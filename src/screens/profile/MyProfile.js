@@ -1,0 +1,452 @@
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, Image, TouchableOpacity, TextInput, Alert, ScrollView, ActivityIndicator } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { colors } from '../../theme/colors';
+import { useTheme } from '../../context/ThemeContext';
+import { useAuth } from '../../context/AuthContext';
+import { supabase } from '../../services/supabase';
+
+export default function MyProfile({ navigation }) {
+    const { theme, isDarkMode } = useTheme();
+    const { user, isAuthenticated } = useAuth();
+    
+    const [loading, setLoading] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const [profile, setProfile] = useState({
+        full_name: '',
+        phone: '',
+        email: '',
+        address: '',
+        city: '',
+    });
+
+    useEffect(() => {
+        if (isAuthenticated && user) {
+            loadProfile();
+        }
+    }, [user, isAuthenticated]);
+
+    const loadProfile = async () => {
+        setLoading(true);
+        try {
+            // Get user metadata
+            const userData = {
+                full_name: user.user_metadata?.full_name || user.email?.split('@')[0] || '',
+                phone: user.phone || user.user_metadata?.phone || '',
+                email: user.email || '',
+                address: user.user_metadata?.address || '',
+                city: user.user_metadata?.city || '',
+            };
+            
+            // Try to fetch from user_profiles table if it exists
+            const { data, error } = await supabase
+                .from('user_profiles')
+                .select('*')
+                .eq('id', user.id)
+                .maybeSingle();
+            
+            if (data && !error) {
+                setProfile({
+                    full_name: data.full_name || userData.full_name,
+                    phone: data.phone || userData.phone,
+                    email: userData.email,
+                    address: data.address || userData.address,
+                    city: data.city || userData.city,
+                });
+            } else {
+                setProfile(userData);
+            }
+        } catch (err) {
+            console.log('[PROFILE] Error loading:', err);
+            // Use user metadata as fallback
+            setProfile({
+                full_name: user.user_metadata?.full_name || user.email?.split('@')[0] || '',
+                phone: user.phone || user.user_metadata?.phone || '',
+                email: user.email || '',
+                address: '',
+                city: '',
+            });
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleSave = async () => {
+        if (!profile.full_name.trim()) {
+            Alert.alert('Error', 'Please enter your name');
+            return;
+        }
+        
+        setSaving(true);
+        try {
+            // Update user metadata
+            const { error: updateError } = await supabase.auth.updateUser({
+                data: {
+                    full_name: profile.full_name,
+                    phone: profile.phone,
+                    address: profile.address,
+                    city: profile.city,
+                }
+            });
+
+            if (updateError) throw updateError;
+
+            // Also try to upsert in user_profiles table
+            await supabase
+                .from('user_profiles')
+                .upsert({
+                    id: user.id,
+                    full_name: profile.full_name,
+                    phone: profile.phone,
+                    address: profile.address,
+                    city: profile.city,
+                    updated_at: new Date().toISOString(),
+                }, { onConflict: 'id' });
+
+            Alert.alert('Success', 'Profile updated successfully!');
+        } catch (err) {
+            console.log('[PROFILE] Save error:', err);
+            Alert.alert('Error', 'Failed to update profile. Please try again.');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const getUserAvatar = () => {
+        if (user?.user_metadata?.avatar_url) {
+            return user.user_metadata.avatar_url;
+        }
+        const name = profile.full_name || 'User';
+        return `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=FF4117&color=fff&size=200`;
+    };
+
+    if (!isAuthenticated) {
+        return (
+            <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
+                <View style={[styles.header, { borderBottomColor: theme.border }]}>
+                    <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+                        <Ionicons name="arrow-back" size={24} color={theme.text} />
+                    </TouchableOpacity>
+                    <Text style={[styles.headerTitle, { color: theme.text }]}>My Profile</Text>
+                    <View style={{ width: 40 }} />
+                </View>
+                
+                <View style={styles.notLoggedIn}>
+                    <Ionicons name="person-circle-outline" size={80} color={theme.textLight} />
+                    <Text style={[styles.notLoggedInText, { color: theme.text }]}>
+                        Please login to view your profile
+                    </Text>
+                    <TouchableOpacity
+                        style={[styles.loginBtn, { backgroundColor: colors.primary }]}
+                        onPress={() => navigation.navigate('Login')}
+                    >
+                        <Text style={styles.loginBtnText}>Login / Sign Up</Text>
+                    </TouchableOpacity>
+                </View>
+            </SafeAreaView>
+        );
+    }
+
+    if (loading) {
+        return (
+            <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
+                <View style={[styles.header, { borderBottomColor: theme.border }]}>
+                    <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+                        <Ionicons name="arrow-back" size={24} color={theme.text} />
+                    </TouchableOpacity>
+                    <Text style={[styles.headerTitle, { color: theme.text }]}>My Profile</Text>
+                    <View style={{ width: 40 }} />
+                </View>
+                <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="large" color={colors.primary} />
+                </View>
+            </SafeAreaView>
+        );
+    }
+
+    return (
+        <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
+            <View style={[styles.header, { borderBottomColor: theme.border }]}>
+                <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+                    <Ionicons name="arrow-back" size={24} color={theme.text} />
+                </TouchableOpacity>
+                <Text style={[styles.headerTitle, { color: theme.text }]}>My Profile</Text>
+                <View style={{ width: 40 }} />
+            </View>
+
+            <ScrollView contentContainerStyle={styles.scrollContent}>
+                {/* Avatar Section */}
+                <View style={styles.avatarSection}>
+                    <Image
+                        source={{ uri: getUserAvatar() }}
+                        style={styles.avatar}
+                    />
+                    <View style={[styles.verifiedBadge, { backgroundColor: user.email_confirmed_at ? '#22C55E' : theme.textLight }]}>
+                        <Ionicons name={user.email_confirmed_at ? "checkmark" : "time"} size={12} color="#FFF" />
+                    </View>
+                </View>
+
+                {/* Profile Form */}
+                <View style={styles.form}>
+                    <View style={styles.inputGroup}>
+                        <Text style={[styles.label, { color: theme.textLight }]}>Full Name</Text>
+                        <TextInput
+                            style={[styles.input, { 
+                                backgroundColor: theme.inputBackground, 
+                                color: theme.text,
+                                borderColor: theme.border,
+                            }]}
+                            value={profile.full_name}
+                            onChangeText={(text) => setProfile({ ...profile, full_name: text })}
+                            placeholder="Enter your name"
+                            placeholderTextColor={theme.textLight}
+                        />
+                    </View>
+
+                    <View style={styles.inputGroup}>
+                        <Text style={[styles.label, { color: theme.textLight }]}>Phone Number</Text>
+                        <TextInput
+                            style={[styles.input, { 
+                                backgroundColor: theme.inputBackground, 
+                                color: theme.text,
+                                borderColor: theme.border,
+                            }]}
+                            value={profile.phone}
+                            onChangeText={(text) => setProfile({ ...profile, phone: text })}
+                            placeholder="+91 XXXXX XXXXX"
+                            placeholderTextColor={theme.textLight}
+                            keyboardType="phone-pad"
+                        />
+                    </View>
+
+                    <View style={styles.inputGroup}>
+                        <Text style={[styles.label, { color: theme.textLight }]}>Email</Text>
+                        <View style={[styles.input, styles.disabledInput, { 
+                            backgroundColor: isDarkMode ? '#333' : '#F5F5F5', 
+                            borderColor: theme.border,
+                        }]}>
+                            <Text style={[styles.disabledText, { color: theme.textLight }]}>
+                                {profile.email}
+                            </Text>
+                            <Ionicons name="lock-closed" size={16} color={theme.textLight} />
+                        </View>
+                    </View>
+
+                    <View style={styles.inputGroup}>
+                        <Text style={[styles.label, { color: theme.textLight }]}>Address</Text>
+                        <TextInput
+                            style={[styles.input, styles.textArea, { 
+                                backgroundColor: theme.inputBackground, 
+                                color: theme.text,
+                                borderColor: theme.border,
+                            }]}
+                            value={profile.address}
+                            onChangeText={(text) => setProfile({ ...profile, address: text })}
+                            placeholder="Enter your address"
+                            placeholderTextColor={theme.textLight}
+                            multiline
+                            numberOfLines={2}
+                        />
+                    </View>
+
+                    <View style={styles.inputGroup}>
+                        <Text style={[styles.label, { color: theme.textLight }]}>City</Text>
+                        <TextInput
+                            style={[styles.input, { 
+                                backgroundColor: theme.inputBackground, 
+                                color: theme.text,
+                                borderColor: theme.border,
+                            }]}
+                            value={profile.city}
+                            onChangeText={(text) => setProfile({ ...profile, city: text })}
+                            placeholder="Enter your city"
+                            placeholderTextColor={theme.textLight}
+                        />
+                    </View>
+                </View>
+
+                {/* Save Button */}
+                <TouchableOpacity
+                    style={[styles.saveBtn, { backgroundColor: colors.primary }]}
+                    onPress={handleSave}
+                    disabled={saving}
+                >
+                    {saving ? (
+                        <ActivityIndicator size="small" color="#FFF" />
+                    ) : (
+                        <>
+                            <Ionicons name="checkmark-circle" size={20} color="#FFF" style={{ marginRight: 8 }} />
+                            <Text style={styles.saveBtnText}>Save Profile</Text>
+                        </>
+                    )}
+                </TouchableOpacity>
+
+                {/* Account Info */}
+                <View style={[styles.accountInfo, { borderTopColor: theme.border }]}>
+                    <Text style={[styles.accountInfoTitle, { color: theme.textLight }]}>Account Information</Text>
+                    <View style={styles.infoRow}>
+                        <Text style={[styles.infoLabel, { color: theme.textLight }]}>User ID:</Text>
+                        <Text style={[styles.infoValue, { color: theme.text }]} numberOfLines={1}>
+                            {user.id?.substring(0, 12)}...
+                        </Text>
+                    </View>
+                    <View style={styles.infoRow}>
+                        <Text style={[styles.infoLabel, { color: theme.textLight }]}>Account Created:</Text>
+                        <Text style={[styles.infoValue, { color: theme.text }]}>
+                            {new Date(user.created_at).toLocaleDateString('en-IN', {
+                                day: 'numeric',
+                                month: 'short',
+                                year: 'numeric',
+                            })}
+                        </Text>
+                    </View>
+                    <View style={styles.infoRow}>
+                        <Text style={[styles.infoLabel, { color: theme.textLight }]}>Auth Provider:</Text>
+                        <Text style={[styles.infoValue, { color: theme.text }]}>
+                            {user.app_metadata?.provider || 'Email/Phone'}
+                        </Text>
+                    </View>
+                </View>
+            </ScrollView>
+        </SafeAreaView>
+    );
+}
+
+const styles = StyleSheet.create({
+    container: {
+        flex: 1,
+    },
+    header: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: 16,
+        borderBottomWidth: 1,
+    },
+    backBtn: {
+        padding: 8,
+    },
+    headerTitle: {
+        fontSize: 18,
+        fontWeight: 'bold',
+    },
+    scrollContent: {
+        padding: 20,
+    },
+    loadingContainer: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    notLoggedIn: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 40,
+    },
+    notLoggedInText: {
+        fontSize: 16,
+        marginTop: 16,
+        marginBottom: 24,
+        textAlign: 'center',
+    },
+    loginBtn: {
+        paddingVertical: 14,
+        paddingHorizontal: 32,
+        borderRadius: 12,
+    },
+    loginBtnText: {
+        color: '#FFF',
+        fontSize: 16,
+        fontWeight: 'bold',
+    },
+    avatarSection: {
+        alignItems: 'center',
+        marginBottom: 32,
+        position: 'relative',
+    },
+    avatar: {
+        width: 120,
+        height: 120,
+        borderRadius: 60,
+        borderWidth: 4,
+        borderColor: colors.primary,
+    },
+    verifiedBadge: {
+        position: 'absolute',
+        bottom: 0,
+        right: '35%',
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 3,
+        borderColor: '#FFF',
+    },
+    form: {
+        marginBottom: 24,
+    },
+    inputGroup: {
+        marginBottom: 20,
+    },
+    label: {
+        fontSize: 14,
+        fontWeight: '500',
+        marginBottom: 8,
+    },
+    input: {
+        borderWidth: 1,
+        borderRadius: 12,
+        paddingHorizontal: 16,
+        paddingVertical: 14,
+        fontSize: 16,
+    },
+    textArea: {
+        minHeight: 80,
+        textAlignVertical: 'top',
+    },
+    disabledInput: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    disabledText: {
+        fontSize: 16,
+    },
+    saveBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 16,
+        borderRadius: 12,
+        marginBottom: 32,
+    },
+    saveBtnText: {
+        color: '#FFF',
+        fontSize: 16,
+        fontWeight: 'bold',
+    },
+    accountInfo: {
+        paddingTop: 24,
+        borderTopWidth: 1,
+    },
+    accountInfoTitle: {
+        fontSize: 14,
+        fontWeight: '500',
+        marginBottom: 16,
+    },
+    infoRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        marginBottom: 12,
+    },
+    infoLabel: {
+        fontSize: 14,
+    },
+    infoValue: {
+        fontSize: 14,
+        fontWeight: '500',
+    },
+});

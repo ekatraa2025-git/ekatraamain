@@ -1,29 +1,73 @@
 {
   "expo": {
-    "name": "ekatraa",
+    "name": "eKatRaa",
     "slug": "ekatraa",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
-    "newArchEnabled": true,
+    "icon": "./assets/android/play_store_512.png",
+    "userInterfaceStyle": "automatic",
+    "scheme": "ekatraa",
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/android/play_store_512.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#FF4117"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.ekatraa.userapp",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Allow eKatRaa to access your camera for profile photos.",
+        "NSPhotoLibraryUsageDescription": "Allow eKatRaa to access your photos for profile pictures.",
+        "NSLocationWhenInUseUsageDescription": "Allow eKatRaa to access your location to show nearby venues and vendors."
+      }
     },
     "android": {
+      "package": "com.ekatraa.userapp",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "foregroundImage": "./assets/android/res/mipmap-xxxhdpi/ic_launcher_foreground.png",
+        "backgroundImage": "./assets/android/res/mipmap-xxxhdpi/ic_launcher_background.png",
+        "monochromeImage": "./assets/android/res/mipmap-xxxhdpi/ic_launcher_monochrome.png"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "permissions": [
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "ekatraa",
+              "host": "auth-callback"
+            }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "94c34160-9afb-4576-93fc-e7f5f5e9a843"
+      }
+    },
+    "plugins": [
+      "@react-native-community/datetimepicker",
+      "expo-location"
+    ],
+    "updates": {
+      "enabled": false,
+      "checkAutomatically": "ON_ERROR_RECOVERY",
+      "fallbackToCacheTimeout": 0
+    },
+    "runtimeVersion": {
+      "policy": "sdkVersion"
     }
   }
 }
