@@ -1,89 +1,172 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, FlatList, Image, TouchableOpacity, Dimensions, Alert, TextInput, Modal, ActivityIndicator, RefreshControl } from 'react-native';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import {
+    View, Text, StyleSheet, ScrollView, FlatList, Image,
+    TouchableOpacity, Dimensions, Modal, Linking,
+    ActivityIndicator, RefreshControl, Animated,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import * as Location from 'expo-location';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, gradients } from '../../theme/colors';
-import { EVENT_TYPES, SERVICES, VENUES as MOCK_VENUES, CITIES } from '../../data/mockData';
-import BookingModal from '../../components/BookingModal';
+import { colors } from '../../theme/colors';
+import { EVENT_TYPES as MOCK_EVENT_TYPES, CITIES } from '../../data/mockData';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import ChatModal from '../../components/ChatModal';
 import { AnimatedBackground } from '../../components/AnimatedBackground';
-import { dbService, getVendorImageUrl } from '../../services/supabase';
-import Logo from '../../components/Logo';
+import { dbService, resolveStorageUrl } from '../../services/supabase';
+import { api, useBackendApi } from '../../services/api';
+import { useCart } from '../../context/CartContext';
+import BottomTabBar from '../../components/BottomTabBar';
 
 const { width } = Dimensions.get('window');
+const OCCASION_CARD_GAP = 12;
+const OCCASION_CARD_WIDTH = (width - 20 * 2 - OCCASION_CARD_GAP) / 2;
+const CATEGORY_BOX_WIDTH = 110;
 
 export default function Home({ navigation }) {
     const { theme, isDarkMode } = useTheme();
-    const { isAuthenticated, user, signOut } = useAuth();
+    const { isAuthenticated, user } = useAuth();
 
-    // State
     const [locationName, setLocationName] = useState('Bhubaneswar, Odisha');
-    const [searchQuery, setSearchQuery] = useState('');
-    const [selectedType, setSelectedType] = useState('all');
+    const [selectedType, setSelectedType] = useState(null);
     const [chatModalVisible, setChatModalVisible] = useState(false);
     const [locationPickerVisible, setLocationPickerVisible] = useState(false);
-    const [bookingModalVisible, setBookingModalVisible] = useState(false);
-    const [selectedEventTypeForBooking, setSelectedEventTypeForBooking] = useState(null);
     const [currentCity, setCurrentCity] = useState('Bhubaneswar');
+    const { cartId, cartItemCount, refreshCartCount: refreshGlobalCartCount } = useCart();
+    const [categories, setCategories] = useState([]);
+    const [categoriesLoading, setCategoriesLoading] = useState(false);
+    const [selectedCategories, setSelectedCategories] = useState(new Set());
 
-    // Data from Supabase
-    const [vendors, setVendors] = useState([]);
-    const [venues, setVenues] = useState([]);
     const [cities, setCities] = useState(CITIES);
     const [banners, setBanners] = useState([]);
+    const [eventTypes, setEventTypes] = useState(MOCK_EVENT_TYPES);
     const [loading, setLoading] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
+    const [othersExpanded, setOthersExpanded] = useState(false);
+    const useApi = useBackendApi();
 
-    // Fetch data on mount and when location/type changes
+    const categoryAnim = useRef(new Animated.Value(0)).current;
+
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            try {
+                const { status } = await Location.requestForegroundPermissionsAsync();
+                if (cancelled || status !== 'granted') return;
+                const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+                if (cancelled) return;
+                const [rev] = await Location.reverseGeocodeAsync({
+                    latitude: pos.coords.latitude,
+                    longitude: pos.coords.longitude,
+                });
+                if (cancelled || !rev) return;
+                const cityName = rev.city || rev.subregion || rev.region || 'Unknown';
+                const stateName = rev.region || '';
+                const displayLocation = stateName ? `${cityName}, ${stateName}` : cityName;
+                setLocationName(displayLocation);
+                setCurrentCity(cityName);
+            } catch (e) { }
+        })();
+        return () => { cancelled = true; };
+    }, []);
+
     useEffect(() => {
         fetchData();
-    }, [currentCity, selectedType]);
+    }, [currentCity]);
+
+    useEffect(() => {
+        if (!selectedType) {
+            setCategories([]);
+            setSelectedCategories(new Set());
+            setCategoriesLoading(false);
+            Animated.timing(categoryAnim, { toValue: 0, duration: 200, useNativeDriver: false }).start();
+            return;
+        }
+        const loadCategories = async () => {
+            setCategoriesLoading(true);
+            let cats = [];
+            try {
+                if (useApi) {
+                    const { data } = await api.getCategories(selectedType);
+                    cats = Array.isArray(data) ? data : [];
+                }
+                if (cats.length === 0) {
+                    const { data } = await dbService.getCategoriesByOccasion(selectedType);
+                    cats = Array.isArray(data) ? data : [];
+                }
+                const resolved = await Promise.all(cats.map(async (cat) => ({
+                    ...cat,
+                    icon_url: await resolveStorageUrl(cat.icon_url),
+                })));
+                setCategories(resolved);
+                setSelectedCategories(new Set());
+                if (cats.length > 0) {
+                    Animated.spring(categoryAnim, { toValue: 1, tension: 60, friction: 10, useNativeDriver: false }).start();
+                }
+            } catch (e) {
+                console.log('[CATEGORY LOAD ERROR]', e);
+            } finally {
+                setCategoriesLoading(false);
+            }
+        };
+        loadCategories();
+    }, [useApi, selectedType]);
+
+    useFocusEffect(
+        useCallback(() => {
+            refreshGlobalCartCount();
+        }, [refreshGlobalCartCount])
+    );
 
     const fetchData = async () => {
         setLoading(true);
         try {
-            // Fetch vendors
-            const { data: vendorData, error: vendorError } = await dbService.getVendors({
-                city: currentCity,
-                serviceCategory: selectedType !== 'all' ? selectedType : null,
-            });
-            
-            if (vendorData && !vendorError) {
-                setVendors(vendorData);
-            }
-
-            // Fetch venues
-            const { data: venueData, error: venueError } = await dbService.getVenues({
-                city: currentCity,
-                eventType: selectedType,
-            });
-            
-            if (venueData && !venueError) {
-                setVenues(venueData);
+            if (useApi) {
+                const [bannerRes, occasionsRes] = await Promise.all([
+                    api.getBanners(),
+                    api.getOccasions(),
+                ]);
+                if (Array.isArray(bannerRes.data)) setBanners(bannerRes.data);
+                if (occasionsRes.data?.length) {
+                    const filtered = occasionsRes.data.filter(t => t.id !== 'all' && t.id !== 'others');
+                    setEventTypes(filtered.length ? filtered : occasionsRes.data);
+                } else {
+                    const { data: eventTypesData } = await api.getEventTypes();
+                    if (eventTypesData?.length) {
+                        const filtered = eventTypesData.filter(t => t.id !== 'all');
+                        setEventTypes(filtered.length ? filtered : eventTypesData);
+                    } else setEventTypes(MOCK_EVENT_TYPES);
+                }
             } else {
-                // Fall back to mock data if Supabase is not configured
-                setVenues(MOCK_VENUES.filter(v => v.city === currentCity));
+                const [bannerRes, occasionsRes] = await Promise.all([
+                    dbService.getBanners(),
+                    dbService.getOccasions(),
+                ]);
+                if (bannerRes.data?.length) setBanners(bannerRes.data);
+                if (occasionsRes.data?.length) {
+                    const filtered = occasionsRes.data.filter(t => t.id !== 'all' && t.id !== 'others');
+                    setEventTypes(filtered.length ? filtered : occasionsRes.data);
+                } else {
+                    const { data: eventTypesFromDb } = await dbService.getEventTypes();
+                    if (eventTypesFromDb?.length) {
+                        const filtered = eventTypesFromDb.filter(t => t.id !== 'all');
+                        setEventTypes(filtered.length ? filtered : eventTypesFromDb);
+                    } else {
+                        const mockFiltered = MOCK_EVENT_TYPES.filter(t => t.id !== 'all');
+                        setEventTypes(mockFiltered.length ? mockFiltered : MOCK_EVENT_TYPES);
+                    }
+                }
             }
 
-            // Fetch cities
             const { data: cityData } = await dbService.getCities();
-            if (cityData && cityData.length > 0) {
-                setCities(cityData.map(c => `${c.name}, ${c.state}`));
-            }
-
-            // Fetch banners
-            const { data: bannerData } = await dbService.getBanners();
-            if (bannerData && bannerData.length > 0) {
-                setBanners(bannerData);
+            if (cityData?.length) {
+                const uniqueCityStrings = [...new Set(cityData.map(c => `${c.name}, ${c.state}`))];
+                setCities(uniqueCityStrings);
             }
         } catch (error) {
             console.log('[FETCH ERROR]', error);
-            // Fall back to mock data
-            setVenues(MOCK_VENUES.filter(v => v.city === currentCity));
         } finally {
             setLoading(false);
         }
@@ -95,127 +178,6 @@ export default function Home({ navigation }) {
         setRefreshing(false);
     }, [currentCity, selectedType]);
 
-    // Derived State
-    const filteredServices = SERVICES.filter(service => {
-        const matchesType = selectedType === 'all' || service.type.includes(selectedType);
-        const matchesSearch = service.name.toLowerCase().includes(searchQuery.toLowerCase());
-        return matchesType && matchesSearch;
-    });
-
-    const filteredVenues = venues.length > 0 
-        ? venues.filter(venue => {
-            const matchesSearch = venue.name?.toLowerCase().includes(searchQuery.toLowerCase());
-            return matchesSearch;
-        })
-        : MOCK_VENUES.filter(venue => {
-            const matchesCity = venue.city === currentCity;
-        const matchesSearch = venue.name.toLowerCase().includes(searchQuery.toLowerCase());
-        const matchesType = selectedType === 'all' || venue.type.includes(selectedType);
-        return matchesCity && matchesSearch && matchesType;
-    });
-
-    // Sub-components
-    const renderServiceItem = ({ item }) => (
-        <TouchableOpacity 
-            style={styles.serviceItem} 
-            onPress={() => navigation.navigate('VendorsList', { 
-                service: item,
-                city: currentCity,
-            })}
-        >
-            <LinearGradient
-                colors={isDarkMode ? ['#2a2a2a', '#1f1f1f'] : ['#ffffff', '#f8f9fa']}
-                style={[styles.serviceIcon, { borderColor: theme.border }]}
-            >
-                <Text style={{ fontSize: 28 }}>{item.icon || '🎯'}</Text>
-            </LinearGradient>
-            <Text style={[styles.serviceName, { color: theme.text }]}>{item.name}</Text>
-        </TouchableOpacity>
-    );
-
-    const renderVenue = ({ item }) => (
-        <TouchableOpacity
-            style={[styles.venueCard, { backgroundColor: theme.card }]}
-            onPress={() => navigation.navigate('VenueDetail', { venue: item })}
-        >
-            <Image 
-                source={{ uri: item.image || item.image_url }} 
-                style={styles.venueImage} 
-            />
-            <View style={styles.venueInfo}>
-                <Text style={[styles.venueName, { color: theme.text }]}>{item.name}</Text>
-                <Text style={[styles.venueLocation, { color: theme.textLight }]}>
-                    {item.location || item.address}
-                </Text>
-                <View style={styles.venueFooter}>
-                    <Text style={[styles.venuePrice, { color: colors.primary }]}>
-                        {item.price || `₹${item.price_per_day || 'Contact'}`}
-                    </Text>
-                    <View style={styles.ratingContainer}>
-                        <Text style={styles.venueRating}>★ {item.rating || '4.5'}</Text>
-                    </View>
-                </View>
-            </View>
-        </TouchableOpacity>
-    );
-
-    const renderVendor = ({ item }) => (
-        <TouchableOpacity
-            style={[styles.vendorCardHome, { backgroundColor: theme.card }]}
-            onPress={() => navigation.navigate('VendorDetail', { 
-                vendor: item,
-                city: currentCity,
-            })}
-        >
-            <Image 
-                source={{ uri: getVendorImageUrl(item.logo_url, item.business_name) }} 
-                style={styles.vendorImageHome} 
-            />
-            <View style={styles.vendorInfoHome}>
-                <Text style={[styles.vendorNameHome, { color: theme.text }]} numberOfLines={1}>
-                    {item.business_name || 'Vendor'}
-                </Text>
-                <Text style={[styles.vendorCategoryHome, { color: colors.primary }]} numberOfLines={1}>
-                    {item.category || 'Service'}
-                </Text>
-                {item.city && (
-                    <View style={styles.vendorLocationHome}>
-                        <Ionicons name="location-outline" size={11} color={theme.textLight} />
-                        <Text style={[styles.vendorLocationText, { color: theme.textLight }]} numberOfLines={1}>
-                            {item.city}
-                        </Text>
-                    </View>
-                )}
-            </View>
-        </TouchableOpacity>
-    );
-
-    // Handlers
-    const handleProfilePress = () => {
-        if (isAuthenticated) {
-            navigation.navigate('Menu');
-        } else {
-            navigation.navigate('Login');
-        }
-    };
-
-    const handleLogout = () => {
-        Alert.alert(
-            "Logout",
-            "Are you sure you want to logout?",
-            [
-                { text: "Cancel", style: "cancel" },
-                { 
-                    text: "Logout", 
-                    style: 'destructive', 
-                    onPress: async () => {
-                        await signOut();
-                    }
-                }
-            ]
-        );
-    };
-
     const handleCityChange = (city) => {
         const cityNameOnly = city.split(',')[0].trim();
         setCurrentCity(cityNameOnly);
@@ -223,139 +185,142 @@ export default function Home({ navigation }) {
         setLocationPickerVisible(false);
     };
 
-    const handleEventTypePress = (typeId) => {
-        const typeObj = EVENT_TYPES.find(t => t.id === typeId);
-        setSelectedEventTypeForBooking(typeObj);
-        setSelectedType(typeId);
-        setBookingModalVisible(true);
+    const handleEventTypePress = (typeObj) => {
+        const id = typeof typeObj === 'object' ? typeObj.id : typeObj;
+        setSelectedType(id === selectedType ? null : id);
     };
 
-    // Get location on mount
-    useEffect(() => {
-        (async () => {
-            let { status } = await Location.requestForegroundPermissionsAsync();
-            if (status !== 'granted') return;
-
-            try {
-            let location = await Location.getCurrentPositionAsync({});
-            let address = await Location.reverseGeocodeAsync(location.coords);
-
-            if (address && address.length > 0) {
-                const { city, region } = address[0];
-                if (city) {
-                    setLocationName(`${city}, ${region}`);
-                    setCurrentCity(city);
-                }
-                }
-            } catch (error) {
-                console.log('[LOCATION ERROR]', error);
+    const toggleCategory = (cat) => {
+        setSelectedCategories(prev => {
+            const next = new Set(prev);
+            const id = typeof cat === 'object' ? cat.id : cat;
+            if (next.has(id)) {
+                next.delete(id);
+            } else {
+                next.add(id);
             }
-        })();
-    }, []);
+            return next;
+        });
+    };
+
+    const handleExploreServices = () => {
+        const selCats = categories.filter(c => selectedCategories.has(c.id));
+        const catIds = selCats.map(c => c.id);
+        const catNames = selCats.map(c => c.name);
+        navigation.navigate('CategoryServices', {
+            categoryIds: catIds,
+            categoryNames: catNames,
+            occasionId: selectedType,
+            occasionName: eventTypes.find(t => t.id === selectedType)?.name,
+            cartId,
+        });
+    };
+
+    const selectedOccasionObj = eventTypes.find(t => t.id === selectedType);
+    const primaryOccasionIds = new Set(
+        eventTypes
+            .filter((t) => {
+                const id = String(t.id || '').toLowerCase();
+                const name = String(t.name || '').toLowerCase();
+                return id === 'wedding' || name.includes('wedding') || name.includes('janeyu') || name.includes('janayu') || name.includes('thread');
+            })
+            .map((t) => t.id)
+    );
+    const primaryOccasions = eventTypes.filter((t) => primaryOccasionIds.has(t.id)).slice(0, 2);
+    const otherOccasions = eventTypes.filter((t) => !primaryOccasionIds.has(t.id));
+    const selectedInOthers = !!selectedType && otherOccasions.some((t) => t.id === selectedType);
+    const catColors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8', '#F7DC6F', '#FF9FF3', '#54A0FF'];
 
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top', 'left', 'right']}>
             <AnimatedBackground>
-                <ScrollView 
-                    contentContainerStyle={styles.scrollContent} 
+                <ScrollView
+                    contentContainerStyle={styles.scrollContent}
                     showsVerticalScrollIndicator={false}
                     refreshControl={
-                        <RefreshControl
-                            refreshing={refreshing}
-                            onRefresh={onRefresh}
-                            tintColor={colors.primary}
-                            colors={[colors.primary]}
-                        />
+                        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} colors={[colors.primary]} />
                     }
                 >
-                    {/* Header */}
+                    {/* Header - Clean, no menu button */}
                     <View style={styles.header}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                            <TouchableOpacity onPress={() => navigation.navigate('Menu')} style={{ marginRight: 12 }}>
-                                <Ionicons name="menu" size={28} color={theme.text} />
-                            </TouchableOpacity>
-                            <TouchableOpacity onPress={() => setLocationPickerVisible(true)}>
-                                <Text style={[styles.locationLabel, { color: theme.textLight }]}>
-                                    Your Location ▾
-                                </Text>
-                                <Text style={[styles.locationValue, { color: theme.text }]}>
-                                    {locationName} 📍
-                                </Text>
-                            </TouchableOpacity>
-                        </View>
-
-                        {/* Login / Profile Icon */}
-                        <TouchableOpacity 
-                            style={[styles.profileBtn, { backgroundColor: isDarkMode ? '#333' : '#FFF5F2' }]} 
-                            onPress={handleProfilePress}
-                        >
-                            {isAuthenticated ? (
-                                <Ionicons name="person" size={22} color={colors.primary} />
-                            ) : (
-                                <Ionicons name="log-in-outline" size={22} color={colors.primary} />
-                            )}
+                        <TouchableOpacity onPress={() => setLocationPickerVisible(true)} style={styles.locationBtn}>
+                            <View style={[styles.locationIcon, { backgroundColor: colors.primary + '15' }]}>
+                                <Ionicons name="location" size={18} color={colors.primary} />
+                            </View>
+                            <View>
+                                <Text style={[styles.locationLabel, { color: theme.textLight }]}>Your Location</Text>
+                                <View style={styles.locationRow}>
+                                    <Text style={[styles.locationValue, { color: theme.text }]}>{locationName}</Text>
+                                    <Ionicons name="chevron-down" size={16} color={theme.textLight} style={{ marginLeft: 4 }} />
+                                </View>
+                            </View>
                         </TouchableOpacity>
                     </View>
 
                     {/* Location Picker Modal */}
                     <Modal visible={locationPickerVisible} animationType="fade" transparent>
-                        <TouchableOpacity 
-                            style={styles.modalOverlay} 
-                            onPress={() => setLocationPickerVisible(false)}
-                            activeOpacity={1}
-                        >
-                            <View style={[styles.pickerContent, { backgroundColor: theme.card }]}>
+                        <TouchableOpacity style={styles.modalOverlay} onPress={() => setLocationPickerVisible(false)} activeOpacity={1}>
+                            <View style={[styles.pickerContent, { backgroundColor: theme.card }]} onStartShouldSetResponder={() => true}>
+                                <View style={styles.pickerHandle} />
                                 <Text style={[styles.pickerTitle, { color: theme.text }]}>Select City</Text>
-                                {cities.map((city, index) => (
-                                    <TouchableOpacity 
-                                        key={index} 
-                                        style={[styles.pickerItem, { borderBottomColor: theme.border }]} 
-                                        onPress={() => handleCityChange(city)}
-                                    >
-                                        <Text style={[styles.pickerItemText, { color: theme.text }]}>{city}</Text>
-                                    </TouchableOpacity>
-                                ))}
+                                <ScrollView style={styles.pickerScroll} contentContainerStyle={styles.pickerScrollContent} showsVerticalScrollIndicator keyboardShouldPersistTaps="handled">
+                                    {[...new Set(cities)].map((city, index) => {
+                                        const isCurrentCity = locationName === city;
+                                        return (
+                                            <TouchableOpacity
+                                                key={`${city}-${index}`}
+                                                style={[
+                                                    styles.pickerItem,
+                                                    { borderBottomColor: theme.border },
+                                                    isCurrentCity && { backgroundColor: colors.primary + '10' },
+                                                ]}
+                                                onPress={() => handleCityChange(city)}
+                                            >
+                                                <Ionicons name="location-outline" size={18} color={isCurrentCity ? colors.primary : theme.textLight} />
+                                                <Text style={[
+                                                    styles.pickerItemText,
+                                                    { color: theme.text },
+                                                    isCurrentCity && { color: colors.primary, fontWeight: '700' },
+                                                ]}>{city}</Text>
+                                                {isCurrentCity && <Ionicons name="checkmark-circle" size={20} color={colors.primary} />}
+                                            </TouchableOpacity>
+                                        );
+                                    })}
+                                </ScrollView>
                             </View>
                         </TouchableOpacity>
                     </Modal>
 
-                    {/* Search Bar */}
-                    <View style={[styles.searchBar, { backgroundColor: theme.inputBackground, borderColor: theme.border }]}>
-                        <Ionicons name="search" size={20} color={theme.textLight} style={{ marginRight: 10 }} />
-                        <TextInput
-                            style={[styles.searchInput, { color: theme.text }]}
-                            placeholder="Search venues, services, vendors..."
-                            placeholderTextColor={theme.textLight}
-                            value={searchQuery}
-                            onChangeText={setSearchQuery}
-                        />
-                        {searchQuery.length > 0 && (
-                            <TouchableOpacity onPress={() => setSearchQuery('')}>
-                                <Ionicons name="close-circle" size={20} color={theme.textLight} />
-                            </TouchableOpacity>
-                        )}
-                    </View>
+                    {/* AI Chat Input */}
+                    <TouchableOpacity
+                        style={[styles.aiChatBar, { backgroundColor: theme.inputBackground, borderColor: colors.primary + '40' }]}
+                        onPress={() => setChatModalVisible(true)}
+                        activeOpacity={0.8}
+                    >
+                        <View style={[styles.aiIconWrap, { backgroundColor: colors.primary + '15' }]}>
+                            <Ionicons name="sparkles" size={18} color={colors.primary} />
+                        </View>
+                        <Text style={[styles.aiPlaceholder, { color: theme.textLight }]}>
+                            Tell us about your event and we'll find the best services...
+                        </Text>
+                        <Ionicons name="arrow-forward-circle" size={24} color={colors.primary} />
+                    </TouchableOpacity>
 
-                    {/* Banner Ads Section */}
+                    {/* Banner Ads — above Plan Your Occasion */}
                     {banners.length > 0 && (
                         <View style={styles.bannerSection}>
                             <FlatList
                                 data={banners}
                                 renderItem={({ item }) => (
                                     <TouchableOpacity style={styles.bannerCard} activeOpacity={0.9}>
-                                        <Image 
-                                            source={{ uri: item.image_url }} 
+                                        <Image
+                                            source={{ uri: item.image_url || 'https://images.unsplash.com/photo-1519741497674-611481863552?w=800' }}
                                             style={styles.bannerImage}
                                             resizeMode="cover"
                                         />
-                                        <LinearGradient
-                                            colors={['transparent', 'rgba(0,0,0,0.7)']}
-                                            style={styles.bannerOverlay}
-                                        >
+                                        <LinearGradient colors={['transparent', 'rgba(0,0,0,0.7)']} style={styles.bannerOverlay}>
                                             <Text style={styles.bannerTitle}>{item.title}</Text>
-                                            {item.subtitle && (
-                                                <Text style={styles.bannerSubtitle}>{item.subtitle}</Text>
-                                            )}
+                                            {item.subtitle && <Text style={styles.bannerSubtitle}>{item.subtitle}</Text>}
                                         </LinearGradient>
                                     </TouchableOpacity>
                                 )}
@@ -370,494 +335,733 @@ export default function Home({ navigation }) {
                         </View>
                     )}
 
-                    {/* Event Type / Get Together Planning */}
+                    {/* Plan Your Occasion */}
                     <View style={styles.section}>
-                        <Text style={[styles.sectionTitle, { color: theme.text }]}>
-                            Plan Your Get Together
-                        </Text>
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.typeList}>
-                            {EVENT_TYPES.map((type) => (
-                                <TouchableOpacity
-                                    key={type.id}
-                                    style={[
-                                        styles.typeChip,
-                                        { backgroundColor: theme.inputBackground, borderColor: theme.border },
-                                        selectedType === type.id && { backgroundColor: colors.primary, borderColor: colors.primary }
-                                    ]}
-                                    onPress={() => handleEventTypePress(type.id)}
-                                >
-                                    <Text style={[
-                                        styles.typeText,
-                                        { color: theme.text },
-                                        selectedType === type.id && styles.typeTextActive
-                                    ]}>{type.name}</Text>
-                                </TouchableOpacity>
-                            ))}
-                        </ScrollView>
-                    </View>
-
-                    {/* Event Services */}
-                    <View style={styles.section}>
-                        <Text style={[styles.sectionTitle, { color: theme.text }]}>
-                            {selectedType === 'all' ? 'Event Services' : `Services for ${EVENT_TYPES.find(t => t.id === selectedType)?.name}`}
-                        </Text>
+                        <View style={styles.sectionTitleRow}>
+                            <View>
+                                <Text style={[styles.sectionTitle, { color: theme.text }]}>Plan Your Occasion</Text>
+                                <Text style={[styles.sectionSubtitle, { color: theme.textLight }]}>Choose an event to get started</Text>
+                            </View>
+                        </View>
                         {loading ? (
-                            <ActivityIndicator size="small" color={colors.primary} style={{ marginTop: 20 }} />
+                            <View style={styles.occasionGrid}>
+                                {[1, 2, 3].map(i => (
+                                    <View key={i} style={[styles.occasionCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+                                        <View style={[styles.occasionIconWrap, { backgroundColor: isDarkMode ? '#2A2A2A' : '#F5F5F5' }]}>
+                                            <ActivityIndicator size="small" color={colors.primary} />
+                                        </View>
+                                        <View style={{ width: 60, height: 12, borderRadius: 6, backgroundColor: isDarkMode ? '#333' : '#E8E8E8' }} />
+                                    </View>
+                                ))}
+                            </View>
                         ) : (
-                        <View style={styles.servicesGrid}>
-                            {filteredServices.map((item) => (
-                                <View key={item.id} style={styles.gridItemWrapper}>
-                                    {renderServiceItem({ item })}
+                            <View>
+                                <View style={styles.occasionGrid}>
+                                    {primaryOccasions.map((type) => {
+                                        const typeColor = type.color || colors.primary;
+                                        const isSelected = selectedType === type.id;
+                                        return (
+                                            <TouchableOpacity
+                                                key={type.id}
+                                                style={[
+                                                    styles.occasionCard,
+                                                    { backgroundColor: theme.card, borderColor: theme.border },
+                                                    isSelected && { borderColor: typeColor, borderWidth: 2 },
+                                                ]}
+                                                onPress={() => handleEventTypePress(type)}
+                                                activeOpacity={0.8}
+                                            >
+                                                {isSelected && (
+                                                    <LinearGradient
+                                                        colors={[typeColor + '15', typeColor + '08']}
+                                                        style={StyleSheet.absoluteFill}
+                                                        start={{ x: 0, y: 0 }}
+                                                        end={{ x: 1, y: 1 }}
+                                                    />
+                                                )}
+                                                <View style={[
+                                                    styles.occasionIconWrap,
+                                                    { backgroundColor: isSelected ? typeColor + '25' : (isDarkMode ? '#2A2A2A' : '#F5F5F5') },
+                                                ]}>
+                                                    {type.image_url ? (
+                                                        <Image source={{ uri: type.image_url }} style={styles.occasionIconImg} resizeMode="cover" />
+                                                    ) : (
+                                                        <Text style={styles.occasionEmoji}>{type.icon || '🎉'}</Text>
+                                                    )}
+                                                </View>
+                                                <Text style={[
+                                                    styles.occasionLabel,
+                                                    { color: theme.text },
+                                                    isSelected && { color: typeColor, fontWeight: '700' },
+                                                ]} numberOfLines={2}>{type.name}</Text>
+                                                {isSelected && (
+                                                    <View style={[styles.occasionCheck, { backgroundColor: typeColor }]}>
+                                                        <Ionicons name="checkmark" size={12} color="#FFF" />
+                                                    </View>
+                                                )}
+                                            </TouchableOpacity>
+                                        );
+                                    })}
+                                    {otherOccasions.length > 0 && (
+                                        <TouchableOpacity
+                                            style={[
+                                                styles.occasionCard,
+                                                styles.othersCard,
+                                                { backgroundColor: theme.card, borderColor: theme.border },
+                                                (othersExpanded || selectedInOthers) && { borderColor: colors.primary, borderWidth: 2 },
+                                            ]}
+                                            onPress={() => setOthersExpanded((prev) => !prev)}
+                                            activeOpacity={0.8}
+                                        >
+                                            <View style={[
+                                                styles.occasionIconWrap,
+                                                { backgroundColor: colors.primary + '15' },
+                                            ]}>
+                                                <Ionicons name={othersExpanded ? 'chevron-up' : 'grid-outline'} size={24} color={colors.primary} />
+                                            </View>
+                                            <Text style={[
+                                                styles.occasionLabel,
+                                                { color: theme.text },
+                                                (othersExpanded || selectedInOthers) && { color: colors.primary, fontWeight: '700' },
+                                            ]} numberOfLines={2}>
+                                                Others
+                                            </Text>
+                                        </TouchableOpacity>
+                                    )}
                                 </View>
-                            ))}
-                        </View>
-                        )}
-                        {!loading && filteredServices.length === 0 && (
-                            <Text style={[styles.noDataText, { color: theme.textLight }]}>
-                                No services found for this category.
-                            </Text>
+                                {othersExpanded && otherOccasions.length > 0 && (
+                                    <View style={styles.occasionGridExpanded}>
+                                        {otherOccasions.map((type) => {
+                                            const typeColor = type.color || colors.primary;
+                                            const isSelected = selectedType === type.id;
+                                            return (
+                                                <TouchableOpacity
+                                                    key={type.id}
+                                                    style={[
+                                                        styles.occasionCard,
+                                                        styles.occasionCardCompact,
+                                                        { backgroundColor: theme.card, borderColor: theme.border },
+                                                        isSelected && { borderColor: typeColor, borderWidth: 2 },
+                                                    ]}
+                                                    onPress={() => handleEventTypePress(type)}
+                                                    activeOpacity={0.8}
+                                                >
+                                                    {isSelected && (
+                                                        <LinearGradient
+                                                            colors={[typeColor + '15', typeColor + '08']}
+                                                            style={StyleSheet.absoluteFill}
+                                                            start={{ x: 0, y: 0 }}
+                                                            end={{ x: 1, y: 1 }}
+                                                        />
+                                                    )}
+                                                    <View style={[
+                                                        styles.occasionIconWrap,
+                                                        { backgroundColor: isSelected ? typeColor + '25' : (isDarkMode ? '#2A2A2A' : '#F5F5F5') },
+                                                    ]}>
+                                                        {type.image_url ? (
+                                                            <Image source={{ uri: type.image_url }} style={styles.occasionIconImg} resizeMode="cover" />
+                                                        ) : (
+                                                            <Text style={styles.occasionEmoji}>{type.icon || '🎉'}</Text>
+                                                        )}
+                                                    </View>
+                                                    <Text style={[
+                                                        styles.occasionLabel,
+                                                        { color: theme.text },
+                                                        isSelected && { color: typeColor, fontWeight: '700' },
+                                                    ]} numberOfLines={2}>{type.name}</Text>
+                                                    {isSelected && (
+                                                        <View style={[styles.occasionCheck, { backgroundColor: typeColor }]}>
+                                                            <Ionicons name="checkmark" size={12} color="#FFF" />
+                                                        </View>
+                                                    )}
+                                                </TouchableOpacity>
+                                            );
+                                        })}
+                                    </View>
+                                )}
+                            </View>
                         )}
                     </View>
 
-                    {/* Vendors Section */}
-                    {vendors.length > 0 && (
-                        <View style={styles.section}>
-                            <Text style={[styles.sectionTitle, { color: theme.text }]}>
-                                Top Vendors in {currentCity}
-                            </Text>
-                            <FlatList
-                                data={vendors.slice(0, 10)}
-                                renderItem={renderVendor}
-                                keyExtractor={item => item.id}
-                                horizontal
-                                showsHorizontalScrollIndicator={false}
-                                contentContainerStyle={styles.vendorsList}
-                            />
-                        </View>
-                    )}
-
-                    {/* Venues Section */}
-                    <View style={styles.section}>
-                        <View style={styles.sectionHeader}>
-                            <Text style={[styles.sectionTitle, { color: theme.text }]}>
-                                {selectedType === 'all' ? `Popular Venues in ${currentCity}` : `Venues for ${EVENT_TYPES.find(t => t.id === selectedType)?.name}`}
-                            </Text>
-                        </View>
-                        {loading ? (
-                            <ActivityIndicator size="small" color={colors.primary} style={{ marginTop: 20 }} />
-                        ) : filteredVenues.length > 0 ? (
-                            <FlatList
-                                data={filteredVenues}
-                                renderItem={renderVenue}
-                                keyExtractor={item => item.id}
-                                horizontal
-                                showsHorizontalScrollIndicator={false}
-                                contentContainerStyle={styles.venuesList}
-                            />
-                        ) : (
-                            <Text style={[styles.noDataText, { color: theme.textLight }]}>
-                                No venues found in {currentCity}.
-                            </Text>
-                        )}
-                    </View>
-
-                    {/* About Us Card */}
-                    <View style={[styles.section, { marginBottom: 100 }]}>
-                        <Text style={[styles.sectionTitle, { color: theme.text }]}>About eKatRaa</Text>
-                        <TouchableOpacity style={styles.promoContainer}>
+                    {/* Category Multi-Select Section */}
+                    {selectedType && categoriesLoading && (
+                        <View style={[styles.categorySection, { marginHorizontal: 16, marginBottom: 28 }]}>
                             <LinearGradient
-                                colors={['#FF4117', '#FF6B35', '#FF8C42']}
+                                colors={isDarkMode ? ['#1A1A2E', '#16213E'] : ['#FFF5F2', '#FFF0EB']}
+                                style={styles.categorySectionBg}
                                 start={{ x: 0, y: 0 }}
                                 end={{ x: 1, y: 1 }}
-                                style={styles.gradientCard}
                             >
-                                <View style={styles.promoLogoContainer}>
-                                    <View style={styles.promoLogoCircle}>
-                                        <Logo width={50} height={50} />
-                                    </View>
+                                <Text style={[styles.categoryTitle, { color: theme.text }]}>What do you need?</Text>
+                                <Text style={[styles.categorySubtitle, { color: theme.textLight, marginBottom: 20 }]}>Loading categories...</Text>
+                                <View style={styles.categoryLoaderRow}>
+                                    {[1, 2, 3, 4].map(i => (
+                                        <View key={i} style={[styles.categoryBox, { backgroundColor: isDarkMode ? '#1F1F2F' : '#FFFFFF', borderColor: isDarkMode ? '#333' : '#F0E6E2', width: 100 }]}>
+                                            <View style={[styles.categoryIconBox, { backgroundColor: isDarkMode ? '#2A2A2A' : '#F5F5F5' }]}>
+                                                <ActivityIndicator size="small" color={colors.primary} />
+                                            </View>
+                                            <View style={{ width: 50, height: 10, borderRadius: 5, backgroundColor: isDarkMode ? '#333' : '#E8E8E8' }} />
+                                        </View>
+                                    ))}
                                 </View>
-                                <Text style={styles.promoTitle}>eKatRaa</Text>
-                                <Text style={styles.promoSubtitle}>"Coming together is a beginning."</Text>
-                                <Text style={styles.promoDescription}>
-                                    We simplify your get-together planning. From weddings to casual meetups, find everything in one place.
-                                </Text>
                             </LinearGradient>
-                        </TouchableOpacity>
+                        </View>
+                    )}
+                    {selectedType && !categoriesLoading && categories.length > 0 && (
+                        <Animated.View style={[
+                            styles.categorySection,
+                            {
+                                opacity: categoryAnim,
+                                transform: [{ translateY: categoryAnim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
+                            },
+                        ]}>
+                            <LinearGradient
+                                colors={isDarkMode ? ['#1A1A2E', '#16213E'] : ['#FFF5F2', '#FFF0EB']}
+                                style={styles.categorySectionBg}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 1 }}
+                            >
+                                <View style={styles.categoryHeaderRow}>
+                                    <View>
+                                        <Text style={[styles.categoryTitle, { color: theme.text }]}>
+                                            What do you need?
+                                        </Text>
+                                        <Text style={[styles.categorySubtitle, { color: theme.textLight }]}>
+                                            Select one or more categories for {selectedOccasionObj?.name || 'your event'}
+                                        </Text>
+                                    </View>
+                                    {selectedCategories.size > 0 && (
+                                        <View style={[styles.selectedCountBadge, { backgroundColor: colors.primary }]}>
+                                            <Text style={styles.selectedCountText}>{selectedCategories.size}</Text>
+                                        </View>
+                                    )}
+                                </View>
+
+                                <ScrollView
+                                    horizontal
+                                    showsHorizontalScrollIndicator={false}
+                                    contentContainerStyle={styles.categoryScrollContent}
+                                >
+                                    {categories.map((cat, idx) => {
+                                        const catColor = catColors[idx % catColors.length];
+                                        const isSelected = selectedCategories.has(cat.id);
+                                        return (
+                                            <TouchableOpacity
+                                                key={cat.id}
+                                                style={[
+                                                    styles.categoryBox,
+                                                    { backgroundColor: isDarkMode ? '#1F1F2F' : '#FFFFFF', borderColor: isDarkMode ? '#333' : '#F0E6E2' },
+                                                    isSelected && { borderColor: catColor, borderWidth: 2, backgroundColor: catColor + '08' },
+                                                ]}
+                                                onPress={() => toggleCategory(cat)}
+                                                activeOpacity={0.7}
+                                            >
+                                                <View style={[styles.categoryIconBox, { backgroundColor: catColor + '18' }]}>
+                                                    {(cat.icon_url || cat.image_url) ? (
+                                                        <Image source={{ uri: cat.icon_url || cat.image_url }} style={styles.categoryBoxImg} resizeMode="cover" />
+                                                    ) : (
+                                                        <Text style={styles.categoryBoxEmoji}>{cat.icon || '📂'}</Text>
+                                                    )}
+                                                </View>
+                                                <Text style={[
+                                                    styles.categoryBoxLabel,
+                                                    { color: theme.text },
+                                                    isSelected && { color: catColor, fontWeight: '700' },
+                                                ]} numberOfLines={2}>{cat.name}</Text>
+                                                <View style={[
+                                                    styles.categoryCheckbox,
+                                                    { borderColor: isSelected ? catColor : (isDarkMode ? '#555' : '#D0D0D0') },
+                                                    isSelected && { backgroundColor: catColor, borderColor: catColor },
+                                                ]}>
+                                                    {isSelected && <Ionicons name="checkmark" size={12} color="#FFF" />}
+                                                </View>
+                                            </TouchableOpacity>
+                                        );
+                                    })}
+                                </ScrollView>
+
+                                {selectedCategories.size > 0 && (
+                                    <TouchableOpacity
+                                        style={styles.exploreBtn}
+                                        onPress={handleExploreServices}
+                                        activeOpacity={0.85}
+                                    >
+                                        <LinearGradient
+                                            colors={[colors.primary, colors.secondary || '#FF7700']}
+                                            start={{ x: 0, y: 0 }}
+                                            end={{ x: 1, y: 0 }}
+                                            style={styles.exploreBtnGradient}
+                                        >
+                                            <Text style={styles.exploreBtnText}>
+                                                Explore {selectedCategories.size} {selectedCategories.size === 1 ? 'Category' : 'Categories'}
+                                            </Text>
+                                            <Ionicons name="arrow-forward" size={20} color="#FFF" />
+                                        </LinearGradient>
+                                    </TouchableOpacity>
+                                )}
+                            </LinearGradient>
+                        </Animated.View>
+                    )}
+
+                    {/* Help & Contact Us */}
+                    <View style={[styles.helpSection, { backgroundColor: theme.card, borderColor: theme.border }]}>
+                        <Text style={[styles.helpTitle, { color: theme.text }]}>Need Help?</Text>
+                        <Text style={[styles.helpSubtitle, { color: theme.textLight }]}>We're here to assist you with your event planning</Text>
+                        <View style={styles.helpButtons}>
+                            <TouchableOpacity
+                                style={[styles.helpBtn, { backgroundColor: colors.primary + '10' }]}
+                                onPress={() => navigation.navigate('HelpSupport')}
+                            >
+                                <Ionicons name="help-circle-outline" size={22} color={colors.primary} />
+                                <Text style={[styles.helpBtnText, { color: colors.primary }]}>Help & FAQ</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.helpBtn, { backgroundColor: '#25D366' + '15' }]}
+                                onPress={() => Linking.openURL('https://wa.me/919876543210')}
+                            >
+                                <Ionicons name="logo-whatsapp" size={22} color="#25D366" />
+                                <Text style={[styles.helpBtnText, { color: '#25D366' }]}>WhatsApp</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.helpBtn, { backgroundColor: '#3B82F6' + '12' }]}
+                                onPress={() => Linking.openURL('tel:+919876543210')}
+                            >
+                                <Ionicons name="call-outline" size={22} color="#3B82F6" />
+                                <Text style={[styles.helpBtnText, { color: '#3B82F6' }]}>Call Us</Text>
+                            </TouchableOpacity>
+                        </View>
                     </View>
 
+                    {/* Guest Manager */}
+                    <TouchableOpacity
+                        style={[styles.guestManagerCard, { backgroundColor: theme.card, borderColor: theme.border }]}
+                        onPress={() => navigation.navigate('GuestManage')}
+                        activeOpacity={0.8}
+                    >
+                        <LinearGradient
+                            colors={isDarkMode ? ['#1A1A2E', '#16213E'] : ['#F0F7FF', '#E8F0FE']}
+                            style={styles.guestManagerGradient}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                        >
+                            <View style={styles.guestManagerContent}>
+                                <View style={[styles.guestManagerIcon, { backgroundColor: '#8B5CF6' + '20' }]}>
+                                    <Ionicons name="people" size={26} color="#8B5CF6" />
+                                </View>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={[styles.guestManagerTitle, { color: theme.text }]}>Guest Manager</Text>
+                                    <Text style={[styles.guestManagerDesc, { color: theme.textLight }]}>
+                                        Manage guest lists, track gifts & send digital invitations
+                                    </Text>
+                                </View>
+                                <Ionicons name="chevron-forward" size={22} color={theme.textLight} />
+                            </View>
+                        </LinearGradient>
+                    </TouchableOpacity>
+
+                    {/* Thank You from eKatRaa */}
+                    <View style={[styles.thankYouSection, { backgroundColor: theme.card, borderColor: theme.border }]}>
+                        <LinearGradient
+                            colors={[colors.primary + '15', (colors.secondary || '#FF7700') + '10']}
+                            style={styles.thankYouGradient}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                        >
+                            <Ionicons name="heart" size={28} color={colors.primary} style={{ marginBottom: 8 }} />
+                            <Text style={[styles.thankYouTitle, { color: theme.text }]}>Thank you from eKatRaa</Text>
+                            <Text style={[styles.thankYouText, { color: theme.textLight }]}>
+                                We're honoured to be part of your special occasion. Your trust means the world to us—here's to creating memories that last a lifetime.
+                            </Text>
+                        </LinearGradient>
+                    </View>
+
+                    <View style={{ height: 80 }} />
                 </ScrollView>
             </AnimatedBackground>
 
-            {/* AI Floating Action Button */}
-            <TouchableOpacity
-                style={[styles.fab, { backgroundColor: colors.primary }]}
-                onPress={() => setChatModalVisible(true)}
-            >
-                <Ionicons name="chatbubbles" size={26} color="#FFF" />
-            </TouchableOpacity>
+            <ChatModal visible={chatModalVisible} onClose={() => setChatModalVisible(false)} />
 
-            {/* Booking Modal */}
-            <BookingModal
-                visible={bookingModalVisible}
-                onClose={() => setBookingModalVisible(false)}
-                eventType={selectedEventTypeForBooking}
+            <BottomTabBar
                 navigation={navigation}
-            />
-
-            {/* AI Chat Modal */}
-            <ChatModal
-                visible={chatModalVisible}
-                onClose={() => setChatModalVisible(false)}
+                activeRoute="Home"
+                cartItemCount={cartItemCount}
             />
         </SafeAreaView>
     );
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-    },
-    scrollContent: {
-        paddingBottom: 40,
-    },
+    container: { flex: 1 },
+    scrollContent: { paddingBottom: 40 },
     header: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
         paddingHorizontal: 20,
         marginTop: 10,
         marginBottom: 20,
     },
-    locationLabel: {
-        fontSize: 12,
+    locationBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
     },
-    locationValue: {
-        fontSize: 16,
-        fontWeight: 'bold',
-    },
-    profileBtn: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
+    locationIcon: {
+        width: 40,
+        height: 40,
+        borderRadius: 12,
         alignItems: 'center',
         justifyContent: 'center',
     },
-    searchBar: {
-        marginHorizontal: 20,
-        paddingHorizontal: 14,
-        height: 50,
-        borderRadius: 12,
-        marginBottom: 24,
-        borderWidth: 1,
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
-    searchInput: {
-        flex: 1,
-        fontSize: 15,
-        height: '100%',
-    },
-    section: {
-        marginBottom: 24,
-    },
-    sectionHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
+    locationLabel: { fontSize: 11, letterSpacing: 0.3, textTransform: 'uppercase', fontWeight: '500' },
+    locationRow: { flexDirection: 'row', alignItems: 'center' },
+    locationValue: { fontSize: 16, fontWeight: '700' },
+    section: { marginBottom: 28 },
+    sectionTitleRow: {
         paddingHorizontal: 20,
         marginBottom: 16,
     },
     sectionTitle: {
-        fontSize: 18,
-        fontWeight: 'bold',
-        marginLeft: 20,
-        marginBottom: 16,
+        fontSize: 20,
+        fontWeight: '800',
+        letterSpacing: -0.3,
     },
-    typeList: {
-        paddingHorizontal: 20,
+    sectionSubtitle: {
+        fontSize: 13,
+        marginTop: 3,
     },
-    typeChip: {
-        paddingHorizontal: 16,
-        paddingVertical: 10,
-        borderRadius: 20,
-        marginRight: 10,
-        borderWidth: 1.5,
-    },
-    typeText: {
-        fontSize: 14,
-        fontWeight: '500',
-    },
-    typeTextActive: {
-        color: '#FFF',
-        fontWeight: 'bold',
-    },
-    servicesGrid: {
+    occasionGrid: {
         flexDirection: 'row',
         flexWrap: 'wrap',
+        paddingHorizontal: 20,
+        gap: OCCASION_CARD_GAP,
+    },
+    occasionGridExpanded: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        paddingHorizontal: 20,
+        gap: OCCASION_CARD_GAP,
+        marginTop: 12,
+    },
+    occasionCard: {
+        width: OCCASION_CARD_WIDTH,
+        alignItems: 'center',
+        paddingVertical: 18,
         paddingHorizontal: 10,
-    },
-    gridItemWrapper: {
-        width: '25%',
-        alignItems: 'center',
-        marginBottom: 20,
-    },
-    serviceItem: {
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    serviceIcon: {
-        width: 64,
-        height: 64,
-        borderRadius: 32,
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginBottom: 8,
+        borderRadius: 18,
+        borderWidth: 1.5,
+        overflow: 'hidden',
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
-        borderWidth: 1,
-    },
-    serviceName: {
-        fontSize: 12,
-        textAlign: 'center',
-        fontWeight: '500',
-    },
-    vendorsList: {
-        paddingHorizontal: 16,
-    },
-    vendorCardHome: {
-        width: 150,
-        borderRadius: 16,
-        marginHorizontal: 8,
-        padding: 14,
-        alignItems: 'center',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 3 },
-        shadowOpacity: 0.1,
+        shadowOpacity: 0.06,
         shadowRadius: 6,
-        elevation: 4,
-        borderWidth: 1,
-        borderColor: 'rgba(255,65,23,0.1)',
+        elevation: 3,
     },
-    vendorImageHome: {
-        width: 70,
-        height: 70,
-        borderRadius: 35,
-        marginBottom: 12,
-        backgroundColor: '#FFF5F2',
-        borderWidth: 2,
-        borderColor: 'rgba(255,65,23,0.2)',
+    othersCard: {
+        borderStyle: 'dashed',
     },
-    vendorInfoHome: {
-        alignItems: 'center',
-        width: '100%',
+    occasionCardCompact: {
+        width: OCCASION_CARD_WIDTH,
     },
-    vendorNameHome: {
-        fontSize: 14,
-        fontWeight: '600',
-        textAlign: 'center',
-        marginBottom: 4,
-    },
-    vendorCategoryHome: {
-        fontSize: 11,
-        fontWeight: '500',
-        textAlign: 'center',
-    },
-    vendorLocationHome: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginTop: 6,
-        gap: 3,
-    },
-    vendorLocationText: {
-        fontSize: 10,
-    },
-    venuesList: {
-        paddingHorizontal: 16,
-    },
-    venueCard: {
-        width: 260,
+    occasionIconWrap: {
+        width: 56,
+        height: 56,
         borderRadius: 16,
-        marginHorizontal: 8,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.1,
-        shadowRadius: 8,
-        elevation: 5,
-        marginBottom: 10,
-        overflow: 'hidden',
-    },
-    venueImage: {
-        width: '100%',
-        height: 150,
-        backgroundColor: '#EEE',
-    },
-    venueInfo: {
-        padding: 12,
-    },
-    venueName: {
-        fontSize: 16,
-        fontWeight: 'bold',
-        marginBottom: 4,
-    },
-    venueLocation: {
-        fontSize: 13,
-        marginBottom: 8,
-    },
-    venueFooter: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-    },
-    venuePrice: {
-        fontSize: 15,
-        fontWeight: '700',
-    },
-    ratingContainer: {
-        backgroundColor: '#10B981',
-        paddingHorizontal: 6,
-        paddingVertical: 2,
-        borderRadius: 4,
-    },
-    venueRating: {
-        fontSize: 12,
-        color: '#FFF',
-        fontWeight: 'bold',
-    },
-    promoContainer: {
-        marginHorizontal: 20,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.2,
-        shadowRadius: 8,
-        elevation: 6,
-    },
-    gradientCard: {
-        borderRadius: 16,
-        padding: 24,
-        alignItems: 'center',
-    },
-    promoLogoContainer: {
-        marginBottom: 12,
-    },
-    promoLogoCircle: {
-        backgroundColor: '#FFFFFF',
-        width: 80,
-        height: 80,
-        borderRadius: 40,
         alignItems: 'center',
         justifyContent: 'center',
+        marginBottom: 10,
+    },
+    occasionIconImg: { width: 38, height: 38, borderRadius: 12 },
+    occasionEmoji: { fontSize: 28 },
+    occasionLabel: { fontSize: 13, textAlign: 'center', fontWeight: '600' },
+    occasionCheck: {
+        position: 'absolute',
+        top: 8,
+        right: 8,
+        width: 22,
+        height: 22,
+        borderRadius: 11,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+
+    // Category multi-select section
+    categorySection: {
+        marginHorizontal: 16,
+        marginBottom: 28,
+        borderRadius: 20,
+        overflow: 'hidden',
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.2,
-        shadowRadius: 8,
-        elevation: 5,
+        shadowOpacity: 0.08,
+        shadowRadius: 12,
+        elevation: 6,
     },
-    promoTitle: {
+    categorySectionBg: {
+        padding: 20,
+        borderRadius: 20,
+    },
+    categoryHeaderRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
+        marginBottom: 18,
+    },
+    categoryTitle: {
+        fontSize: 19,
+        fontWeight: '800',
+        letterSpacing: -0.3,
+    },
+    categorySubtitle: {
+        fontSize: 13,
+        marginTop: 4,
+    },
+    selectedCountBadge: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    selectedCountText: {
         color: '#FFF',
-        fontSize: 26,
-        fontWeight: 'bold',
-        marginBottom: 4,
-    },
-    promoSubtitle: {
-        color: 'rgba(255,255,255,0.9)',
         fontSize: 15,
-        fontStyle: 'italic',
-        marginBottom: 12,
+        fontWeight: '800',
     },
-    promoDescription: {
-        color: 'rgba(255,255,255,0.95)',
-        fontSize: 14,
-        lineHeight: 20,
-        fontWeight: '500',
+    categoryScrollContent: {
+        paddingRight: 8,
+        gap: 10,
+    },
+    categoryBox: {
+        width: 110,
+        paddingVertical: 12,
+        paddingHorizontal: 10,
+        borderRadius: 16,
+        borderWidth: 1.5,
+        alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.04,
+        shadowRadius: 4,
+        elevation: 2,
+    },
+    categoryIconBox: {
+        width: 44,
+        height: 44,
+        borderRadius: 14,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 8,
+    },
+    categoryBoxImg: { width: 28, height: 28, borderRadius: 8 },
+    categoryBoxEmoji: { fontSize: 22 },
+    categoryBoxLabel: {
+        fontSize: 12,
+        fontWeight: '600',
+        lineHeight: 15,
         textAlign: 'center',
+        marginBottom: 8,
     },
-    noDataText: {
-        textAlign: 'center',
-        fontStyle: 'italic',
-        marginTop: 10,
-        marginHorizontal: 20,
+    categoryCheckbox: {
+        width: 20,
+        height: 20,
+        borderRadius: 10,
+        borderWidth: 2,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
+    exploreBtn: {
+        marginTop: 20,
+        borderRadius: 14,
+        overflow: 'hidden',
+    },
+    exploreBtnGradient: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 15,
+        paddingHorizontal: 24,
+        gap: 8,
+    },
+    exploreBtnText: {
+        color: '#FFF',
+        fontSize: 16,
+        fontWeight: '700',
+        letterSpacing: 0.3,
+    },
+
     modalOverlay: {
         flex: 1,
         backgroundColor: 'rgba(0,0,0,0.5)',
-        justifyContent: 'center',
-        alignItems: 'center',
+        justifyContent: 'flex-end',
     },
     pickerContent: {
-        borderRadius: 16,
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
         padding: 20,
-        width: '80%',
-        maxHeight: '60%',
+        paddingTop: 12,
+        maxHeight: '70%',
+    },
+    pickerHandle: {
+        width: 40,
+        height: 4,
+        borderRadius: 2,
+        backgroundColor: '#CCC',
+        alignSelf: 'center',
+        marginBottom: 16,
     },
     pickerTitle: {
-        fontSize: 18,
-        fontWeight: 'bold',
+        fontSize: 20,
+        fontWeight: '800',
         marginBottom: 16,
-        textAlign: 'center',
     },
+    pickerScroll: { maxHeight: 400 },
+    pickerScrollContent: { paddingBottom: 20 },
     pickerItem: {
-        paddingVertical: 14,
-        borderBottomWidth: 1,
-    },
-    pickerItemText: {
-        fontSize: 16,
-        textAlign: 'center',
-    },
-    fab: {
-        position: 'absolute',
-        bottom: 30,
-        right: 20,
-        width: 58,
-        height: 58,
-        borderRadius: 29,
+        flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'center',
-        elevation: 8,
-        shadowColor: colors.primary,
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 6,
-        zIndex: 100,
+        paddingVertical: 14,
+        paddingHorizontal: 8,
+        borderBottomWidth: 1,
+        gap: 12,
     },
-    bannerSection: {
-        marginBottom: 24,
-    },
-    bannerList: {
-        paddingHorizontal: 20,
-    },
+    pickerItemText: { flex: 1, fontSize: 16, fontWeight: '500' },
+    bannerSection: { marginBottom: 24 },
+    bannerList: { paddingHorizontal: 20 },
     bannerCard: {
         width: width - 40,
-        height: 160,
-        borderRadius: 16,
+        height: 170,
+        borderRadius: 20,
         overflow: 'hidden',
         marginRight: 12,
     },
-    bannerImage: {
-        width: '100%',
-        height: '100%',
-    },
+    bannerImage: { width: '100%', height: '100%' },
     bannerOverlay: {
         position: 'absolute',
         bottom: 0,
         left: 0,
         right: 0,
-        padding: 16,
-        paddingTop: 40,
+        padding: 18,
+        paddingTop: 50,
     },
     bannerTitle: {
         color: '#FFFFFF',
-        fontSize: 18,
-        fontWeight: 'bold',
+        fontSize: 20,
+        fontWeight: '800',
         marginBottom: 4,
         textShadowColor: 'rgba(0,0,0,0.3)',
         textShadowOffset: { width: 0, height: 1 },
-        textShadowRadius: 2,
+        textShadowRadius: 3,
     },
-    bannerSubtitle: {
-        color: 'rgba(255,255,255,0.9)',
+    bannerSubtitle: { color: 'rgba(255,255,255,0.9)', fontSize: 13 },
+
+    aiChatBar: {
+        marginHorizontal: 20,
+        paddingHorizontal: 14,
+        paddingVertical: 12,
+        borderRadius: 16,
+        marginBottom: 24,
+        borderWidth: 1.5,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+    },
+    aiIconWrap: {
+        width: 32,
+        height: 32,
+        borderRadius: 10,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    aiPlaceholder: {
+        flex: 1,
         fontSize: 13,
+        lineHeight: 18,
+    },
+    categoryLoaderRow: {
+        flexDirection: 'row',
+        gap: 10,
+    },
+    helpSection: {
+        marginHorizontal: 16,
+        borderRadius: 20,
+        borderWidth: 1,
+        padding: 20,
+        marginBottom: 16,
+    },
+    helpTitle: {
+        fontSize: 18,
+        fontWeight: '800',
+        marginBottom: 4,
+    },
+    helpSubtitle: {
+        fontSize: 13,
+        marginBottom: 16,
+    },
+    helpButtons: {
+        flexDirection: 'row',
+        gap: 10,
+    },
+    helpBtn: {
+        flex: 1,
+        alignItems: 'center',
+        paddingVertical: 14,
+        borderRadius: 14,
+        gap: 6,
+    },
+    helpBtnText: {
+        fontSize: 11,
+        fontWeight: '700',
+    },
+    guestManagerCard: {
+        marginHorizontal: 16,
+        borderRadius: 20,
+        borderWidth: 1,
+        overflow: 'hidden',
+        marginBottom: 16,
+    },
+    guestManagerGradient: {
+        borderRadius: 20,
+    },
+    guestManagerContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 18,
+        gap: 14,
+    },
+    guestManagerIcon: {
+        width: 52,
+        height: 52,
+        borderRadius: 16,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    guestManagerTitle: {
+        fontSize: 16,
+        fontWeight: '700',
+        marginBottom: 3,
+    },
+    guestManagerDesc: {
+        fontSize: 12,
+        lineHeight: 17,
+    },
+    thankYouSection: {
+        marginHorizontal: 16,
+        marginBottom: 16,
+        borderRadius: 20,
+        borderWidth: 1,
+        overflow: 'hidden',
+    },
+    thankYouGradient: {
+        padding: 24,
+        borderRadius: 20,
+        alignItems: 'center',
+    },
+    thankYouTitle: {
+        fontSize: 17,
+        fontWeight: '700',
+        marginBottom: 8,
+    },
+    thankYouText: {
+        fontSize: 14,
+        lineHeight: 22,
+        textAlign: 'center',
     },
 });

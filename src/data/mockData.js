@@ -1,16 +1,16 @@
 export const CITIES = ['Bhubaneswar, Odisha', 'Guwahati, Assam', 'Kolkata, West Bengal'];
 
 export const EVENT_TYPES = [
-    { id: 'all', name: 'All' },
-    { id: 'wedding', name: 'Wedding (Groom/Bride)' },
-    { id: 'janayu', name: 'Janayu / Thread' },
-    { id: 'social', name: 'Social Gathering' },
-    { id: 'birthday', name: 'Birthday' },
-    { id: 'corporate', name: 'Corporate' },
-    { id: 'funeral', name: 'Funeral / Antyesti' },
+    { id: 'all', name: 'All', icon: '🎉', color: '#FF4117' },
+    { id: 'wedding', name: 'Wedding (Groom/Bride)', icon: '💒', color: '#EC4899' },
+    { id: 'janayu', name: 'Janayu / Thread', icon: '🕉️', color: '#8B5CF6' },
+    { id: 'social', name: 'Social Gathering', icon: '🎊', color: '#10B981' },
+    { id: 'birthday', name: 'Birthday', icon: '🎂', color: '#F59E0B' },
+    { id: 'corporate', name: 'Corporate', icon: '💼', color: '#3B82F6' },
+    { id: 'funeral', name: 'Funeral / Antyesti', icon: '🙏', color: '#6B7280' },
 ];
 
-export const SERVICES = [
+const SERVICES = [
     { id: '1', name: 'Venue', icon: '🏰', type: ['wedding', 'janayu', 'social', 'birthday', 'corporate', 'funeral'] },
     { id: '2', name: 'Catering', icon: '🍽️', type: ['wedding', 'janayu', 'social', 'birthday', 'corporate', 'funeral'] },
     { id: '3', name: 'Decor', icon: '✨', type: ['wedding', 'janayu', 'social', 'birthday', 'corporate'] },
@@ -22,6 +22,8 @@ export const SERVICES = [
     { id: '9', name: 'Sound & Lights', icon: '🔊', type: ['wedding', 'social', 'corporate', 'birthday'] },
     { id: '10', name: 'Transport', icon: '🚌', type: ['wedding', 'corporate', 'funeral'] },
 ];
+export { SERVICES };
+export { SERVICES as MOCK_SERVICES };
 
 export const VENUES = [
     // Bhubaneswar

@@ -6,6 +6,7 @@ import { colors } from '../../theme/colors';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { supabase, dbService } from '../../services/supabase';
+import BottomTabBar from '../../components/BottomTabBar';
 
 const STATUS_COLORS = {
     pending: { bg: '#FEF3C7', text: '#D97706' },
@@ -215,6 +216,7 @@ export default function MyEnquiries({ navigation }) {
                         <Text style={styles.loginBtnText}>Login / Sign Up</Text>
                     </TouchableOpacity>
                 </View>
+                <BottomTabBar navigation={navigation} activeRoute="Menu" />
             </SafeAreaView>
         );
     }
@@ -251,6 +253,7 @@ export default function MyEnquiries({ navigation }) {
                     }
                 />
             )}
+            <BottomTabBar navigation={navigation} activeRoute="Menu" />
         </SafeAreaView>
     );
 }

@@ -6,12 +6,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { useTheme } from '../../context/ThemeContext';
 import { dbService, getVendorImageUrl } from '../../services/supabase';
+import BottomTabBar from '../../components/BottomTabBar';
 
 const { width } = Dimensions.get('window');
 
 export default function VendorsList({ route, navigation }) {
     const { theme, isDarkMode } = useTheme();
-    const { service, city } = route.params;
+    const { service, city, state } = route.params || {};
     
     const [vendors, setVendors] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -19,7 +20,7 @@ export default function VendorsList({ route, navigation }) {
 
     useEffect(() => {
         fetchVendors();
-    }, [service, city]);
+    }, [service, city, state]);
 
     const fetchVendors = async () => {
         setLoading(true);
@@ -28,6 +29,7 @@ export default function VendorsList({ route, navigation }) {
             const { data, error } = await dbService.getVendorsByService({
                 serviceCategory: service?.name || service?.category,
                 city: city,
+                state: state,
             });
             
             console.log('[VENDORS] Result:', data?.length, 'vendors', error ? 'Error: ' + error.message : '');
@@ -48,7 +50,7 @@ export default function VendorsList({ route, navigation }) {
         setRefreshing(true);
         await fetchVendors();
         setRefreshing(false);
-    }, [service, city]);
+    }, [service, city, state]);
 
     const renderVendor = ({ item, index }) => (
         <TouchableOpacity
@@ -212,6 +214,7 @@ export default function VendorsList({ route, navigation }) {
                     </Text>
                 </View>
             )}
+            <BottomTabBar navigation={navigation} activeRoute="Home" />
         </SafeAreaView>
     );
 }

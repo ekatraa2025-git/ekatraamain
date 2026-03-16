@@ -13,93 +13,147 @@ import VenueDetail from '../screens/home/VenueDetail';
 import ServiceDetail from '../screens/home/ServiceDetail';
 import VendorsList from '../screens/home/VendorsList';
 import VendorDetail from '../screens/home/VendorDetail';
+import CategoryServices from '../screens/home/CategoryServices';
 import Menu from '../screens/menu/Menu';
 import MyBookings from '../screens/bookings/MyBookings';
 import MyProfile from '../screens/profile/MyProfile';
 import MyEnquiries from '../screens/enquiries/MyEnquiries';
+import Cart from '../screens/cart/Cart';
+import Checkout from '../screens/orders/Checkout';
+import OrderDetail from '../screens/orders/OrderDetail';
+import OrderSummary from '../screens/orders/OrderSummary';
+import MyOrders from '../screens/orders/MyOrders';
+import About from '../screens/about/About';
+import HelpSupport from '../screens/help/HelpSupport';
+import GuestManage from '../screens/guests/GuestManage';
 
 const Stack = createNativeStackNavigator();
 
 export default function AppNavigator() {
     return (
         <NavigationContainer>
-            <Stack.Navigator 
-                initialRouteName="Splash" 
-                screenOptions={{ 
+            <Stack.Navigator
+                initialRouteName="Splash"
+                screenOptions={{
                     headerShown: false,
                     animation: 'fade',
                 }}
             >
                 {/* Onboarding Flow */}
                 <Stack.Screen name="Splash" component={Splash} />
-                <Stack.Screen 
-                    name="Onboarding" 
+                <Stack.Screen
+                    name="Onboarding"
                     component={Onboarding}
                     options={{ animation: 'slide_from_right' }}
                 />
-                
+
                 {/* Main App - No login required to access */}
-                <Stack.Screen 
-                    name="Home" 
+                <Stack.Screen
+                    name="Home"
                     component={Home}
                     options={{ animation: 'slide_from_right' }}
                 />
-                <Stack.Screen 
-                    name="VenueDetail" 
+                <Stack.Screen
+                    name="VenueDetail"
                     component={VenueDetail}
                     options={{ animation: 'slide_from_right' }}
                 />
-                <Stack.Screen 
-                    name="ServiceDetail" 
+                <Stack.Screen
+                    name="ServiceDetail"
                     component={ServiceDetail}
                     options={{ animation: 'slide_from_right' }}
                 />
-                <Stack.Screen 
-                    name="VendorsList" 
+                <Stack.Screen
+                    name="VendorsList"
                     component={VendorsList}
                     options={{ animation: 'slide_from_right' }}
                 />
-                <Stack.Screen 
-                    name="VendorDetail" 
+                <Stack.Screen
+                    name="VendorDetail"
                     component={VendorDetail}
                     options={{ animation: 'slide_from_right' }}
                 />
-                <Stack.Screen 
-                    name="MyBookings" 
+                <Stack.Screen
+                    name="CategoryServices"
+                    component={CategoryServices}
+                    options={{ animation: 'slide_from_right' }}
+                />
+                <Stack.Screen
+                    name="MyBookings"
                     component={MyBookings}
                     options={{ animation: 'slide_from_right' }}
                 />
-                <Stack.Screen 
-                    name="MyProfile" 
+                <Stack.Screen
+                    name="MyProfile"
                     component={MyProfile}
                     options={{ animation: 'slide_from_right' }}
                 />
-                <Stack.Screen 
-                    name="MyEnquiries" 
+                <Stack.Screen
+                    name="MyEnquiries"
                     component={MyEnquiries}
                     options={{ animation: 'slide_from_right' }}
                 />
-                
+                <Stack.Screen
+                    name="Cart"
+                    component={Cart}
+                    options={{ animation: 'slide_from_right' }}
+                />
+                <Stack.Screen
+                    name="Checkout"
+                    component={Checkout}
+                    options={{ animation: 'slide_from_right' }}
+                />
+                <Stack.Screen
+                    name="OrderDetail"
+                    component={OrderDetail}
+                    options={{ animation: 'slide_from_right' }}
+                />
+                <Stack.Screen
+                    name="OrderSummary"
+                    component={OrderSummary}
+                    options={{ animation: 'slide_from_right' }}
+                />
+                <Stack.Screen
+                    name="MyOrders"
+                    component={MyOrders}
+                    options={{ animation: 'slide_from_right' }}
+                />
+                <Stack.Screen
+                    name="About"
+                    component={About}
+                    options={{ animation: 'slide_from_right' }}
+                />
+                <Stack.Screen
+                    name="HelpSupport"
+                    component={HelpSupport}
+                    options={{ animation: 'slide_from_right' }}
+                />
+                <Stack.Screen
+                    name="GuestManage"
+                    component={GuestManage}
+                    options={{ animation: 'slide_from_right' }}
+                />
+
                 {/* Auth Screens - Only shown when login is needed */}
-                <Stack.Screen 
-                    name="Login" 
+                <Stack.Screen
+                    name="Login"
                     component={Login}
-                    options={{ 
+                    options={{
                         presentation: 'modal',
                         animation: 'slide_from_bottom',
                     }}
                 />
-                <Stack.Screen 
-                    name="Otp" 
+                <Stack.Screen
+                    name="Otp"
                     component={Otp}
                     options={{ animation: 'slide_from_right' }}
                 />
-                <Stack.Screen 
-                    name="Register" 
+                <Stack.Screen
+                    name="Register"
                     component={Register}
                     options={{ animation: 'slide_from_right' }}
                 />
-                
+
                 {/* Menu / Profile */}
                 <Stack.Screen
                     name="Menu"

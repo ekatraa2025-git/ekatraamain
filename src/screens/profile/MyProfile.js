@@ -6,6 +6,7 @@ import { colors } from '../../theme/colors';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../services/supabase';
+import BottomTabBar from '../../components/BottomTabBar';
 
 export default function MyProfile({ navigation }) {
     const { theme, isDarkMode } = useTheme();
@@ -309,6 +310,7 @@ export default function MyProfile({ navigation }) {
                     </View>
                 </View>
             </ScrollView>
+            <BottomTabBar navigation={navigation} activeRoute="Menu" />
         </SafeAreaView>
     );
 }

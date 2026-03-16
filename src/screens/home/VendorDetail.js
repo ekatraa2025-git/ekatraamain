@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Linking, Alert, Modal, TextInput, Platform, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -7,13 +7,36 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { colors } from '../../theme/colors';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
-import { dbService, getVendorImageUrl } from '../../services/supabase';
+import { dbService, getVendorImageUrl, getServiceImageUrl } from '../../services/supabase';
 import { Button } from '../../components/Button';
+import BottomTabBar from '../../components/BottomTabBar';
 
 export default function VendorDetail({ route, navigation }) {
-    const { vendor, city, openEnquiry } = route.params || {};
+    const { vendor: vendorParam, city, openEnquiry } = route.params || {};
     const { theme, isDarkMode } = useTheme();
     const { user, isAuthenticated } = useAuth();
+
+    // Full vendor data (fetched by id); fallback to params
+    const [vendorData, setVendorData] = useState(vendorParam || null);
+    const [fetchLoading, setFetchLoading] = useState(!!vendorParam?.id);
+
+    useEffect(() => {
+        if (!vendorParam?.id) {
+            setFetchLoading(false);
+            return;
+        }
+        let cancelled = false;
+        (async () => {
+            const { data, error } = await dbService.getVendorById(vendorParam.id);
+            if (cancelled) return;
+            setFetchLoading(false);
+            if (!error && data) setVendorData(data);
+            else if (vendorParam) setVendorData(vendorParam);
+        })();
+        return () => { cancelled = true; };
+    }, [vendorParam?.id]);
+
+    const vendor = vendorData;
 
     // Enquiry Modal State
     const [enquiryVisible, setEnquiryVisible] = useState(openEnquiry || false);
@@ -35,6 +58,36 @@ export default function VendorDetail({ route, navigation }) {
                     <Ionicons name="alert-circle-outline" size={64} color={theme.textLight} />
                     <Text style={[styles.errorText, { color: theme.text }]}>Vendor not found</Text>
                     <Button title="Go Back" onPress={() => navigation.goBack()} />
+                </View>
+            </SafeAreaView>
+        );
+    }
+
+    // Unauthenticated: show vendor card but gate full details — ask to register
+    if (!isAuthenticated) {
+        return (
+            <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
+                <View style={[styles.header, { borderBottomColor: theme.border }]}>
+                    <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+                        <Ionicons name="arrow-back" size={24} color={theme.text} />
+                    </TouchableOpacity>
+                    <Text style={[styles.headerTitle, { color: theme.text }]}>Vendor Details</Text>
+                    <View style={{ width: 40 }} />
+                </View>
+                <View style={[styles.authGateContainer, { backgroundColor: theme.card }]}>
+                    <Image
+                        source={{ uri: getVendorImageUrl(vendor.logo_url, vendor.business_name) }}
+                        style={styles.authGateLogo}
+                    />
+                    <Text style={[styles.authGateName, { color: theme.text }]}>{vendor.business_name || 'Vendor'}</Text>
+                    <Text style={[styles.authGateCategory, { color: theme.textLight }]}>{vendor.category || 'Service Provider'}</Text>
+                    <Text style={[styles.authGateMessage, { color: theme.textLight }]}>
+                        Register or login to view full details, services, pricing and contact info.
+                    </Text>
+                    <Button
+                        title="Register / Login"
+                        onPress={() => navigation.navigate('Login')}
+                    />
                 </View>
             </SafeAreaView>
         );
@@ -134,7 +187,7 @@ export default function VendorDetail({ route, navigation }) {
                     <Ionicons name="arrow-back" size={24} color={theme.text} />
                 </TouchableOpacity>
                 <Text style={[styles.headerTitle, { color: theme.text }]}>Vendor Details</Text>
-                <View style={{ width: 40 }} />
+                {fetchLoading ? <ActivityIndicator size="small" color={colors.primary} style={{ width: 40 }} /> : <View style={{ width: 40 }} />}
             </View>
 
             <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
@@ -230,17 +283,30 @@ export default function VendorDetail({ route, navigation }) {
                 {vendor.services && vendor.services.length > 0 && (
                     <View style={[styles.section, { backgroundColor: theme.card }]}>
                         <Text style={[styles.sectionTitle, { color: theme.text }]}>Services Offered</Text>
-                        {vendor.services.map((svc, idx) => (
-                            <View key={idx} style={[styles.serviceItem, { borderBottomColor: theme.border }]}>
-                                <Text style={[styles.serviceName, { color: theme.text }]}>{svc.name}</Text>
-                                {svc.price_amount && (
-                                    <Text style={[styles.servicePrice, { color: colors.primary }]}>
-                                        ₹{svc.price_amount.toLocaleString('en-IN')}
-                                        {svc.price_unit && ` / ${svc.price_unit}`}
-                                    </Text>
-                                )}
-                            </View>
-                        ))}
+                        {vendor.services.map((svc, idx) => {
+                            const serviceImageUri = getServiceImageUrl(svc.image_url);
+                            return (
+                                <View key={svc.id || idx} style={[styles.serviceItem, { borderBottomColor: theme.border }]}>
+                                    {serviceImageUri ? (
+                                        <Image source={{ uri: serviceImageUri }} style={styles.serviceImage} />
+                                    ) : (
+                                        <View style={[styles.serviceImagePlaceholder, { backgroundColor: theme.border }]}>
+                                            <Ionicons name="briefcase-outline" size={24} color={theme.textLight} />
+                                        </View>
+                                    )}
+                                    <View style={styles.serviceInfo}>
+                                        <Text style={[styles.serviceName, { color: theme.text }]}>{svc.name}</Text>
+                                        {svc.description ? <Text style={[styles.serviceDesc, { color: theme.textLight }]} numberOfLines={2}>{svc.description}</Text> : null}
+                                        {(svc.price_amount != null || svc.base_price != null) && (
+                                            <Text style={[styles.servicePrice, { color: colors.primary }]}>
+                                                ₹{Number(svc.price_amount ?? svc.base_price).toLocaleString('en-IN')}
+                                                {svc.price_unit ? ` / ${svc.price_unit}` : ''}
+                                            </Text>
+                                        )}
+                                    </View>
+                                </View>
+                            );
+                        })}
                     </View>
                 )}
 
@@ -262,6 +328,8 @@ export default function VendorDetail({ route, navigation }) {
                     </LinearGradient>
                 </TouchableOpacity>
             </View>
+
+            <BottomTabBar navigation={navigation} activeRoute="Home" />
 
             {/* Enquiry Modal */}
             <Modal visible={enquiryVisible} animationType="slide" transparent>
@@ -489,18 +557,39 @@ const styles = StyleSheet.create({
     },
     serviceItem: {
         flexDirection: 'row',
-        justifyContent: 'space-between',
         alignItems: 'center',
         paddingVertical: 12,
         borderBottomWidth: 1,
+        gap: 12,
+    },
+    serviceImage: {
+        width: 56,
+        height: 56,
+        borderRadius: 8,
+        backgroundColor: '#f0f0f0',
+    },
+    serviceImagePlaceholder: {
+        width: 56,
+        height: 56,
+        borderRadius: 8,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    serviceInfo: {
+        flex: 1,
     },
     serviceName: {
         fontSize: 14,
-        flex: 1,
+        fontWeight: '600',
+    },
+    serviceDesc: {
+        fontSize: 12,
+        marginTop: 2,
     },
     servicePrice: {
         fontSize: 14,
         fontWeight: '600',
+        marginTop: 4,
     },
     bottomBar: {
         position: 'absolute',
@@ -535,6 +624,37 @@ const styles = StyleSheet.create({
     errorText: {
         fontSize: 18,
         marginVertical: 16,
+    },
+    authGateContainer: {
+        flex: 1,
+        margin: 16,
+        padding: 24,
+        borderRadius: 16,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    authGateLogo: {
+        width: 80,
+        height: 80,
+        borderRadius: 40,
+        backgroundColor: '#f0f0f0',
+        marginBottom: 16,
+    },
+    authGateName: {
+        fontSize: 20,
+        fontWeight: 'bold',
+        marginBottom: 4,
+        textAlign: 'center',
+    },
+    authGateCategory: {
+        fontSize: 14,
+        marginBottom: 16,
+    },
+    authGateMessage: {
+        fontSize: 14,
+        textAlign: 'center',
+        marginBottom: 24,
+        lineHeight: 22,
     },
     modalOverlay: {
         flex: 1,

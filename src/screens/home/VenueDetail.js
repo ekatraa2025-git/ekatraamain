@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Image, ScrollView, Dimensions, TouchableOpacity
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button } from '../../components/Button';
 import { useTheme } from '../../context/ThemeContext';
+import BottomTabBar from '../../components/BottomTabBar';
 
 const { width } = Dimensions.get('window');
 
@@ -64,6 +65,7 @@ export default function VenueDetail({ route, navigation }) {
             <View style={[styles.footer, { backgroundColor: theme.background, borderTopColor: theme.border }]}>
                 <Button title="Book Now" onPress={() => alert('Booking feature coming soon!')} />
             </View>
+            <BottomTabBar navigation={navigation} activeRoute="Home" />
         </SafeAreaView>
     );
 }

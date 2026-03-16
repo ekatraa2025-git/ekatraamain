@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-nati
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button } from '../../components/Button';
 import { useTheme } from '../../context/ThemeContext';
+import BottomTabBar from '../../components/BottomTabBar';
 
 export default function ServiceDetail({ route, navigation }) {
     const { service } = route.params;
@@ -44,6 +45,7 @@ export default function ServiceDetail({ route, navigation }) {
                     style={{ marginTop: 40 }}
                 />
             </ScrollView>
+            <BottomTabBar navigation={navigation} activeRoute="Home" />
         </SafeAreaView>
     );
 }

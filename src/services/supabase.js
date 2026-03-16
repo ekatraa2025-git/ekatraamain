@@ -46,6 +46,41 @@ export const getVendorImageUrl = (logoPath, vendorName = 'Vendor') => {
     return `${supabaseUrl}/storage/v1/object/public/ekatraa2025/${logoPath}`;
 };
 
+/** Returns full URL for a service image (storage path or full URL). Returns null if no path (caller can hide image). */
+export const getServiceImageUrl = (imagePath) => {
+    if (!imagePath) return null;
+    if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) return imagePath;
+    return `${supabaseUrl}/storage/v1/object/public/ekatraa2025/${imagePath}`;
+};
+
+const STORAGE_PATH_RE = /\/storage\/v1\/object\/public\/[^/]+\/(.+)$/;
+const apiBase = process.env.EXPO_PUBLIC_API_URL || process.env.NEXT_PUBLIC_API_URL || '';
+
+/** Resolves a storage path (or full Supabase URL) to a signed URL via the backend. Returns null if no path. */
+export const resolveStorageUrl = async (pathOrUrl) => {
+    if (!pathOrUrl) return null;
+    let storagePath = pathOrUrl;
+    if (pathOrUrl.startsWith('http://') || pathOrUrl.startsWith('https://')) {
+        const match = pathOrUrl.match(STORAGE_PATH_RE);
+        if (!match) return pathOrUrl;
+        storagePath = match[1];
+    }
+    if (apiBase) {
+        try {
+            const res = await fetch(`${apiBase}/api/public/storage/signed-url?path=${encodeURIComponent(storagePath)}`);
+            const json = await res.json();
+            if (json?.url) return json.url;
+        } catch (_) { /* fall through */ }
+    }
+    try {
+        const { data, error } = await supabase.storage
+            .from('ekatraa2025')
+            .createSignedUrl(storagePath, 3600);
+        if (!error && data?.signedUrl) return data.signedUrl;
+    } catch (_) { /* fall through */ }
+    return `${supabaseUrl}/storage/v1/object/public/ekatraa2025/${storagePath}`;
+};
+
 // Auth helper functions
 export const authService = {
     // Send OTP to phone number
@@ -120,8 +155,8 @@ export const authService = {
 
 // Database service functions - Updated for flexible vendor queries
 export const dbService = {
-    // Fetch vendors by location and service category
-    async getVendors({ city, serviceCategory, limit = 20 }) {
+    // Fetch vendors by location (city and/or state) and service category
+    async getVendors({ city, state, serviceCategory, limit = 20 }) {
         let query = supabase
             .from('vendors')
             .select(`
@@ -132,7 +167,9 @@ export const dbService = {
         if (city) {
             query = query.ilike('city', `%${city}%`);
         }
-
+        if (state) {
+            query = query.ilike('state', `%${state}%`);
+        }
         if (serviceCategory) {
             query = query.ilike('category', `%${serviceCategory}%`);
         }
@@ -173,13 +210,60 @@ export const dbService = {
         return { data, error };
     },
 
-    // Fetch event types
+    // Fetch event types (get-together types with icon, color, image_url from admin)
     async getEventTypes() {
         const { data, error } = await supabase
             .from('event_types')
             .select('*')
+            .eq('is_active', true)
             .order('display_order');
         return { data, error };
+    },
+
+    // Fetch occasions from the occasions table (new flow)
+    async getOccasions() {
+        const { data, error } = await supabase
+            .from('occasions')
+            .select('id, name, icon, icon_url, display_order')
+            .eq('is_active', true)
+            .order('display_order', { ascending: true });
+        return { data, error };
+    },
+
+    // Fetch categories for an occasion (via occasion_categories join table)
+    async getCategoriesByOccasion(occasionId) {
+        if (!occasionId) {
+            const { data, error } = await supabase
+                .from('categories')
+                .select('id, name, icon_url, display_order')
+                .eq('is_active', true)
+                .order('display_order', { ascending: true });
+            return { data, error };
+        }
+        const { data, error } = await supabase
+            .from('occasion_categories')
+            .select('category_id, categories(id, name, icon_url, display_order)')
+            .eq('occasion_id', occasionId)
+            .order('display_order', { ascending: true });
+        if (error) return { data: null, error };
+        const list = (data ?? []).flatMap(row =>
+            Array.isArray(row.categories) ? row.categories : row.categories ? [row.categories] : []
+        );
+        return { data: list, error: null };
+    },
+
+    // Fetch app service catalog by event type (services shown per get-together type, configurable in admin)
+    async getAppServicesByEventType(eventType) {
+        let query = supabase
+            .from('app_service_catalog')
+            .select('*')
+            .eq('is_active', true)
+            .order('display_order');
+        if (eventType && eventType !== 'all') {
+            query = query.contains('event_types', [eventType]);
+        }
+        const { data, error } = await query;
+        return { data: data || [], error };
     },
 
     // Submit enquiry
@@ -270,13 +354,13 @@ export const dbService = {
         return { data, error };
     },
 
-    // Get vendors by service category - v4 with proper filtering
-    async getVendorsByService({ serviceCategory, city, limit = 50 }) {
+    // Get vendors by service category - v4 with proper filtering (city and/or state)
+    async getVendorsByService({ serviceCategory, city, state, limit = 80 }) {
         try {
-            console.log('[VENDORS-V4] Starting fetch for:', serviceCategory, 'in', city);
+            console.log('[VENDORS-V4] Starting fetch for:', serviceCategory, 'in', city, state ? `state: ${state}` : '');
             
             // Fetch all vendors with their services
-            const { data: allVendors, error: fetchError } = await supabase
+            let query = supabase
                 .from('vendors')
                 .select(`
                     id, 
@@ -288,6 +372,7 @@ export const dbService = {
                     email, 
                     address, 
                     city, 
+                    state,
                     logo_url, 
                     status, 
                     is_verified, 
@@ -297,10 +382,16 @@ export const dbService = {
                         name,
                         description,
                         price_amount,
-                        price_unit
+                        price_unit,
+                        base_price,
+                        image_url
                     )
                 `)
                 .limit(limit);
+            if (city) query = query.ilike('city', `%${city}%`);
+            // Do NOT filter by state in query - vendors with null state would be excluded; filter in JS instead
+
+            const { data: allVendors, error: fetchError } = await query;
 
             if (fetchError) {
                 console.log('[VENDORS-V4] Fetch error:', fetchError.message);
@@ -313,23 +404,21 @@ export const dbService = {
             let filteredVendors = allVendors || [];
             
             if (serviceCategory && filteredVendors.length > 0) {
-                const searchTerm = serviceCategory.toLowerCase();
+                const searchTerm = serviceCategory.toLowerCase().trim();
+                const searchStem = searchTerm.slice(0, 4);
                 filteredVendors = filteredVendors.filter(v => {
-                    // Check if vendor category matches
-                    const categoryMatch = v.category?.toLowerCase().includes(searchTerm);
-                    
-                    // Check if any of vendor's services match
-                    const serviceMatch = v.services?.some(svc => 
-                        svc.name?.toLowerCase().includes(searchTerm)
+                    const cat = (v.category || '').toLowerCase();
+                    const categoryMatch = cat && (cat.includes(searchTerm) || searchTerm.includes(cat) || cat.slice(0, 4) === searchStem || searchStem === cat.slice(0, 4));
+                    const serviceMatch = Array.isArray(v.services) && v.services.some(svc =>
+                        (svc.name || '').toLowerCase().includes(searchTerm) || searchTerm.includes((svc.name || '').toLowerCase())
                     );
-                    
                     return categoryMatch || serviceMatch;
                 });
-                
+                // Only show vendors that match this service type; do not fall back to all vendors
                 console.log('[VENDORS-V4] After category filter:', filteredVendors.length, 'vendors');
             }
             
-            // Filter by city if provided
+            // Filter by city if provided (when not already filtered by city in query)
             if (city && filteredVendors.length > 0) {
                 const cityTerm = city.toLowerCase();
                 const cityFiltered = filteredVendors.filter(v => 
@@ -342,6 +431,11 @@ export const dbService = {
                     filteredVendors = cityFiltered;
                 }
                 console.log('[VENDORS-V4] After city filter:', filteredVendors.length, 'vendors');
+            }
+            if (state && filteredVendors.length > 0) {
+                const stateTerm = state.toLowerCase();
+                const stateFiltered = filteredVendors.filter(v => !v.state || v.state.toLowerCase().includes(stateTerm));
+                if (stateFiltered.length > 0) filteredVendors = stateFiltered;
             }
 
             // Return empty array if no matches - don't show all vendors
@@ -408,6 +502,16 @@ export const dbService = {
             .from('services')
             .select('*')
             .eq('vendor_id', vendorId);
+        return { data, error };
+    },
+
+    // Get single vendor with all services and details (for VendorDetail page)
+    async getVendorById(vendorId) {
+        const { data, error } = await supabase
+            .from('vendors')
+            .select('*, services(*)')
+            .eq('id', vendorId)
+            .single();
         return { data, error };
     },
 };

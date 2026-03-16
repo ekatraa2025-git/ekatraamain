@@ -6,6 +6,7 @@ import { colors } from '../../theme/colors';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { dbService, getVendorImageUrl } from '../../services/supabase';
+import BottomTabBar from '../../components/BottomTabBar';
 
 const STATUS_COLORS = {
     pending: { bg: '#FEF3C7', text: '#D97706' },
@@ -157,6 +158,7 @@ export default function MyBookings({ navigation }) {
                         <Text style={styles.loginBtnText}>Login Now</Text>
                     </TouchableOpacity>
                 </View>
+                <BottomTabBar navigation={navigation} activeRoute="Menu" />
             </SafeAreaView>
         );
     }
@@ -216,6 +218,7 @@ export default function MyBookings({ navigation }) {
                     </TouchableOpacity>
                 </View>
             )}
+            <BottomTabBar navigation={navigation} activeRoute="Menu" />
         </SafeAreaView>
     );
 }

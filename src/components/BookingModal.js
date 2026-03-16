@@ -283,12 +283,36 @@ export default function BookingModal({ visible, onClose, eventType, navigation }
                             />
                         </View>
 
-                        {/* Budget Range */}
+                        {/* Budget / Price Range - Select options */}
                         <View style={styles.field}>
-                            <Text style={[styles.label, { color: theme.text }]}>Budget Range</Text>
+                            <Text style={[styles.label, { color: theme.text }]}>Budget / Price Range</Text>
+                            <View style={styles.priceOptionsRow}>
+                                {[
+                                    { id: 'under1', label: 'Under ₹1L' },
+                                    { id: '1-2', label: '₹1-2 Lakhs' },
+                                    { id: '2-5', label: '₹2-5 Lakhs' },
+                                    { id: '5+', label: '₹5+ Lakhs' },
+                                ].map((opt) => (
+                                    <TouchableOpacity
+                                        key={opt.id}
+                                        style={[
+                                            styles.priceChip,
+                                            { backgroundColor: theme.inputBackground, borderColor: theme.border },
+                                            budget === opt.label && { backgroundColor: colors.primary + '22', borderColor: colors.primary }
+                                        ]}
+                                        onPress={() => setBudget(budget === opt.label ? '' : opt.label)}
+                                    >
+                                        <Text style={[
+                                            styles.priceChipText,
+                                            { color: theme.text },
+                                            budget === opt.label && { color: colors.primary, fontWeight: '700' }
+                                        ]}>{opt.label}</Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
                             <TextInput
-                                style={[styles.input, { backgroundColor: theme.inputBackground, color: theme.text, borderColor: theme.border }]}
-                                placeholder="e.g., ₹1-2 Lakhs, ₹5+ Lakhs"
+                                style={[styles.input, { marginTop: 10, backgroundColor: theme.inputBackground, color: theme.text, borderColor: theme.border }]}
+                                placeholder="Or type custom range (e.g., ₹3 Lakhs)"
                                 placeholderTextColor={theme.textLight}
                                 value={budget}
                                 onChangeText={setBudget}
@@ -373,6 +397,21 @@ const styles = StyleSheet.create({
     roleOptions: {
         flexDirection: 'row',
         gap: 12,
+    },
+    priceOptionsRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 10,
+    },
+    priceChip: {
+        paddingHorizontal: 14,
+        paddingVertical: 10,
+        borderRadius: 12,
+        borderWidth: 1.5,
+    },
+    priceChipText: {
+        fontSize: 13,
+        fontWeight: '500',
     },
     roleChip: {
         paddingHorizontal: 20,

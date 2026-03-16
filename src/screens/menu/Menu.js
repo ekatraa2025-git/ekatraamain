@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
+import BottomTabBar from '../../components/BottomTabBar';
 
 export default function Menu({ navigation }) {
     const { isDarkMode, toggleTheme, theme } = useTheme();
@@ -61,7 +62,7 @@ export default function Menu({ navigation }) {
     const borderStyle = { borderBottomColor: theme.border };
 
     return (
-        <SafeAreaView style={containerStyle}>
+        <SafeAreaView style={containerStyle} edges={['top', 'left', 'right']}>
             <View style={[styles.header, borderStyle]}>
                 <Text style={[styles.title, textStyle]}>Menu</Text>
                 <TouchableOpacity onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.replace('Home')} style={styles.closeBtn}>
@@ -92,7 +93,7 @@ export default function Menu({ navigation }) {
                         </View>
                     </View>
                 ) : (
-                    <TouchableOpacity 
+                    <TouchableOpacity
                         style={styles.loginPrompt}
                         onPress={() => navigation.navigate('Login')}
                     >
@@ -132,24 +133,40 @@ export default function Menu({ navigation }) {
                     <Ionicons name="chevron-forward" size={20} color={theme.textLight} />
                 </TouchableOpacity>
 
-                <TouchableOpacity style={[styles.menuItem, borderStyle]} onPress={() => navigation.navigate('MyBookings')}>
+                <TouchableOpacity style={[styles.menuItem, borderStyle]} onPress={() => navigation.navigate('MyOrders')}>
                     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        <Ionicons name="calendar-outline" size={22} color={theme.text} style={{ marginRight: 10 }} />
-                        <Text style={[styles.menuText, textStyle]}>My Bookings</Text>
+                        <Ionicons name="receipt-outline" size={22} color={theme.text} style={{ marginRight: 10 }} />
+                        <Text style={[styles.menuText, textStyle]}>My Orders</Text>
                     </View>
                     <Ionicons name="chevron-forward" size={20} color={theme.textLight} />
                 </TouchableOpacity>
 
-                <TouchableOpacity style={[styles.menuItem, borderStyle]} onPress={() => navigation.navigate('MyEnquiries')}>
+                <TouchableOpacity style={[styles.menuItem, borderStyle]} onPress={() => navigation.navigate('GuestManage')}>
                     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        <Ionicons name="chatbubbles-outline" size={22} color={theme.text} style={{ marginRight: 10 }} />
-                        <Text style={[styles.menuText, textStyle]}>My Enquiries</Text>
+                        <Ionicons name="people-outline" size={22} color={theme.text} style={{ marginRight: 10 }} />
+                        <Text style={[styles.menuText, textStyle]}>Guest Manager</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={20} color={theme.textLight} />
+                </TouchableOpacity>
+
+                <TouchableOpacity style={[styles.menuItem, borderStyle]} onPress={() => navigation.navigate('HelpSupport')}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <Ionicons name="help-circle-outline" size={22} color={theme.text} style={{ marginRight: 10 }} />
+                        <Text style={[styles.menuText, textStyle]}>Help & Support</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={20} color={theme.textLight} />
+                </TouchableOpacity>
+
+                <TouchableOpacity style={[styles.menuItem, borderStyle]} onPress={() => navigation.navigate('About')}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <Ionicons name="information-circle-outline" size={22} color={theme.text} style={{ marginRight: 10 }} />
+                        <Text style={[styles.menuText, textStyle]}>About</Text>
                     </View>
                     <Ionicons name="chevron-forward" size={20} color={theme.textLight} />
                 </TouchableOpacity>
             </ScrollView>
 
-            {/* Footer */}
+            {/* Footer actions */}
             <View style={[styles.footer, { borderTopColor: theme.border }]}>
                 {isAuthenticated ? (
                     <TouchableOpacity onPress={handleLogout} style={[styles.logoutBtn, { backgroundColor: isDarkMode ? '#330010' : '#FFF0F5' }]}>
@@ -164,6 +181,7 @@ export default function Menu({ navigation }) {
                 )}
                 <Text style={styles.version}>v1.0.0</Text>
             </View>
+            <BottomTabBar navigation={navigation} activeRoute="Menu" />
         </SafeAreaView>
     );
 }
