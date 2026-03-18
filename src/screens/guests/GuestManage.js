@@ -395,7 +395,7 @@ export default function GuestManage({ navigation }) {
     const renderInviteTab = () => (
         <ScrollView contentContainerStyle={styles.inviteScroll} showsVerticalScrollIndicator={false}>
             <LinearGradient
-                colors={isDarkMode ? ['#1A1A2E', '#16213E'] : ['#FFF5F2', '#FFF0EB']}
+                colors={isDarkMode ? ['#181B25', '#1A1D27'] : ['#FFF8F0', '#FFF3E6']}
                 style={styles.inviteCard}
             >
                 <View style={styles.inviteHeaderRow}>
@@ -688,7 +688,7 @@ export default function GuestManage({ navigation }) {
                     style={styles.fab}
                     onPress={() => activeTab === 'Guests' ? setShowAddGuest(true) : setShowAddGift(true)}
                 >
-                    <LinearGradient colors={[colors.primary, '#FF7700']} style={styles.fabGradient}>
+                    <LinearGradient colors={[colors.primary, '#FFA040']} style={styles.fabGradient}>
                         <Ionicons name="add" size={28} color="#FFF" />
                     </LinearGradient>
                 </TouchableOpacity>
@@ -968,7 +968,7 @@ const styles = StyleSheet.create({
     previewMessage: { fontSize: 13, color: '#5C4318', fontStyle: 'italic', textAlign: 'center', marginTop: 10, lineHeight: 20 },
     previewFooter: { fontSize: 12, color: '#8B6914', marginTop: 14, fontWeight: '500' },
     previewBrand: { flexDirection: 'row', alignItems: 'center', marginTop: 16, gap: 6 },
-    previewBrandDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#FF4117' },
+    previewBrandDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#FF7A00' },
     previewBrandText: { fontSize: 10, color: '#999', fontWeight: '600' },
     shareActions: { gap: 10, marginBottom: 16 },
     shareBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 15, borderRadius: 14 },

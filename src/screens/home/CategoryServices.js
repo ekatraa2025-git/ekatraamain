@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
     View, Text, StyleSheet, ScrollView, Image,
     TouchableOpacity, TextInput, Alert, ActivityIndicator,
-    Dimensions, Animated, LayoutAnimation, UIManager, Platform,
+    Dimensions, Animated, LayoutAnimation, Platform,
     Modal, Linking, KeyboardAvoidingView,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -19,21 +19,18 @@ import { supabase, resolveStorageUrl } from '../../services/supabase';
 import { useCart } from '../../context/CartContext';
 import BottomTabBar from '../../components/BottomTabBar';
 
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-    UIManager.setLayoutAnimationEnabledExperimental(true);
-}
 
 const { width } = Dimensions.get('window');
 const TIER_KEYS = ['price_basic', 'price_classic_value', 'price_signature', 'price_prestige', 'price_royal', 'price_imperial'];
 const TIER_LABELS = ['Basic', 'Classic Value', 'Signature', 'Prestige', 'Royal', 'Imperial'];
 const TIER_QTY_KEYS = ['qty_label_basic', 'qty_label_classic_value', 'qty_label_signature', 'qty_label_prestige', 'qty_label_royal', 'qty_label_imperial'];
 const TIER_GUESTS_DEFAULT = ['Upto 100', 'Upto 300', 'Upto 500', '500-1000', '1000+', '1500+'];
-const TIER_COLORS = ['#4ECDC4', '#45B7D1', '#FF6B6B', '#DDA0DD', '#FFD700', '#A78BFA'];
+const TIER_COLORS = ['#10B981', '#3B82F6', '#FF7A00', '#8B5CF6', '#F59E0B', '#EC4899'];
 const BUDGET_OPTIONS = [
     '6-10 Lakhs', '11-15 Lakhs', '16-20 Lakhs',
     '21-30 Lakhs', '30 Lakhs+', '50 Lakhs+',
 ];
-const SECTION_COLORS = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#FF9FF3', '#54A0FF'];
+const SECTION_COLORS = ['#FF7A00', '#1E3A8A', '#10B981', '#8B5CF6', '#F59E0B', '#EC4899', '#06B6D4', '#14B8A6'];
 
 export default function CategoryServices({ route, navigation }) {
     const { theme, isDarkMode } = useTheme();
@@ -297,7 +294,7 @@ export default function CategoryServices({ route, navigation }) {
             {/* Header */}
             <View style={[styles.header, { backgroundColor: theme.card, borderBottomColor: theme.border }]}>
                 <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-                    <View style={[styles.backBtnCircle, { backgroundColor: isDarkMode ? '#333' : '#F5F5F5' }]}>
+                    <View style={[styles.backBtnCircle, { backgroundColor: isDarkMode ? '#2D3142' : '#F3F4F6' }]}>
                         <Ionicons name="arrow-back" size={20} color={theme.text} />
                     </View>
                 </TouchableOpacity>
@@ -330,7 +327,7 @@ export default function CategoryServices({ route, navigation }) {
                 </View>
             ) : allServices.length === 0 ? (
                 <View style={styles.emptyWrap}>
-                    <View style={[styles.emptyIcon, { backgroundColor: isDarkMode ? '#1F1F2F' : '#FFF5F2' }]}>
+                    <View style={[styles.emptyIcon, { backgroundColor: isDarkMode ? '#1A1D27' : '#FFF8F0' }]}>
                         <Ionicons name="search-outline" size={40} color={colors.primary} />
                     </View>
                     <Text style={[styles.emptyTitle, { color: theme.text }]}>No services available</Text>
@@ -338,7 +335,7 @@ export default function CategoryServices({ route, navigation }) {
                         We haven't added services for this selection yet. Check back soon!
                     </Text>
                     <TouchableOpacity style={styles.emptyBtn} onPress={() => navigation.goBack()}>
-                        <LinearGradient colors={[colors.primary, '#FF7700']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.emptyBtnGradient}>
+                        <LinearGradient colors={[colors.primary, '#FFA040']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.emptyBtnGradient}>
                             <Ionicons name="arrow-back" size={18} color="#FFF" />
                             <Text style={styles.emptyBtnText}>Go Back</Text>
                         </LinearGradient>
@@ -379,7 +376,7 @@ export default function CategoryServices({ route, navigation }) {
                                     </Text>
                                 </View>
                             </View>
-                            <View style={[styles.chevronWrap, { backgroundColor: isDarkMode ? '#333' : '#F5F5F5' }]}>
+                            <View style={[styles.chevronWrap, { backgroundColor: isDarkMode ? '#2D3142' : '#F3F4F6' }]}>
                                 <Ionicons name={formVisible ? 'chevron-up' : 'chevron-down'} size={18} color={theme.textLight} />
                             </View>
                         </TouchableOpacity>
@@ -398,7 +395,7 @@ export default function CategoryServices({ route, navigation }) {
                                                 key={role}
                                                 style={[
                                                     styles.roleChip,
-                                                    { backgroundColor: isDarkMode ? '#2A2A2A' : '#FFF', borderColor: theme.border },
+                                                    { backgroundColor: isDarkMode ? '#252840' : '#FFF', borderColor: theme.border },
                                                     form.role === role && { backgroundColor: colors.primary, borderColor: colors.primary },
                                                 ]}
                                                 onPress={() => setForm(p => ({ ...p, role }))}
@@ -417,7 +414,7 @@ export default function CategoryServices({ route, navigation }) {
                                 <View style={styles.formRow}>
                                     <View style={styles.formCol}>
                                         <Text style={[styles.formLabel, { color: theme.textLight }]}>Name *</Text>
-                                        <View style={[styles.inputWrap, { backgroundColor: isDarkMode ? '#1A1A1A' : '#FFF', borderColor: theme.border }]}>
+                                        <View style={[styles.inputWrap, { backgroundColor: isDarkMode ? '#1F2333' : '#FFF', borderColor: theme.border }]}>
                                             <Ionicons name="person-outline" size={16} color={theme.textLight} />
                                             <TextInput
                                                 style={[styles.input, { color: theme.text }]}
@@ -430,7 +427,7 @@ export default function CategoryServices({ route, navigation }) {
                                     </View>
                                     <View style={styles.formCol}>
                                         <Text style={[styles.formLabel, { color: theme.textLight }]}>Phone *</Text>
-                                        <View style={[styles.inputWrap, { backgroundColor: isDarkMode ? '#1A1A1A' : '#FFF', borderColor: theme.border }]}>
+                                        <View style={[styles.inputWrap, { backgroundColor: isDarkMode ? '#1F2333' : '#FFF', borderColor: theme.border }]}>
                                             <Ionicons name="call-outline" size={16} color={theme.textLight} />
                                             <TextInput
                                                 style={[styles.input, { color: theme.text }]}
@@ -448,7 +445,7 @@ export default function CategoryServices({ route, navigation }) {
                                 <View style={styles.formRow}>
                                     <View style={styles.formCol}>
                                         <Text style={[styles.formLabel, { color: theme.textLight }]}>Email</Text>
-                                        <View style={[styles.inputWrap, { backgroundColor: isDarkMode ? '#1A1A1A' : '#FFF', borderColor: theme.border }]}>
+                                        <View style={[styles.inputWrap, { backgroundColor: isDarkMode ? '#1F2333' : '#FFF', borderColor: theme.border }]}>
                                             <Ionicons name="mail-outline" size={16} color={theme.textLight} />
                                             <TextInput
                                                 style={[styles.input, { color: theme.text }]}
@@ -463,7 +460,7 @@ export default function CategoryServices({ route, navigation }) {
                                     <View style={styles.formCol}>
                                         <Text style={[styles.formLabel, { color: theme.textLight }]}>Event Date</Text>
                                         <TouchableOpacity
-                                            style={[styles.inputWrap, { backgroundColor: isDarkMode ? '#1A1A1A' : '#FFF', borderColor: theme.border }]}
+                                            style={[styles.inputWrap, { backgroundColor: isDarkMode ? '#1F2333' : '#FFF', borderColor: theme.border }]}
                                             onPress={() => setShowDatePicker(true)}
                                             activeOpacity={0.7}
                                         >
@@ -495,7 +492,7 @@ export default function CategoryServices({ route, navigation }) {
                                 {/* Guests */}
                                 <View style={styles.formGroup}>
                                     <Text style={[styles.formLabel, { color: theme.textLight }]}>Guests</Text>
-                                    <View style={[styles.inputWrap, { backgroundColor: isDarkMode ? '#1A1A1A' : '#FFF', borderColor: theme.border }]}>
+                                    <View style={[styles.inputWrap, { backgroundColor: isDarkMode ? '#1F2333' : '#FFF', borderColor: theme.border }]}>
                                         <Ionicons name="people-outline" size={16} color={theme.textLight} />
                                         <TextInput
                                             style={[styles.input, { color: theme.text }]}
@@ -517,7 +514,7 @@ export default function CategoryServices({ route, navigation }) {
                                                 key={opt}
                                                 style={[
                                                     styles.roleChip,
-                                                    { backgroundColor: isDarkMode ? '#2A2A2A' : '#FFF', borderColor: theme.border },
+                                                    { backgroundColor: isDarkMode ? '#252840' : '#FFF', borderColor: theme.border },
                                                     form.venue_preference === opt && { backgroundColor: colors.primary, borderColor: colors.primary },
                                                 ]}
                                                 onPress={() => setForm(p => ({ ...p, venue_preference: opt }))}
@@ -578,7 +575,7 @@ export default function CategoryServices({ route, navigation }) {
                                             <Text style={[styles.locationActionText, { color: theme.text }]}>Select on Map</Text>
                                         </TouchableOpacity>
                                     </View>
-                                    <View style={[styles.inputWrap, { backgroundColor: isDarkMode ? '#1A1A1A' : '#FFF', borderColor: theme.border, marginTop: 8 }]}>
+                                    <View style={[styles.inputWrap, { backgroundColor: isDarkMode ? '#1F2333' : '#FFF', borderColor: theme.border, marginTop: 8 }]}>
                                         <Ionicons name="location-outline" size={16} color={theme.textLight} />
                                         <TextInput
                                             style={[styles.input, { color: theme.text }]}
@@ -600,7 +597,7 @@ export default function CategoryServices({ route, navigation }) {
                                                     <Ionicons name="close" size={24} color={theme.text} />
                                                 </TouchableOpacity>
                                             </View>
-                                            <View style={[styles.mapSearchWrap, { backgroundColor: isDarkMode ? '#1A1A1A' : '#FFF', borderColor: theme.border }]}>
+                                            <View style={[styles.mapSearchWrap, { backgroundColor: isDarkMode ? '#1F2333' : '#FFF', borderColor: theme.border }]}>
                                                 <Ionicons name="search-outline" size={18} color={theme.textLight} />
                                                 <TextInput
                                                     style={[styles.mapSearchInput, { color: theme.text }]}
@@ -661,7 +658,7 @@ export default function CategoryServices({ route, navigation }) {
                                                 key={opt}
                                                 style={[
                                                     styles.budgetChip,
-                                                    { backgroundColor: isDarkMode ? '#2A2A2A' : '#FFF', borderColor: theme.border },
+                                                    { backgroundColor: isDarkMode ? '#252840' : '#FFF', borderColor: theme.border },
                                                     form.planned_budget === opt && { backgroundColor: colors.primary, borderColor: colors.primary },
                                                 ]}
                                                 onPress={() => setForm(p => ({ ...p, planned_budget: opt }))}
@@ -748,7 +745,7 @@ export default function CategoryServices({ route, navigation }) {
                                                     {/* Selection indicator */}
                                                     <View style={[
                                                         styles.selectCircle,
-                                                        { borderColor: isSelected ? colors.primary : (isDarkMode ? '#555' : '#D0D0D0') },
+                                                        { borderColor: isSelected ? colors.primary : (isDarkMode ? '#4B5563' : '#D1D5DB') },
                                                         isSelected && { backgroundColor: colors.primary, borderColor: colors.primary },
                                                     ]}>
                                                         {isSelected && <Ionicons name="checkmark" size={16} color="#FFF" />}
@@ -766,7 +763,7 @@ export default function CategoryServices({ route, navigation }) {
                                                                     key={tier.key}
                                                                     style={[
                                                                         styles.tierOption,
-                                                                        { backgroundColor: isDarkMode ? '#1A1A2E' : '#FAFAFA', borderColor: isDarkMode ? '#333' : '#EEE' },
+                                                                        { backgroundColor: isDarkMode ? '#1A1D27' : '#FAFAFA', borderColor: isDarkMode ? '#2D3142' : '#E5E7EB' },
                                                                         isTierSelected && { backgroundColor: colors.primary + '0A', borderColor: colors.primary },
                                                                     ]}
                                                                     onPress={() => selectTier(item.id, tier.key, tier.value)}
@@ -774,7 +771,7 @@ export default function CategoryServices({ route, navigation }) {
                                                                 >
                                                                     <View style={[
                                                                         styles.tierRadioOuter,
-                                                                        { borderColor: isTierSelected ? colors.primary : (isDarkMode ? '#555' : '#CCC') },
+                                                                        { borderColor: isTierSelected ? colors.primary : (isDarkMode ? '#4B5563' : '#D1D5DB') },
                                                                     ]}>
                                                                         {isTierSelected && <View style={[styles.tierRadioInner, { backgroundColor: colors.primary }]} />}
                                                                     </View>
@@ -844,7 +841,7 @@ export default function CategoryServices({ route, navigation }) {
                                 <ActivityIndicator color="#FFF" size="small" />
                             ) : (
                                 <LinearGradient
-                                    colors={selectedServices.size > 0 ? [colors.primary, '#FF6B35'] : ['#9CA3AF', '#6B7280']}
+                                    colors={selectedServices.size > 0 ? [colors.primary, '#FFA040'] : ['#9CA3AF', '#6B7280']}
                                     start={{ x: 0, y: 0 }}
                                     end={{ x: 1, y: 0 }}
                                     style={styles.addToCartGradient}
@@ -1156,7 +1153,7 @@ const styles = StyleSheet.create({
         paddingVertical: 14,
         borderWidth: 1,
         borderRadius: 20,
-        shadowColor: '#FF4117',
+        shadowColor: colors.primary,
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.25,
         shadowRadius: 12,

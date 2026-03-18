@@ -1,70 +1,69 @@
-// eKatRaa brand colors from logo
-// Primary gradient: #FF0000 → #FF7700 (red to orange)
-// Accent: #FF4117 (eKatRaa red-orange)
-// Secondary: #918F8F (gray)
+// eKatRaa brand colors — refreshed palette
+// Primary Orange: #FF7A00
+// Secondary Blue: #1E3A8A
 
 const light = {
-    primary: '#FF4117',          // eKatRaa red-orange from logo
-    primaryGradientStart: '#FF0000',
-    primaryGradientEnd: '#FF7700',
-    secondary: '#FF7700',        // Orange from gradient
-    accent: '#918F8F',           // Gray from logo
-    background: '#FFFFFF',
-    surface: '#FFF8F5',          // Light warm tint
+    primary: '#FF7A00',
+    primaryGradientStart: '#FF7A00',
+    primaryGradientEnd: '#FFA040',
+    secondary: '#1E3A8A',
+    accent: '#3B82F6',
+    background: '#F7F8FA',
+    surface: '#FFFFFF',
     text: '#1F2937',
     textLight: '#6B7280',
-    inputBackground: '#FFF5F2',  // Light orange tint
-    border: '#FFE5DC',           // Light orange border
+    inputBackground: '#F3F4F6',
+    border: '#E5E7EB',
     card: '#FFFFFF',
-    cardBorder: '#FFDDD0',
+    cardBorder: '#E5E7EB',
     error: '#DC2626',
     success: '#10B981',
     warning: '#F59E0B',
     white: '#FFFFFF',
     black: '#000000',
-    overlay: 'rgba(0,0,0,0.5)',
-    gradientStart: '#FF4117',
-    gradientMiddle: '#FF6B35',
-    gradientEnd: '#FF8C42',
+    overlay: 'rgba(0,0,0,0.4)',
+    gradientStart: '#FF7A00',
+    gradientMiddle: '#FF9A33',
+    gradientEnd: '#FFA040',
 };
 
 const dark = {
-    primary: '#FF5733',          // Slightly lighter for dark mode
-    primaryGradientStart: '#FF3333',
-    primaryGradientEnd: '#FF8800',
-    secondary: '#FF9500',
-    accent: '#A0A0A0',
-    background: '#0F0F0F',
-    surface: '#1A1A1A',
+    primary: '#FF8C1A',
+    primaryGradientStart: '#FF8C1A',
+    primaryGradientEnd: '#FFB060',
+    secondary: '#3B82F6',
+    accent: '#60A5FA',
+    background: '#0F1117',
+    surface: '#1A1D27',
     text: '#F9FAFB',
     textLight: '#9CA3AF',
-    inputBackground: '#262626',
-    border: '#3D3D3D',
-    card: '#1F1F1F',
-    cardBorder: '#333333',
+    inputBackground: '#1F2333',
+    border: '#2D3142',
+    card: '#181B25',
+    cardBorder: '#2D3142',
     error: '#EF4444',
     success: '#34D399',
     warning: '#FBBF24',
     white: '#FFFFFF',
     black: '#000000',
-    overlay: 'rgba(0,0,0,0.7)',
-    gradientStart: '#FF4117',
-    gradientMiddle: '#FF6B35',
-    gradientEnd: '#FF8C42',
+    overlay: 'rgba(0,0,0,0.6)',
+    gradientStart: '#FF8C1A',
+    gradientMiddle: '#FF9A33',
+    gradientEnd: '#FFB060',
 };
 
 export const colors = {
-    ...light, // Backward compatibility
+    ...light,
     light,
     dark,
 };
 
-// Gradient presets
 export const gradients = {
-    primary: ['#FF0000', '#FF4117', '#FF7700'],
-    warm: ['#FF4117', '#FF6B35', '#FF8C42'],
-    sunset: ['#FF4117', '#FF7700', '#FFB347'],
-    splash: ['#FF4117', '#FF5722', '#FF7043'],
-    card: ['#FFFFFF', '#FFF8F5'],
-    darkCard: ['#1F1F1F', '#1A1A1A'],
+    primary: ['#FF7A00', '#FFA040'],
+    warm: ['#FF7A00', '#FF9A33', '#FFA040'],
+    sunset: ['#FF7A00', '#FFA040', '#FFD180'],
+    splash: ['#1E3A8A', '#3B82F6'],
+    card: ['#FFFFFF', '#F7F8FA'],
+    darkCard: ['#181B25', '#1A1D27'],
+    blue: ['#1E3A8A', '#2563EB', '#3B82F6'],
 };

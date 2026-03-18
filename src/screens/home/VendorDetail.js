@@ -193,7 +193,7 @@ export default function VendorDetail({ route, navigation }) {
             <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
                 {/* Vendor Header Card */}
                 <LinearGradient
-                    colors={['#FF4117', '#FF6B35', '#FF8C42']}
+                    colors={['#FF7A00', '#FF9A33', '#FFA040']}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 1 }}
                     style={styles.vendorHeader}
@@ -318,7 +318,7 @@ export default function VendorDetail({ route, navigation }) {
             <View style={[styles.bottomBar, { backgroundColor: theme.card, borderTopColor: theme.border }]}>
                 <TouchableOpacity style={styles.enquireBtn} onPress={() => setEnquiryVisible(true)}>
                     <LinearGradient
-                        colors={['#FF4117', '#FF6B35']}
+                        colors={['#FF7A00', '#FFA040']}
                         start={{ x: 0, y: 0 }}
                         end={{ x: 1, y: 0 }}
                         style={styles.enquireBtnGradient}

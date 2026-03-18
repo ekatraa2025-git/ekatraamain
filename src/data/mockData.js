@@ -1,7 +1,7 @@
 export const CITIES = ['Bhubaneswar, Odisha', 'Guwahati, Assam', 'Kolkata, West Bengal'];
 
 export const EVENT_TYPES = [
-    { id: 'all', name: 'All', icon: '🎉', color: '#FF4117' },
+    { id: 'all', name: 'All', icon: '🎉', color: '#FF7A00' },
     { id: 'wedding', name: 'Wedding (Groom/Bride)', icon: '💒', color: '#EC4899' },
     { id: 'janayu', name: 'Janayu / Thread', icon: '🕉️', color: '#8B5CF6' },
     { id: 'social', name: 'Social Gathering', icon: '🎊', color: '#10B981' },

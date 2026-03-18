@@ -60,7 +60,7 @@ export default function Splash({ navigation }) {
 
     return (
         <LinearGradient
-            colors={['#FF4117', '#FF5722', '#FF7043', '#FF8A65']}
+            colors={['#FF7A00', '#FFA040']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.container}

@@ -18,7 +18,9 @@ import { AnimatedBackground } from '../../components/AnimatedBackground';
 import { dbService, resolveStorageUrl } from '../../services/supabase';
 import { api, useBackendApi } from '../../services/api';
 import { useCart } from '../../context/CartContext';
+import { useAppData } from '../../context/AppDataContext';
 import BottomTabBar from '../../components/BottomTabBar';
+import Logo from '../../components/Logo';
 
 const { width } = Dimensions.get('window');
 const OCCASION_CARD_GAP = 12;
@@ -35,6 +37,7 @@ export default function Home({ navigation }) {
     const [locationPickerVisible, setLocationPickerVisible] = useState(false);
     const [currentCity, setCurrentCity] = useState('Bhubaneswar');
     const { cartId, cartItemCount, refreshCartCount: refreshGlobalCartCount } = useCart();
+    const { getOccasions, getBanners, getCategories: getCachedCategories, invalidateCache } = useAppData();
     const [categories, setCategories] = useState([]);
     const [categoriesLoading, setCategoriesLoading] = useState(false);
     const [selectedCategories, setSelectedCategories] = useState(new Set());
@@ -86,23 +89,15 @@ export default function Home({ navigation }) {
         }
         const loadCategories = async () => {
             setCategoriesLoading(true);
-            let cats = [];
             try {
-                if (useApi) {
-                    const { data } = await api.getCategories(selectedType);
-                    cats = Array.isArray(data) ? data : [];
-                }
-                if (cats.length === 0) {
-                    const { data } = await dbService.getCategoriesByOccasion(selectedType);
-                    cats = Array.isArray(data) ? data : [];
-                }
-                const resolved = await Promise.all(cats.map(async (cat) => ({
+                const cats = await getCachedCategories(selectedType);
+                const resolved = await Promise.all((cats || []).map(async (cat) => ({
                     ...cat,
                     icon_url: await resolveStorageUrl(cat.icon_url),
                 })));
                 setCategories(resolved);
                 setSelectedCategories(new Set());
-                if (cats.length > 0) {
+                if (resolved.length > 0) {
                     Animated.spring(categoryAnim, { toValue: 1, tension: 60, friction: 10, useNativeDriver: false }).start();
                 }
             } catch (e) {
@@ -120,44 +115,20 @@ export default function Home({ navigation }) {
         }, [refreshGlobalCartCount])
     );
 
-    const fetchData = async () => {
+    const fetchData = async (forceRefresh = false) => {
         setLoading(true);
         try {
-            if (useApi) {
-                const [bannerRes, occasionsRes] = await Promise.all([
-                    api.getBanners(),
-                    api.getOccasions(),
-                ]);
-                if (Array.isArray(bannerRes.data)) setBanners(bannerRes.data);
-                if (occasionsRes.data?.length) {
-                    const filtered = occasionsRes.data.filter(t => t.id !== 'all' && t.id !== 'others');
-                    setEventTypes(filtered.length ? filtered : occasionsRes.data);
-                } else {
-                    const { data: eventTypesData } = await api.getEventTypes();
-                    if (eventTypesData?.length) {
-                        const filtered = eventTypesData.filter(t => t.id !== 'all');
-                        setEventTypes(filtered.length ? filtered : eventTypesData);
-                    } else setEventTypes(MOCK_EVENT_TYPES);
-                }
+            const [cachedOccasions, cachedBanners] = await Promise.all([
+                getOccasions(forceRefresh),
+                getBanners(forceRefresh),
+            ]);
+            if (cachedOccasions?.length) {
+                setEventTypes(cachedOccasions);
             } else {
-                const [bannerRes, occasionsRes] = await Promise.all([
-                    dbService.getBanners(),
-                    dbService.getOccasions(),
-                ]);
-                if (bannerRes.data?.length) setBanners(bannerRes.data);
-                if (occasionsRes.data?.length) {
-                    const filtered = occasionsRes.data.filter(t => t.id !== 'all' && t.id !== 'others');
-                    setEventTypes(filtered.length ? filtered : occasionsRes.data);
-                } else {
-                    const { data: eventTypesFromDb } = await dbService.getEventTypes();
-                    if (eventTypesFromDb?.length) {
-                        const filtered = eventTypesFromDb.filter(t => t.id !== 'all');
-                        setEventTypes(filtered.length ? filtered : eventTypesFromDb);
-                    } else {
-                        const mockFiltered = MOCK_EVENT_TYPES.filter(t => t.id !== 'all');
-                        setEventTypes(mockFiltered.length ? mockFiltered : MOCK_EVENT_TYPES);
-                    }
-                }
+                setEventTypes(MOCK_EVENT_TYPES);
+            }
+            if (cachedBanners?.length) {
+                setBanners(cachedBanners);
             }
 
             const { data: cityData } = await dbService.getCities();
@@ -174,7 +145,8 @@ export default function Home({ navigation }) {
 
     const onRefresh = useCallback(async () => {
         setRefreshing(true);
-        await fetchData();
+        invalidateCache();
+        await fetchData(true);
         setRefreshing(false);
     }, [currentCity, selectedType]);
 
@@ -229,7 +201,7 @@ export default function Home({ navigation }) {
     const primaryOccasions = eventTypes.filter((t) => primaryOccasionIds.has(t.id)).slice(0, 2);
     const otherOccasions = eventTypes.filter((t) => !primaryOccasionIds.has(t.id));
     const selectedInOthers = !!selectedType && otherOccasions.some((t) => t.id === selectedType);
-    const catColors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8', '#F7DC6F', '#FF9FF3', '#54A0FF'];
+    const catColors = ['#FF7A00', '#1E3A8A', '#10B981', '#8B5CF6', '#F59E0B', '#EC4899', '#06B6D4', '#EF4444', '#14B8A6', '#6366F1'];
 
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top', 'left', 'right']}>
@@ -241,20 +213,37 @@ export default function Home({ navigation }) {
                         <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} colors={[colors.primary]} />
                     }
                 >
-                    {/* Header - Clean, no menu button */}
+                    {/* Header */}
                     <View style={styles.header}>
-                        <TouchableOpacity onPress={() => setLocationPickerVisible(true)} style={styles.locationBtn}>
-                            <View style={[styles.locationIcon, { backgroundColor: colors.primary + '15' }]}>
-                                <Ionicons name="location" size={18} color={colors.primary} />
+                        <View style={styles.headerLeft}>
+                            <View style={styles.logoWrap}>
+                                <Logo width={32} height={32} />
                             </View>
-                            <View>
-                                <Text style={[styles.locationLabel, { color: theme.textLight }]}>Your Location</Text>
-                                <View style={styles.locationRow}>
-                                    <Text style={[styles.locationValue, { color: theme.text }]}>{locationName}</Text>
-                                    <Ionicons name="chevron-down" size={16} color={theme.textLight} style={{ marginLeft: 4 }} />
+                            <TouchableOpacity onPress={() => setLocationPickerVisible(true)} style={styles.locationBtn}>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={[styles.locationLabel, { color: theme.textLight }]}>Your Location</Text>
+                                    <View style={styles.locationRow}>
+                                        <Ionicons name="location" size={14} color={colors.primary} />
+                                        <Text style={[styles.locationValue, { color: theme.text }]}>{locationName}</Text>
+                                        <Ionicons name="chevron-down" size={14} color={theme.textLight} style={{ marginLeft: 2 }} />
+                                    </View>
                                 </View>
-                            </View>
-                        </TouchableOpacity>
+                            </TouchableOpacity>
+                        </View>
+                        <View style={styles.headerActions}>
+                            <TouchableOpacity
+                                style={[styles.headerIconBtn, { backgroundColor: isDarkMode ? '#1F2333' : '#F3F4F6' }]}
+                                onPress={() => navigation.navigate('Cart')}
+                                activeOpacity={0.7}
+                            >
+                                <Ionicons name="cart-outline" size={22} color={theme.text} />
+                                {cartItemCount > 0 && (
+                                    <View style={[styles.cartBadge, { backgroundColor: colors.primary }]}>
+                                        <Text style={styles.cartBadgeText}>{cartItemCount > 99 ? '99+' : cartItemCount}</Text>
+                                    </View>
+                                )}
+                            </TouchableOpacity>
+                        </View>
                     </View>
 
                     {/* Location Picker Modal */}
@@ -347,10 +336,10 @@ export default function Home({ navigation }) {
                             <View style={styles.occasionGrid}>
                                 {[1, 2, 3].map(i => (
                                     <View key={i} style={[styles.occasionCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
-                                        <View style={[styles.occasionIconWrap, { backgroundColor: isDarkMode ? '#2A2A2A' : '#F5F5F5' }]}>
+                                        <View style={[styles.occasionIconWrap, { backgroundColor: isDarkMode ? '#252840' : '#F3F4F6' }]}>
                                             <ActivityIndicator size="small" color={colors.primary} />
                                         </View>
-                                        <View style={{ width: 60, height: 12, borderRadius: 6, backgroundColor: isDarkMode ? '#333' : '#E8E8E8' }} />
+                                        <View style={{ width: 60, height: 12, borderRadius: 6, backgroundColor: isDarkMode ? '#2D3142' : '#E5E7EB' }} />
                                     </View>
                                 ))}
                             </View>
@@ -381,7 +370,7 @@ export default function Home({ navigation }) {
                                                 )}
                                                 <View style={[
                                                     styles.occasionIconWrap,
-                                                    { backgroundColor: isSelected ? typeColor + '25' : (isDarkMode ? '#2A2A2A' : '#F5F5F5') },
+                                                    { backgroundColor: isSelected ? typeColor + '25' : (isDarkMode ? '#252840' : '#F3F4F6') },
                                                 ]}>
                                                     {type.image_url ? (
                                                         <Image source={{ uri: type.image_url }} style={styles.occasionIconImg} resizeMode="cover" />
@@ -456,7 +445,7 @@ export default function Home({ navigation }) {
                                                     )}
                                                     <View style={[
                                                         styles.occasionIconWrap,
-                                                        { backgroundColor: isSelected ? typeColor + '25' : (isDarkMode ? '#2A2A2A' : '#F5F5F5') },
+                                                        { backgroundColor: isSelected ? typeColor + '25' : (isDarkMode ? '#252840' : '#F3F4F6') },
                                                     ]}>
                                                         {type.image_url ? (
                                                             <Image source={{ uri: type.image_url }} style={styles.occasionIconImg} resizeMode="cover" />
@@ -487,7 +476,7 @@ export default function Home({ navigation }) {
                     {selectedType && categoriesLoading && (
                         <View style={[styles.categorySection, { marginHorizontal: 16, marginBottom: 28 }]}>
                             <LinearGradient
-                                colors={isDarkMode ? ['#1A1A2E', '#16213E'] : ['#FFF5F2', '#FFF0EB']}
+                                colors={isDarkMode ? ['#181B25', '#1A1D27'] : ['#FFF8F0', '#FFF3E6']}
                                 style={styles.categorySectionBg}
                                 start={{ x: 0, y: 0 }}
                                 end={{ x: 1, y: 1 }}
@@ -496,11 +485,11 @@ export default function Home({ navigation }) {
                                 <Text style={[styles.categorySubtitle, { color: theme.textLight, marginBottom: 20 }]}>Loading categories...</Text>
                                 <View style={styles.categoryLoaderRow}>
                                     {[1, 2, 3, 4].map(i => (
-                                        <View key={i} style={[styles.categoryBox, { backgroundColor: isDarkMode ? '#1F1F2F' : '#FFFFFF', borderColor: isDarkMode ? '#333' : '#F0E6E2', width: 100 }]}>
-                                            <View style={[styles.categoryIconBox, { backgroundColor: isDarkMode ? '#2A2A2A' : '#F5F5F5' }]}>
+                                        <View key={i} style={[styles.categoryBox, { backgroundColor: isDarkMode ? '#1A1D27' : '#FFFFFF', borderColor: isDarkMode ? '#2D3142' : '#E5E7EB', width: 100 }]}>
+                                            <View style={[styles.categoryIconBox, { backgroundColor: isDarkMode ? '#252840' : '#F3F4F6' }]}>
                                                 <ActivityIndicator size="small" color={colors.primary} />
                                             </View>
-                                            <View style={{ width: 50, height: 10, borderRadius: 5, backgroundColor: isDarkMode ? '#333' : '#E8E8E8' }} />
+                                            <View style={{ width: 50, height: 10, borderRadius: 5, backgroundColor: isDarkMode ? '#2D3142' : '#E5E7EB' }} />
                                         </View>
                                     ))}
                                 </View>
@@ -516,7 +505,7 @@ export default function Home({ navigation }) {
                             },
                         ]}>
                             <LinearGradient
-                                colors={isDarkMode ? ['#1A1A2E', '#16213E'] : ['#FFF5F2', '#FFF0EB']}
+                                colors={isDarkMode ? ['#181B25', '#1A1D27'] : ['#FFF8F0', '#FFF3E6']}
                                 style={styles.categorySectionBg}
                                 start={{ x: 0, y: 0 }}
                                 end={{ x: 1, y: 1 }}
@@ -550,7 +539,7 @@ export default function Home({ navigation }) {
                                                 key={cat.id}
                                                 style={[
                                                     styles.categoryBox,
-                                                    { backgroundColor: isDarkMode ? '#1F1F2F' : '#FFFFFF', borderColor: isDarkMode ? '#333' : '#F0E6E2' },
+                                                    { backgroundColor: isDarkMode ? '#1A1D27' : '#FFFFFF', borderColor: isDarkMode ? '#2D3142' : '#E5E7EB' },
                                                     isSelected && { borderColor: catColor, borderWidth: 2, backgroundColor: catColor + '08' },
                                                 ]}
                                                 onPress={() => toggleCategory(cat)}
@@ -570,7 +559,7 @@ export default function Home({ navigation }) {
                                                 ]} numberOfLines={2}>{cat.name}</Text>
                                                 <View style={[
                                                     styles.categoryCheckbox,
-                                                    { borderColor: isSelected ? catColor : (isDarkMode ? '#555' : '#D0D0D0') },
+                                                    { borderColor: isSelected ? catColor : (isDarkMode ? '#4B5563' : '#D1D5DB') },
                                                     isSelected && { backgroundColor: catColor, borderColor: catColor },
                                                 ]}>
                                                     {isSelected && <Ionicons name="checkmark" size={12} color="#FFF" />}
@@ -587,7 +576,7 @@ export default function Home({ navigation }) {
                                         activeOpacity={0.85}
                                     >
                                         <LinearGradient
-                                            colors={[colors.primary, colors.secondary || '#FF7700']}
+                                            colors={[colors.primary, colors.secondary]}
                                             start={{ x: 0, y: 0 }}
                                             end={{ x: 1, y: 0 }}
                                             style={styles.exploreBtnGradient}
@@ -639,7 +628,7 @@ export default function Home({ navigation }) {
                         activeOpacity={0.8}
                     >
                         <LinearGradient
-                            colors={isDarkMode ? ['#1A1A2E', '#16213E'] : ['#F0F7FF', '#E8F0FE']}
+                            colors={isDarkMode ? ['#181B25', '#1A1D27'] : ['#EEF2FF', '#E8EDFF']}
                             style={styles.guestManagerGradient}
                             start={{ x: 0, y: 0 }}
                             end={{ x: 1, y: 1 }}
@@ -662,12 +651,14 @@ export default function Home({ navigation }) {
                     {/* Thank You from eKatRaa */}
                     <View style={[styles.thankYouSection, { backgroundColor: theme.card, borderColor: theme.border }]}>
                         <LinearGradient
-                            colors={[colors.primary + '15', (colors.secondary || '#FF7700') + '10']}
+                            colors={[colors.primary + '12', colors.secondary + '08']}
                             style={styles.thankYouGradient}
                             start={{ x: 0, y: 0 }}
                             end={{ x: 1, y: 1 }}
                         >
-                            <Ionicons name="heart" size={28} color={colors.primary} style={{ marginBottom: 8 }} />
+                            <View style={{ marginBottom: 10 }}>
+                                <Logo width={40} height={40} />
+                            </View>
                             <Text style={[styles.thankYouTitle, { color: theme.text }]}>Thank you from eKatRaa</Text>
                             <Text style={[styles.thankYouText, { color: theme.textLight }]}>
                                 We're honoured to be part of your special occasion. Your trust means the world to us—here's to creating memories that last a lifetime.
@@ -694,25 +685,62 @@ const styles = StyleSheet.create({
     container: { flex: 1 },
     scrollContent: { paddingBottom: 40 },
     header: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
         paddingHorizontal: 20,
         marginTop: 10,
-        marginBottom: 20,
+        marginBottom: 16,
+    },
+    headerLeft: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        flex: 1,
+        gap: 10,
+    },
+    logoWrap: {
+        width: 36,
+        height: 36,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     locationBtn: {
         flexDirection: 'row',
         alignItems: 'center',
+        flex: 1,
+    },
+    locationLabel: { fontSize: 11, letterSpacing: 0.5, textTransform: 'uppercase', fontWeight: '600' },
+    locationRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+    locationValue: { fontSize: 15, fontWeight: '700' },
+    headerActions: {
+        flexDirection: 'row',
+        alignItems: 'center',
         gap: 10,
     },
-    locationIcon: {
-        width: 40,
-        height: 40,
-        borderRadius: 12,
+    headerIconBtn: {
+        width: 42,
+        height: 42,
+        borderRadius: 14,
         alignItems: 'center',
         justifyContent: 'center',
+        position: 'relative',
     },
-    locationLabel: { fontSize: 11, letterSpacing: 0.3, textTransform: 'uppercase', fontWeight: '500' },
-    locationRow: { flexDirection: 'row', alignItems: 'center' },
-    locationValue: { fontSize: 16, fontWeight: '700' },
+    cartBadge: {
+        position: 'absolute',
+        top: -3,
+        right: -3,
+        minWidth: 18,
+        height: 18,
+        borderRadius: 9,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 4,
+    },
+    cartBadgeText: {
+        color: '#FFF',
+        fontSize: 10,
+        fontWeight: '800',
+    },
     section: { marginBottom: 28 },
     sectionTitleRow: {
         paddingHorizontal: 20,

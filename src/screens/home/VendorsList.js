@@ -87,7 +87,7 @@ export default function VendorsList({ route, navigation }) {
                 </Text>
                 
                 <View style={styles.categoryRow}>
-                    <View style={[styles.categoryBadge, { backgroundColor: isDarkMode ? '#FF411720' : '#FFF5F2' }]}>
+                    <View style={[styles.categoryBadge, { backgroundColor: isDarkMode ? colors.primary + '20' : colors.primary + '10' }]}>
                         <Text style={styles.categoryBadgeText}>{item.category || 'Service Provider'}</Text>
                     </View>
                 </View>
@@ -143,7 +143,7 @@ export default function VendorsList({ route, navigation }) {
                         })}
                     >
                         <LinearGradient
-                            colors={['#FF4117', '#FF6B35']}
+                            colors={[colors.primary, '#FFA040']}
                             start={{ x: 0, y: 0 }}
                             end={{ x: 1, y: 0 }}
                             style={styles.enquiryBtnGradient}

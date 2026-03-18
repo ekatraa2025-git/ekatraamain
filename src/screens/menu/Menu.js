@@ -32,7 +32,7 @@ export default function Menu({ navigation }) {
             return user.user_metadata.avatar_url;
         }
         const name = getUserName();
-        return `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=FF4117&color=fff&size=120`;
+        return `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=FF7A00&color=fff&size=120`;
     };
 
     const handleLogout = () => {
@@ -97,7 +97,7 @@ export default function Menu({ navigation }) {
                         style={styles.loginPrompt}
                         onPress={() => navigation.navigate('Login')}
                     >
-                        <View style={[styles.guestAvatar, { backgroundColor: isDarkMode ? '#333' : '#F0F0F0' }]}>
+                        <View style={[styles.guestAvatar, { backgroundColor: isDarkMode ? '#2D3142' : '#F3F4F6' }]}>
                             <Ionicons name="person-outline" size={32} color={theme.textLight} />
                         </View>
                         <View style={{ flex: 1 }}>
@@ -169,7 +169,7 @@ export default function Menu({ navigation }) {
             {/* Footer actions */}
             <View style={[styles.footer, { borderTopColor: theme.border }]}>
                 {isAuthenticated ? (
-                    <TouchableOpacity onPress={handleLogout} style={[styles.logoutBtn, { backgroundColor: isDarkMode ? '#330010' : '#FFF0F5' }]}>
+                    <TouchableOpacity onPress={handleLogout} style={[styles.logoutBtn, { backgroundColor: isDarkMode ? '#2D1012' : '#FEF2F2' }]}>
                         <Ionicons name="log-out-outline" size={20} color={theme.error} style={{ marginRight: 8 }} />
                         <Text style={[styles.logoutText, { color: theme.error }]}>Logout</Text>
                     </TouchableOpacity>
