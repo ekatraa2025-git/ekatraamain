@@ -154,8 +154,18 @@ export const api = {
     async getOrders(userId) {
         return get('/api/public/orders', { user_id: userId });
     },
-    async getOrder(orderId) {
-        return get(`/api/public/orders/${orderId}`);
+    async getOrder(orderId, userId) {
+        const params = userId ? { user_id: userId } : {};
+        return get(`/api/public/orders/${orderId}`, params);
+    },
+    async acceptQuotation(orderId, quotationId, action) {
+        return patch(`/api/public/orders/${orderId}/quotation/${quotationId}`, { action });
+    },
+    async createBalancePaymentOrder(body) {
+        return post('/api/public/payment/create-balance-order', body);
+    },
+    async verifyBalancePayment(body) {
+        return post('/api/public/payment/verify-balance', body);
     },
 
     // Guests

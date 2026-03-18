@@ -22,6 +22,7 @@ import Cart from '../screens/cart/Cart';
 import Checkout from '../screens/orders/Checkout';
 import OrderDetail from '../screens/orders/OrderDetail';
 import OrderSummary from '../screens/orders/OrderSummary';
+import BalancePayment from '../screens/orders/BalancePayment';
 import MyOrders from '../screens/orders/MyOrders';
 import About from '../screens/about/About';
 import HelpSupport from '../screens/help/HelpSupport';
@@ -111,6 +112,11 @@ export default function AppNavigator() {
                 <Stack.Screen
                     name="OrderSummary"
                     component={OrderSummary}
+                    options={{ animation: 'slide_from_right' }}
+                />
+                <Stack.Screen
+                    name="BalancePayment"
+                    component={BalancePayment}
                     options={{ animation: 'slide_from_right' }}
                 />
                 <Stack.Screen

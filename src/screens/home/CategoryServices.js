@@ -10,7 +10,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Location from 'expo-location';
-import MapView, { Marker } from 'react-native-maps';
+import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+import Constants from 'expo-constants';
 import { colors } from '../../theme/colors';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
@@ -31,6 +32,12 @@ const BUDGET_OPTIONS = [
     '21-30 Lakhs', '30 Lakhs+', '50 Lakhs+',
 ];
 const SECTION_COLORS = ['#FF7A00', '#1E3A8A', '#10B981', '#8B5CF6', '#F59E0B', '#EC4899', '#06B6D4', '#14B8A6'];
+
+// Check if Google Maps API key is configured (prevents crash on Android production)
+const hasMapsApiKey = !!(
+  Constants.expoConfig?.android?.config?.googleMaps?.apiKey ||
+  Constants.expoConfig?.ios?.config?.googleMapsApiKey
+);
 
 export default function CategoryServices({ route, navigation }) {
     const { theme, isDarkMode } = useTheme();
@@ -67,6 +74,7 @@ export default function CategoryServices({ route, navigation }) {
     const [mapMarkerCoord, setMapMarkerCoord] = useState(null);
     const [mapSearchQuery, setMapSearchQuery] = useState('');
     const [mapSearchLoading, setMapSearchLoading] = useState(false);
+    const [mapReady, setMapReady] = useState(false);
 
     const [form, setForm] = useState({
         role: '',
@@ -561,6 +569,7 @@ export default function CategoryServices({ route, navigation }) {
                                         <TouchableOpacity
                                             style={[styles.locationActionBtn, { backgroundColor: isDarkMode ? '#2A2A2A' : '#F5F5F5', borderColor: theme.border }]}
                                             onPress={async () => {
+                                                setMapReady(false);
                                                 try {
                                                     const { status } = await Location.requestForegroundPermissionsAsync();
                                                     if (status === 'granted') {
@@ -593,7 +602,7 @@ export default function CategoryServices({ route, navigation }) {
                                         <View style={[styles.mapModalContent, { backgroundColor: theme.card }]}>
                                             <View style={styles.mapModalHeader}>
                                                 <Text style={[styles.mapModalTitle, { color: theme.text }]}>Select Location</Text>
-                                                <TouchableOpacity onPress={() => { setShowLocationMapModal(false); setMapSearchQuery(''); setMapMarkerCoord(null); }}>
+                                                <TouchableOpacity onPress={() => { setShowLocationMapModal(false); setMapSearchQuery(''); setMapMarkerCoord(null); setMapReady(false); }}>
                                                     <Ionicons name="close" size={24} color={theme.text} />
                                                 </TouchableOpacity>
                                             </View>
@@ -616,10 +625,16 @@ export default function CategoryServices({ route, navigation }) {
                                                     </TouchableOpacity>
                                                 )}
                                             </View>
+                                            <View style={styles.mapContainer}>
+                                            {hasMapsApiKey ? (
                                             <MapView
                                                 style={styles.mapView}
+                                                provider={PROVIDER_GOOGLE}
+                                                initialRegion={mapRegion}
                                                 region={mapRegion}
+                                                onMapReady={() => setMapReady(true)}
                                                 onRegionChangeComplete={setMapRegion}
+                                                loadingEnabled
                                                 onPress={(e) => {
                                                     const { latitude, longitude } = e.nativeEvent.coordinate;
                                                     setMapRegion(r => ({ ...r, latitude, longitude }));
@@ -639,9 +654,23 @@ export default function CategoryServices({ route, navigation }) {
                                                     <Marker coordinate={mapMarkerCoord} />
                                                 )}
                                             </MapView>
+                                            ) : (
+                                                <View style={[styles.mapView, styles.mapFallback, { backgroundColor: isDarkMode ? '#1F2333' : '#F5F5F5' }]}>
+                                                    <Ionicons name="map-outline" size={48} color={theme.textLight} />
+                                                    <Text style={[styles.mapFallbackText, { color: theme.text }]}>Map unavailable</Text>
+                                                    <Text style={[styles.mapFallbackHint, { color: theme.textLight }]}>Enter your address in the search above or in the form</Text>
+                                                </View>
+                                            )}
+                                            {hasMapsApiKey && !mapReady && (
+                                                <View style={styles.mapLoadingOverlay}>
+                                                    <ActivityIndicator size="large" color={colors.primary} />
+                                                    <Text style={[styles.mapLoadingText, { color: theme.textLight }]}>Loading map...</Text>
+                                                </View>
+                                            )}
+                                            </View>
                                             <TouchableOpacity
                                                 style={[styles.mapConfirmBtn, { backgroundColor: colors.primary }]}
-                                                onPress={() => { setShowLocationMapModal(false); setMapSearchQuery(''); setMapMarkerCoord(null); }}
+                                                onPress={() => { setShowLocationMapModal(false); setMapSearchQuery(''); setMapMarkerCoord(null); setMapReady(false); }}
                                             >
                                                 <Text style={styles.mapConfirmBtnText}>Confirm Location</Text>
                                             </TouchableOpacity>
@@ -1034,7 +1063,23 @@ const styles = StyleSheet.create({
     },
     mapSearchInput: { flex: 1, paddingVertical: 12, fontSize: 15 },
     mapSearchBtn: { padding: 4 },
-    mapView: { height: 280, borderRadius: 12, marginBottom: 12 },
+    mapContainer: { position: 'relative', height: 280, borderRadius: 12, marginBottom: 12, overflow: 'hidden' },
+    mapView: { height: 280, borderRadius: 12, width: '100%' },
+    mapLoadingOverlay: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: 'rgba(255,255,255,0.92)',
+        zIndex: 10,
+    },
+    mapLoadingText: { marginTop: 8, fontSize: 14 },
+    mapFallback: { justifyContent: 'center', alignItems: 'center', padding: 24 },
+    mapFallbackText: { fontSize: 16, fontWeight: '600', marginTop: 12 },
+    mapFallbackHint: { fontSize: 13, marginTop: 6, textAlign: 'center', paddingHorizontal: 16 },
     mapConfirmBtn: { paddingVertical: 14, borderRadius: 12, alignItems: 'center' },
     mapConfirmBtnText: { color: '#FFF', fontSize: 16, fontWeight: '600' },
 
