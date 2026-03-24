@@ -8,13 +8,10 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import DateTimePicker from '@react-native-community/datetimepicker';
-import * as Location from 'expo-location';
-import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
-import Constants from 'expo-constants';
 import { colors } from '../../theme/colors';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
+import { useEventForm } from '../../context/EventFormContext';
 import { api, useBackendApi } from '../../services/api';
 import { supabase, resolveStorageUrl } from '../../services/supabase';
 import { useCart } from '../../context/CartContext';
@@ -33,16 +30,11 @@ const BUDGET_OPTIONS = [
 ];
 const SECTION_COLORS = ['#FF7A00', '#1E3A8A', '#10B981', '#8B5CF6', '#F59E0B', '#EC4899', '#06B6D4', '#14B8A6'];
 
-// Check if Google Maps API key is configured (prevents crash on Android production)
-const hasMapsApiKey = !!(
-  Constants.expoConfig?.android?.config?.googleMaps?.apiKey ||
-  Constants.expoConfig?.ios?.config?.googleMapsApiKey
-);
-
 export default function CategoryServices({ route, navigation }) {
     const { theme, isDarkMode } = useTheme();
     const insets = useSafeAreaInsets();
     const { isAuthenticated, user } = useAuth();
+    const { eventForm } = useEventForm();
     const { cartId: globalCartId, setCartId: setGlobalCartId, refreshCartCount } = useCart();
 
     const {
@@ -65,42 +57,23 @@ export default function CategoryServices({ route, navigation }) {
     const [selectedServices, setSelectedServices] = useState(new Map());
     const [cartId, setCartId] = useState(globalCartId || null);
     const [adding, setAdding] = useState(false);
-    const [formVisible, setFormVisible] = useState(false);
     const [expandedServiceId, setExpandedServiceId] = useState(null);
-    const [showDatePicker, setShowDatePicker] = useState(false);
-    const [showLocationMapModal, setShowLocationMapModal] = useState(false);
-    const [locationLoading, setLocationLoading] = useState(false);
-    const [mapRegion, setMapRegion] = useState({ latitude: 20.2961, longitude: 85.8245, latitudeDelta: 0.05, longitudeDelta: 0.05 });
-    const [mapMarkerCoord, setMapMarkerCoord] = useState(null);
-    const [mapSearchQuery, setMapSearchQuery] = useState('');
-    const [mapSearchLoading, setMapSearchLoading] = useState(false);
-    const [mapReady, setMapReady] = useState(false);
-
-    const [form, setForm] = useState({
-        role: '',
+    const [showContactModal, setShowContactModal] = useState(false);
+    const [contactModalForm, setContactModalForm] = useState({
         contact_name: user?.user_metadata?.full_name || user?.user_metadata?.name || '',
         contact_mobile: user?.phone || '',
-        contact_email: user?.email || '',
-        event_date: '',
-        guest_count: '',
-        location_preference: '',
-        venue_preference: '',
-        planned_budget: '',
     });
-
-    const formAnim = useRef(new Animated.Value(0)).current;
 
     useEffect(() => {
         fetchAllServices();
     }, []);
 
     useEffect(() => {
-        Animated.timing(formAnim, {
-            toValue: formVisible ? 1 : 0,
-            duration: 300,
-            useNativeDriver: false,
-        }).start();
-    }, [formVisible]);
+        setContactModalForm({
+            contact_name: user?.user_metadata?.full_name || user?.user_metadata?.name || eventForm?.contact_name || '',
+            contact_mobile: user?.phone || eventForm?.contact_mobile || '',
+        });
+    }, [user?.id, eventForm?.contact_name, eventForm?.contact_mobile]);
 
     const useApi = useBackendApi();
 
@@ -173,7 +146,6 @@ export default function CategoryServices({ route, navigation }) {
                     price: tiers.length > 0 ? tiers[0].value : 0,
                 });
                 setExpandedServiceId(service.id);
-                if (!formVisible) setFormVisible(true);
             }
             return next;
         });
@@ -190,18 +162,29 @@ export default function CategoryServices({ route, navigation }) {
         });
     };
 
+    const getEffectiveForm = () => {
+        const fromContext = eventForm || {};
+        return {
+            contact_name: fromContext.contact_name || contactModalForm.contact_name || '',
+            contact_mobile: fromContext.contact_mobile || contactModalForm.contact_mobile || '',
+            contact_email: fromContext.contact_email || null,
+            event_date: fromContext.event_date || null,
+            guest_count: fromContext.guest_count || null,
+            location_preference: fromContext.location_preference || null,
+            venue_preference: fromContext.venue_preference || null,
+            planned_budget: fromContext.planned_budget || null,
+            role: fromContext.role || null,
+        };
+    };
+
     const handleAddToCart = async () => {
         if (selectedServices.size === 0) {
             Alert.alert('Select Services', 'Please select at least one service.');
             return;
         }
-        if (!form.contact_name.trim() || !form.contact_mobile.trim()) {
-            if (!formVisible) {
-                setFormVisible(true);
-                Alert.alert('Fill Your Details', 'Please provide your name and mobile number to continue.');
-                return;
-            }
-            Alert.alert('Required', 'Please fill in your name and mobile number.');
+        const effectiveForm = getEffectiveForm();
+        if (!effectiveForm.contact_name.trim() || !effectiveForm.contact_mobile.trim()) {
+            setShowContactModal(true);
             return;
         }
 
@@ -226,14 +209,14 @@ export default function CategoryServices({ route, navigation }) {
         if (!cid) { setAdding(false); return; }
 
         const cartPayload = {
-            contact_name: form.contact_name || null,
-            contact_mobile: form.contact_mobile || null,
-            contact_email: form.contact_email || null,
-            event_date: form.event_date || null,
-            guest_count: form.guest_count ? parseInt(form.guest_count, 10) : null,
-            location_preference: form.location_preference || null,
-            venue_preference: form.venue_preference || null,
-            planned_budget: form.planned_budget || null,
+            contact_name: effectiveForm.contact_name || null,
+            contact_mobile: effectiveForm.contact_mobile || null,
+            contact_email: effectiveForm.contact_email || null,
+            event_date: effectiveForm.event_date || null,
+            guest_count: effectiveForm.guest_count || null,
+            location_preference: effectiveForm.location_preference || null,
+            venue_preference: effectiveForm.venue_preference || null,
+            planned_budget: effectiveForm.planned_budget || null,
         };
         await api.updateCart(cid, cartPayload);
 
@@ -247,12 +230,13 @@ export default function CategoryServices({ route, navigation }) {
                     tier: entry.selectedTier,
                     occasion: occasionName,
                     category: resolvedCategoryNames.join(', '),
-                    role: form.role,
+                    role: effectiveForm.role,
                 },
             });
         }
 
         setAdding(false);
+        setShowContactModal(false);
         refreshCartCount(cid);
         Alert.alert(
             'Added to Cart',
@@ -264,29 +248,16 @@ export default function CategoryServices({ route, navigation }) {
         );
     };
 
+    const handleContactModalSubmit = () => {
+        if (!contactModalForm.contact_name.trim() || !contactModalForm.contact_mobile.trim()) {
+            Alert.alert('Required', 'Please fill in your name and mobile number.');
+            return;
+        }
+        handleAddToCart();
+    };
+
     const totalAmount = Array.from(selectedServices.values()).reduce((sum, e) => sum + (e.price || 0), 0);
     const allServices = Object.values(servicesByCategory).flatMap(cat => cat.services);
-    const handleMapSearch = async () => {
-        if (!mapSearchQuery.trim()) return;
-        setMapSearchLoading(true);
-        try {
-            const [res] = await Location.geocodeAsync(mapSearchQuery.trim());
-            if (res) {
-                const { latitude, longitude } = res;
-                setMapRegion(r => ({ ...r, latitude, longitude }));
-                setMapMarkerCoord({ latitude, longitude });
-                const [rev] = await Location.reverseGeocodeAsync({ latitude, longitude });
-                const addr = rev ? [rev.name, rev.street, rev.city, rev.subregion, rev.region].filter(Boolean).join(', ') : mapSearchQuery.trim();
-                setForm(p => ({ ...p, location_preference: addr }));
-            } else {
-                Alert.alert('Not found', 'Could not find that location. Try a different search.');
-            }
-        } catch (_) {
-            Alert.alert('Error', 'Could not search location. Please try again.');
-        } finally {
-            setMapSearchLoading(false);
-        }
-    };
 
     const headerTitle = resolvedCategoryNames.length === 1
         ? resolvedCategoryNames[0]
@@ -357,352 +328,54 @@ export default function CategoryServices({ route, navigation }) {
                         keyboardShouldPersistTaps="handled"
                         keyboardDismissMode="on-drag"
                     >
-                        {/* Your Details - Elegant collapsible */}
-                        <TouchableOpacity
-                            style={[
-                                styles.detailsToggle,
-                                { backgroundColor: isDarkMode ? theme.card : '#FFF', borderColor: formVisible ? colors.primary : theme.border },
-                                formVisible && { borderBottomLeftRadius: 0, borderBottomRightRadius: 0 },
-                            ]}
-                            onPress={() => {
-                                LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-                                setFormVisible(!formVisible);
-                            }}
-                            activeOpacity={0.7}
-                        >
-                            <View style={styles.detailsToggleLeft}>
-                                <LinearGradient
-                                    colors={[colors.primary + '20', colors.primary + '08']}
-                                    style={styles.detailsIconWrap}
-                                >
-                                    <Ionicons name="person-outline" size={18} color={colors.primary} />
-                                </LinearGradient>
-                                <View>
-                                    <Text style={[styles.detailsToggleTitle, { color: theme.text }]}>Your Event Details</Text>
-                                    <Text style={[styles.detailsToggleHint, { color: theme.textLight }]}>
-                                        {form.contact_name ? `${form.contact_name}${form.event_date ? ` · ${form.event_date}` : ''}` : 'Required before adding to cart'}
+                        {/* Contact modal - shown when adding to cart without event form */}
+                        <Modal visible={showContactModal} animationType="slide" transparent>
+                            <View style={styles.contactModalOverlay}>
+                                <View style={[styles.contactModalContent, { backgroundColor: theme.card }]}>
+                                    <Text style={[styles.contactModalTitle, { color: theme.text }]}>Contact Details Required</Text>
+                                    <Text style={[styles.contactModalSubtitle, { color: theme.textLight }]}>
+                                        Please provide your name and phone to add items to cart.
                                     </Text>
-                                </View>
-                            </View>
-                            <View style={[styles.chevronWrap, { backgroundColor: isDarkMode ? '#2D3142' : '#F3F4F6' }]}>
-                                <Ionicons name={formVisible ? 'chevron-up' : 'chevron-down'} size={18} color={theme.textLight} />
-                            </View>
-                        </TouchableOpacity>
-
-                        {formVisible && (
-                            <Animated.View style={[
-                                styles.formCard,
-                                { backgroundColor: isDarkMode ? theme.card : '#FAFAFA', borderColor: colors.primary + '30' },
-                            ]}>
-                                {/* Role */}
-                                <View style={styles.formGroup}>
-                                    <Text style={[styles.formLabel, { color: theme.textLight }]}>I am the</Text>
-                                    <View style={styles.roleRow}>
-                                        {['Groom', 'Bride', 'Host', 'Other'].map(role => (
-                                            <TouchableOpacity
-                                                key={role}
-                                                style={[
-                                                    styles.roleChip,
-                                                    { backgroundColor: isDarkMode ? '#252840' : '#FFF', borderColor: theme.border },
-                                                    form.role === role && { backgroundColor: colors.primary, borderColor: colors.primary },
-                                                ]}
-                                                onPress={() => setForm(p => ({ ...p, role }))}
-                                            >
-                                                <Text style={[
-                                                    styles.roleText,
-                                                    { color: theme.text },
-                                                    form.role === role && { color: '#FFF', fontWeight: '700' },
-                                                ]}>{role}</Text>
-                                            </TouchableOpacity>
-                                        ))}
-                                    </View>
-                                </View>
-
-                                {/* Name + Phone row */}
-                                <View style={styles.formRow}>
-                                    <View style={styles.formCol}>
-                                        <Text style={[styles.formLabel, { color: theme.textLight }]}>Name *</Text>
-                                        <View style={[styles.inputWrap, { backgroundColor: isDarkMode ? '#1F2333' : '#FFF', borderColor: theme.border }]}>
-                                            <Ionicons name="person-outline" size={16} color={theme.textLight} />
-                                            <TextInput
-                                                style={[styles.input, { color: theme.text }]}
-                                                placeholder="Your name"
-                                                placeholderTextColor={theme.textLight}
-                                                value={form.contact_name}
-                                                onChangeText={t => setForm(p => ({ ...p, contact_name: t }))}
-                                            />
-                                        </View>
-                                    </View>
-                                    <View style={styles.formCol}>
-                                        <Text style={[styles.formLabel, { color: theme.textLight }]}>Phone *</Text>
-                                        <View style={[styles.inputWrap, { backgroundColor: isDarkMode ? '#1F2333' : '#FFF', borderColor: theme.border }]}>
-                                            <Ionicons name="call-outline" size={16} color={theme.textLight} />
-                                            <TextInput
-                                                style={[styles.input, { color: theme.text }]}
-                                                placeholder="Mobile number"
-                                                placeholderTextColor={theme.textLight}
-                                                value={form.contact_mobile}
-                                                onChangeText={t => setForm(p => ({ ...p, contact_mobile: t }))}
-                                                keyboardType="phone-pad"
-                                            />
-                                        </View>
-                                    </View>
-                                </View>
-
-                                {/* Email + Date row */}
-                                <View style={styles.formRow}>
-                                    <View style={styles.formCol}>
-                                        <Text style={[styles.formLabel, { color: theme.textLight }]}>Email</Text>
-                                        <View style={[styles.inputWrap, { backgroundColor: isDarkMode ? '#1F2333' : '#FFF', borderColor: theme.border }]}>
-                                            <Ionicons name="mail-outline" size={16} color={theme.textLight} />
-                                            <TextInput
-                                                style={[styles.input, { color: theme.text }]}
-                                                placeholder="Email address"
-                                                placeholderTextColor={theme.textLight}
-                                                value={form.contact_email}
-                                                onChangeText={t => setForm(p => ({ ...p, contact_email: t }))}
-                                                keyboardType="email-address"
-                                            />
-                                        </View>
-                                    </View>
-                                    <View style={styles.formCol}>
-                                        <Text style={[styles.formLabel, { color: theme.textLight }]}>Event Date</Text>
-                                        <TouchableOpacity
-                                            style={[styles.inputWrap, { backgroundColor: isDarkMode ? '#1F2333' : '#FFF', borderColor: theme.border }]}
-                                            onPress={() => setShowDatePicker(true)}
-                                            activeOpacity={0.7}
-                                        >
-                                            <Ionicons name="calendar-outline" size={16} color={theme.textLight} />
-                                            <Text style={[styles.input, { color: form.event_date ? theme.text : theme.textLight, paddingVertical: 10 }]}>
-                                                {form.event_date || 'Select date'}
-                                            </Text>
-                                        </TouchableOpacity>
-                                        {showDatePicker && (
-                                            <DateTimePicker
-                                                value={form.event_date ? new Date(form.event_date) : new Date()}
-                                                mode="date"
-                                                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                                                minimumDate={new Date()}
-                                                onChange={(event, selectedDate) => {
-                                                    setShowDatePicker(Platform.OS === 'ios');
-                                                    if (selectedDate) {
-                                                        const y = selectedDate.getFullYear();
-                                                        const m = String(selectedDate.getMonth() + 1).padStart(2, '0');
-                                                        const d = String(selectedDate.getDate()).padStart(2, '0');
-                                                        setForm(p => ({ ...p, event_date: `${y}-${m}-${d}` }));
-                                                    }
-                                                }}
-                                            />
-                                        )}
-                                    </View>
-                                </View>
-
-                                {/* Guests */}
-                                <View style={styles.formGroup}>
-                                    <Text style={[styles.formLabel, { color: theme.textLight }]}>Guests</Text>
-                                    <View style={[styles.inputWrap, { backgroundColor: isDarkMode ? '#1F2333' : '#FFF', borderColor: theme.border }]}>
-                                        <Ionicons name="people-outline" size={16} color={theme.textLight} />
+                                    <View style={[styles.contactModalInputWrap, { backgroundColor: isDarkMode ? '#1F2333' : '#FFF', borderColor: theme.border }]}>
+                                        <Ionicons name="person-outline" size={16} color={theme.textLight} />
                                         <TextInput
-                                            style={[styles.input, { color: theme.text }]}
-                                            placeholder="Count"
+                                            style={[styles.contactModalInput, { color: theme.text }]}
+                                            placeholder="Your name"
                                             placeholderTextColor={theme.textLight}
-                                            value={form.guest_count}
-                                            onChangeText={t => setForm(p => ({ ...p, guest_count: t }))}
-                                            keyboardType="number-pad"
+                                            value={contactModalForm.contact_name}
+                                            onChangeText={t => setContactModalForm(p => ({ ...p, contact_name: t }))}
                                         />
                                     </View>
-                                </View>
-
-                                {/* Venue Preference */}
-                                <View style={styles.formGroup}>
-                                    <Text style={[styles.formLabel, { color: theme.textLight }]}>Venue</Text>
-                                    <View style={styles.roleRow}>
-                                        {['Venue', 'Own Place'].map(opt => (
-                                            <TouchableOpacity
-                                                key={opt}
-                                                style={[
-                                                    styles.roleChip,
-                                                    { backgroundColor: isDarkMode ? '#252840' : '#FFF', borderColor: theme.border },
-                                                    form.venue_preference === opt && { backgroundColor: colors.primary, borderColor: colors.primary },
-                                                ]}
-                                                onPress={() => setForm(p => ({ ...p, venue_preference: opt }))}
-                                            >
-                                                <Text style={[
-                                                    styles.roleText,
-                                                    { color: theme.text },
-                                                    form.venue_preference === opt && { color: '#FFF', fontWeight: '700' },
-                                                ]}>{opt}</Text>
-                                            </TouchableOpacity>
-                                        ))}
-                                    </View>
-                                </View>
-
-                                {/* Location - Current Location / Select on Map */}
-                                <View style={styles.formGroup}>
-                                    <Text style={[styles.formLabel, { color: theme.textLight }]}>Location</Text>
-                                    <View style={styles.locationBtnRow}>
-                                        <TouchableOpacity
-                                            style={[styles.locationActionBtn, { backgroundColor: colors.primary + '15', borderColor: colors.primary + '40' }]}
-                                            onPress={async () => {
-                                                setLocationLoading(true);
-                                                try {
-                                                    const { status } = await Location.requestForegroundPermissionsAsync();
-                                                    if (status !== 'granted') {
-                                                        Alert.alert('Permission', 'Please allow location access.');
-                                                        return;
-                                                    }
-                                                    const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-                                                    const [rev] = await Location.reverseGeocodeAsync({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
-                                                    const addr = rev ? [rev.city, rev.subregion, rev.region].filter(Boolean).join(', ') : `${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)}`;
-                                                    setForm(p => ({ ...p, location_preference: addr }));
-                                                } catch (e) {
-                                                    Alert.alert('Error', 'Could not get location. Please try again.');
-                                                } finally {
-                                                    setLocationLoading(false);
-                                                }
-                                            }}
-                                            disabled={locationLoading}
-                                        >
-                                            {locationLoading ? <ActivityIndicator size="small" color={colors.primary} /> : <Ionicons name="locate" size={18} color={colors.primary} />}
-                                            <Text style={[styles.locationActionText, { color: colors.primary }]}>Current</Text>
-                                        </TouchableOpacity>
-                                        <TouchableOpacity
-                                            style={[styles.locationActionBtn, { backgroundColor: isDarkMode ? '#2A2A2A' : '#F5F5F5', borderColor: theme.border }]}
-                                            onPress={async () => {
-                                                setMapReady(false);
-                                                try {
-                                                    const { status } = await Location.requestForegroundPermissionsAsync();
-                                                    if (status === 'granted') {
-                                                        const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-                                                        setMapRegion(r => ({ ...r, latitude: pos.coords.latitude, longitude: pos.coords.longitude }));
-                                                    }
-                                                } catch (_) {}
-                                                setShowLocationMapModal(true);
-                                            }}
-                                        >
-                                            <Ionicons name="map-outline" size={18} color={theme.text} />
-                                            <Text style={[styles.locationActionText, { color: theme.text }]}>Select on Map</Text>
-                                        </TouchableOpacity>
-                                    </View>
-                                    <View style={[styles.inputWrap, { backgroundColor: isDarkMode ? '#1F2333' : '#FFF', borderColor: theme.border, marginTop: 8 }]}>
-                                        <Ionicons name="location-outline" size={16} color={theme.textLight} />
+                                    <View style={[styles.contactModalInputWrap, { backgroundColor: isDarkMode ? '#1F2333' : '#FFF', borderColor: theme.border }]}>
+                                        <Ionicons name="call-outline" size={16} color={theme.textLight} />
                                         <TextInput
-                                            style={[styles.input, { color: theme.text }]}
-                                            placeholder={form.venue_preference === 'Own Place' ? 'Your venue address' : 'Preferred area or address'}
+                                            style={[styles.contactModalInput, { color: theme.text }]}
+                                            placeholder="Mobile number"
                                             placeholderTextColor={theme.textLight}
-                                            value={form.location_preference}
-                                            onChangeText={t => setForm(p => ({ ...p, location_preference: t }))}
+                                            value={contactModalForm.contact_mobile}
+                                            onChangeText={t => setContactModalForm(p => ({ ...p, contact_mobile: t }))}
+                                            keyboardType="phone-pad"
                                         />
                                     </View>
-                                </View>
-
-                                {/* Location Map Modal */}
-                                <Modal visible={showLocationMapModal} animationType="slide" transparent>
-                                    <View style={styles.mapModalOverlay}>
-                                        <View style={[styles.mapModalContent, { backgroundColor: theme.card }]}>
-                                            <View style={styles.mapModalHeader}>
-                                                <Text style={[styles.mapModalTitle, { color: theme.text }]}>Select Location</Text>
-                                                <TouchableOpacity onPress={() => { setShowLocationMapModal(false); setMapSearchQuery(''); setMapMarkerCoord(null); setMapReady(false); }}>
-                                                    <Ionicons name="close" size={24} color={theme.text} />
-                                                </TouchableOpacity>
-                                            </View>
-                                            <View style={[styles.mapSearchWrap, { backgroundColor: isDarkMode ? '#1F2333' : '#FFF', borderColor: theme.border }]}>
-                                                <Ionicons name="search-outline" size={18} color={theme.textLight} />
-                                                <TextInput
-                                                    style={[styles.mapSearchInput, { color: theme.text }]}
-                                                    placeholder="Search location..."
-                                                    placeholderTextColor={theme.textLight}
-                                                    value={mapSearchQuery}
-                                                    onChangeText={setMapSearchQuery}
-                                                    onSubmitEditing={handleMapSearch}
-                                                    returnKeyType="search"
-                                                />
-                                                {mapSearchLoading ? (
-                                                    <ActivityIndicator size="small" color={colors.primary} />
-                                                ) : (
-                                                    <TouchableOpacity onPress={handleMapSearch} style={styles.mapSearchBtn}>
-                                                        <Ionicons name="search" size={20} color={colors.primary} />
-                                                    </TouchableOpacity>
-                                                )}
-                                            </View>
-                                            <View style={styles.mapContainer}>
-                                            {hasMapsApiKey ? (
-                                            <MapView
-                                                style={styles.mapView}
-                                                provider={PROVIDER_GOOGLE}
-                                                initialRegion={mapRegion}
-                                                region={mapRegion}
-                                                onMapReady={() => setMapReady(true)}
-                                                onRegionChangeComplete={setMapRegion}
-                                                loadingEnabled
-                                                onPress={(e) => {
-                                                    const { latitude, longitude } = e.nativeEvent.coordinate;
-                                                    setMapRegion(r => ({ ...r, latitude, longitude }));
-                                                    setMapMarkerCoord({ latitude, longitude });
-                                                    (async () => {
-                                                        try {
-                                                            const [rev] = await Location.reverseGeocodeAsync({ latitude, longitude });
-                                                            const addr = rev ? [rev.name, rev.street, rev.city, rev.subregion, rev.region].filter(Boolean).join(', ') : `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
-                                                            setForm(p => ({ ...p, location_preference: addr }));
-                                                        } catch (_) {
-                                                            setForm(p => ({ ...p, location_preference: `${latitude.toFixed(4)}, ${longitude.toFixed(4)}` }));
-                                                        }
-                                                    })();
-                                                }}
-                                            >
-                                                {mapMarkerCoord && (
-                                                    <Marker coordinate={mapMarkerCoord} />
-                                                )}
-                                            </MapView>
-                                            ) : (
-                                                <View style={[styles.mapView, styles.mapFallback, { backgroundColor: isDarkMode ? '#1F2333' : '#F5F5F5' }]}>
-                                                    <Ionicons name="map-outline" size={48} color={theme.textLight} />
-                                                    <Text style={[styles.mapFallbackText, { color: theme.text }]}>Map unavailable</Text>
-                                                    <Text style={[styles.mapFallbackHint, { color: theme.textLight }]}>Enter your address in the search above or in the form</Text>
-                                                </View>
-                                            )}
-                                            {hasMapsApiKey && !mapReady && (
-                                                <View style={styles.mapLoadingOverlay}>
-                                                    <ActivityIndicator size="large" color={colors.primary} />
-                                                    <Text style={[styles.mapLoadingText, { color: theme.textLight }]}>Loading map...</Text>
-                                                </View>
-                                            )}
-                                            </View>
-                                            <TouchableOpacity
-                                                style={[styles.mapConfirmBtn, { backgroundColor: colors.primary }]}
-                                                onPress={() => { setShowLocationMapModal(false); setMapSearchQuery(''); setMapMarkerCoord(null); setMapReady(false); }}
-                                            >
-                                                <Text style={styles.mapConfirmBtnText}>Confirm Location</Text>
-                                            </TouchableOpacity>
-                                        </View>
-                                    </View>
-                                </Modal>
-
-                                {/* Budget */}
-                                <View style={styles.formGroup}>
-                                    <Text style={[styles.formLabel, { color: theme.textLight }]}>Budget (excl. Gold & Apparels)</Text>
-                                    <View style={styles.budgetRow}>
-                                        {BUDGET_OPTIONS.map(opt => (
-                                            <TouchableOpacity
-                                                key={opt}
-                                                style={[
-                                                    styles.budgetChip,
-                                                    { backgroundColor: isDarkMode ? '#252840' : '#FFF', borderColor: theme.border },
-                                                    form.planned_budget === opt && { backgroundColor: colors.primary, borderColor: colors.primary },
-                                                ]}
-                                                onPress={() => setForm(p => ({ ...p, planned_budget: opt }))}
-                                            >
-                                                <Text style={[
-                                                    styles.budgetText,
-                                                    { color: theme.text },
-                                                    form.planned_budget === opt && { color: '#FFF', fontWeight: '700' },
-                                                ]}>₹{opt}</Text>
-                                            </TouchableOpacity>
-                                        ))}
+                                    <View style={styles.contactModalActions}>
+                                        <TouchableOpacity
+                                            style={[styles.contactModalCancelBtn, { borderColor: theme.border }]}
+                                            onPress={() => setShowContactModal(false)}
+                                        >
+                                            <Text style={[styles.contactModalCancelText, { color: theme.text }]}>Cancel</Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                            style={styles.contactModalSubmitBtn}
+                                            onPress={handleContactModalSubmit}
+                                        >
+                                            <LinearGradient colors={[colors.primary, colors.secondary]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.contactModalSubmitGradient}>
+                                                <Text style={styles.contactModalSubmitText}>Add to Cart</Text>
+                                            </LinearGradient>
+                                        </TouchableOpacity>
                                     </View>
                                 </View>
-                            </Animated.View>
-                        )}
+                            </View>
+                        </Modal>
 
                         {/* Services grouped by category */}
                         {Object.entries(servicesByCategory).map(([catId, catData], catIdx) => {
@@ -961,7 +634,48 @@ const styles = StyleSheet.create({
 
     scrollContent: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 120 },
 
-    // Form toggle
+    contactModalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 20,
+    },
+    contactModalContent: {
+        width: '100%',
+        maxWidth: 360,
+        borderRadius: 20,
+        padding: 24,
+    },
+    contactModalTitle: { fontSize: 20, fontWeight: '800', marginBottom: 8 },
+    contactModalSubtitle: { fontSize: 14, marginBottom: 20 },
+    contactModalInputWrap: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        borderWidth: 1,
+        borderRadius: 12,
+        paddingHorizontal: 12,
+        gap: 10,
+        marginBottom: 14,
+    },
+    contactModalInput: { flex: 1, paddingVertical: 12, fontSize: 15 },
+    contactModalActions: { flexDirection: 'row', gap: 12, marginTop: 8 },
+    contactModalCancelBtn: {
+        flex: 1,
+        paddingVertical: 14,
+        borderRadius: 14,
+        borderWidth: 1.5,
+        alignItems: 'center',
+    },
+    contactModalCancelText: { fontSize: 16, fontWeight: '700' },
+    contactModalSubmitBtn: { flex: 1, borderRadius: 14, overflow: 'hidden' },
+    contactModalSubmitGradient: {
+        paddingVertical: 14,
+        alignItems: 'center',
+    },
+    contactModalSubmitText: { color: '#FFF', fontSize: 16, fontWeight: '700' },
+
+    // Form toggle (legacy - kept for reference, form moved to Home)
     detailsToggle: {
         flexDirection: 'row',
         alignItems: 'center',

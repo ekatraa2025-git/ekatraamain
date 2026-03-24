@@ -120,6 +120,29 @@ export const api = {
         if (params.search) q.search = params.search;
         return get('/api/public/services', q);
     },
+    /**
+     * @param {string} occasionId
+     * @param {string | number | { budget?: string, budget_inr?: number, category_weights?: Record<string, number> }} budgetOrOpts
+     */
+    async getRecommendations(occasionId, budgetOrOpts) {
+        const q = { occasion_id: occasionId };
+        if (budgetOrOpts != null && typeof budgetOrOpts === 'object' && !Array.isArray(budgetOrOpts)) {
+            if (budgetOrOpts.budget_inr != null) q.budget_inr = String(budgetOrOpts.budget_inr);
+            if (budgetOrOpts.budget) q.budget = budgetOrOpts.budget;
+            if (budgetOrOpts.category_weights && Object.keys(budgetOrOpts.category_weights).length > 0) {
+                q.category_weights = JSON.stringify(budgetOrOpts.category_weights);
+            }
+        } else {
+            q.budget = String(budgetOrOpts);
+        }
+        return get('/api/public/recommendations', q);
+    },
+    async postRecommendationNarrative(body) {
+        return post('/api/public/recommendations/narrative', body);
+    },
+    async postBudgetRecommendationSnapshot(body) {
+        return post('/api/public/budget-recommendation-snapshots', body);
+    },
 
     // Cart
     async createCart(body) {

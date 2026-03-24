@@ -6,6 +6,7 @@ import { ThemeProvider } from './src/context/ThemeContext';
 import { AuthProvider } from './src/context/AuthContext';
 import { CartProvider } from './src/context/CartContext';
 import { AppDataProvider } from './src/context/AppDataContext';
+import { EventFormProvider } from './src/context/EventFormContext';
 
 export default function App() {
   return (
@@ -13,10 +14,12 @@ export default function App() {
       <AuthProvider>
         <CartProvider>
           <AppDataProvider>
+            <EventFormProvider>
             <ThemeProvider>
               <AppNavigator />
               <StatusBar style="auto" />
             </ThemeProvider>
+            </EventFormProvider>
           </AppDataProvider>
         </CartProvider>
       </AuthProvider>
