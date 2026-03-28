@@ -1051,7 +1051,14 @@ export default function Home({ navigation }) {
                 </ScrollView>
             </AnimatedBackground>
 
-            <ChatModal visible={chatModalVisible} onClose={() => setChatModalVisible(false)} />
+            <ChatModal
+                visible={chatModalVisible}
+                onClose={() => setChatModalVisible(false)}
+                city={currentCity}
+                occasionId={selectedType}
+                occasionName={selectedOccasionObj?.name}
+                plannedBudgetInr={plannedBudgetInr}
+            />
 
             <RecommendationBudgetModal
                 visible={recommendationsModalVisible}
@@ -1071,6 +1078,7 @@ export default function Home({ navigation }) {
                 }}
                 theme={theme}
                 colors={colors}
+                city={currentCity}
                 occasionId={selectedType}
                 occasionName={selectedOccasionObj?.name}
                 data={recommendationsData}

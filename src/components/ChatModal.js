@@ -5,17 +5,31 @@ import { useTheme } from '../context/ThemeContext';
 import { api } from '../services/api';
 import { sanitizeAiDisplayText } from '../utils/sanitizeAiDisplayText';
 
-const INITIAL_MESSAGES = [
-    { id: '1', text: "Namaste! 🙏 I am Ekatraa AI.", sender: 'bot' },
-    { id: '2', text: "I can help you plan weddings, funerals, birthdays, or any get-together. What are you looking for today?", sender: 'bot' }
-];
+function buildWelcomeMessages(city, occasionName) {
+    const place = city ? ` in ${city}` : '';
+    const occ = occasionName
+        ? ` If you're planning ${occasionName}, we can talk through budget areas and what to explore next in the app.`
+        : '';
+    return [
+        { id: '1', text: `Namaste! 🙏 I'm Ekatraa AI — here to help with gatherings using what's in the Ekatraa app${place}.`, sender: 'bot' },
+        { id: '2', text: `Ask about occasions, spending areas, or what to book.${occ} I'll suggest real categories and service types from our catalog when it helps.`, sender: 'bot' },
+    ];
+}
 
-export default function ChatModal({ visible, onClose }) {
+export default function ChatModal({ visible, onClose, city, occasionId, occasionName, plannedBudgetInr }) {
     const { theme, isDarkMode } = useTheme();
-    const [messages, setMessages] = useState(INITIAL_MESSAGES);
+    const [messages, setMessages] = useState(() => buildWelcomeMessages(city, occasionName));
     const [inputText, setInputText] = useState('');
     const [isTyping, setIsTyping] = useState(false);
     const flatListRef = useRef(null);
+    const prevVisibleRef = useRef(false);
+
+    useEffect(() => {
+        if (visible && !prevVisibleRef.current) {
+            setMessages(buildWelcomeMessages(city, occasionName));
+        }
+        prevVisibleRef.current = visible;
+    }, [visible, city, occasionName]);
 
     const sendMessage = async () => {
         const trimmed = inputText.trim();
@@ -32,15 +46,24 @@ export default function ChatModal({ visible, onClose }) {
         setIsTyping(true);
 
         try {
-            const { data, error } = await api.postAiChat({
+            const chatBody = {
                 message: trimmed,
                 history,
-            });
+                ...(city ? { city } : {}),
+                ...(occasionId ? { occasion_id: occasionId } : {}),
+                ...(occasionName ? { occasion_name: occasionName } : {}),
+                ...(typeof plannedBudgetInr === 'number' &&
+                plannedBudgetInr > 0 &&
+                Number.isFinite(plannedBudgetInr)
+                    ? { planned_budget_inr: plannedBudgetInr }
+                    : {}),
+            };
+            const { data, error } = await api.postAiChat(chatBody);
             if (error) {
                 const rawErr = error.message || 'Could not reach Ekatraa AI. Check your connection and API settings.';
                 const botMsg = {
                     id: (Date.now() + 1).toString(),
-                    text: sanitizeAiDisplayText(rawErr) || 'Could not complete this chat. Try again shortly.',
+                    text: rawErr,
                     sender: 'bot',
                 };
                 setMessages((prev) => [...prev, botMsg]);
@@ -57,7 +80,7 @@ export default function ChatModal({ visible, onClose }) {
         } catch (e) {
             const botMsg = {
                 id: (Date.now() + 1).toString(),
-                text: sanitizeAiDisplayText(e?.message || '') || 'Something went wrong.',
+                text: e?.message || 'Something went wrong.',
                 sender: 'bot',
             };
             setMessages((prev) => [...prev, botMsg]);

@@ -1,13 +1,27 @@
-/** Strip Anthropic model echoes from strings shown in the UI (inline, glued blocks, or API errors). */
+function isAssistantModelEchoLine(line) {
+    const x = line.trim()
+    if (!x) return true
+    if (/^model\s*[:：]\s*claude[-\w.]*/i.test(x)) return true
+    if (/^model\s*[:：]\s*$/i.test(x)) return true
+    if (/^claude[-a-z0-9.]+$/i.test(x) && x.length < 96) return true
+    if (/^assistant\s*model\s*[:：]\s*\S+$/i.test(x)) return true
+    return false
+}
+
+function stripLeadingTrailingModelEchoLines(s) {
+    const lines = s.split('\n')
+    while (lines.length && isAssistantModelEchoLine(lines[0])) lines.shift()
+    while (lines.length && isAssistantModelEchoLine(lines[lines.length - 1])) lines.pop()
+    return lines.join('\n').trim()
+}
+
+/** Strip model-id echoes from assistant text (gentle: do not rewrite words inside sentences). */
 export function sanitizeAiDisplayText(s) {
     if (typeof s !== 'string') return ''
-    let t = s.trim()
-    t = t.replace(/^\s*model\s*[:：]\s*claude[-\w.]*/i, '')
-    t = t.replace(/\bmodel\s*[:：]\s*claude[-\w.]*\b/gi, '')
-    t = t.replace(/\bassistant\s*model\s*[:：]\s*\S+/gi, '')
-    t = t.replace(/\bclaude-(?:3|sonnet|opus|haiku)[-\d.a-z]*\b/gi, '')
-    t = t.replace(/\bclaude-\d[\w.-]*\b/gi, '')
-    t = t.replace(/[ \t]{2,}/g, ' ')
-    t = t.replace(/\n{3,}/g, '\n\n').trim()
-    return t
+    const raw = s.trim()
+    if (!raw) return ''
+    const gentle = stripLeadingTrailingModelEchoLines(raw)
+    if (gentle.length > 0) return gentle
+    const deGlued = raw.replace(/^\s*model\s*[:：]\s*claude[-\w.]*/i, '').trim()
+    return deGlued || raw
 }

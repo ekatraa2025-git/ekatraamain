@@ -1,5 +1,3 @@
-import { sanitizeAiDisplayText } from '../utils/sanitizeAiDisplayText';
-
 /**
  * Backend API client for Ekatraa app.
  * When EXPO_PUBLIC_API_URL is set, uses new flow: occasions → categories → services → cart → checkout → orders.
@@ -30,8 +28,7 @@ function stringifyApiError(raw) {
             }
         }
     } else msg = String(raw);
-    const cleaned = sanitizeAiDisplayText(msg);
-    return cleaned || msg || 'Request failed';
+    return msg || 'Request failed';
 }
 
 function buildError(e) {

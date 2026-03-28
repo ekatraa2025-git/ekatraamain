@@ -92,6 +92,7 @@ export default function RecommendationBudgetModal({
     onClose,
     theme,
     colors,
+    city,
     occasionId,
     occasionName,
     data,
@@ -173,6 +174,8 @@ export default function RecommendationBudgetModal({
                 guest_band: formSnapshot?.guest_count
                     ? `Approximately ${formSnapshot.guest_count} guests`
                     : null,
+                ...(city ? { city } : {}),
+                ...(occasionId ? { occasion_id: occasionId } : {}),
                 allocation_lines: data.allocation_summary.map((a) => ({
                     category_id: a.category_id,
                     name: a.name,
@@ -198,7 +201,7 @@ export default function RecommendationBudgetModal({
         return () => {
             cancelled = true;
         };
-    }, [visible, data, occasionName, formSnapshot?.guest_count]);
+    }, [visible, data, occasionName, formSnapshot?.guest_count, city, occasionId]);
 
     const toggleSelect = (svc, catName) => {
         setSelected((prev) => {
@@ -429,9 +432,7 @@ export default function RecommendationBudgetModal({
                                     <ActivityIndicator style={{ marginTop: 12 }} color={colors.primary} />
                                 )}
                                 {narrativeError ? (
-                                    <Text style={styles.errText}>
-                                        {sanitizeAiDisplayText(String(narrativeError)) || 'Something went wrong.'}
-                                    </Text>
+                                    <Text style={styles.errText}>{String(narrativeError)}</Text>
                                 ) : null}
                                 {narrative ? (
                                     <View style={{ marginTop: 12 }}>
