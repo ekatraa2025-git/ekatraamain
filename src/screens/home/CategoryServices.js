@@ -3,7 +3,7 @@ import {
     View, Text, StyleSheet, ScrollView, Image,
     TouchableOpacity, TextInput, Alert, ActivityIndicator,
     Dimensions, Animated, LayoutAnimation, Platform,
-    Modal, Linking, KeyboardAvoidingView,
+    Modal, Linking, KeyboardAvoidingView, UIManager,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -29,6 +29,10 @@ const BUDGET_OPTIONS = [
     '21-30 Lakhs', '30 Lakhs+', '50 Lakhs+',
 ];
 const SECTION_COLORS = ['#FF7A00', '#1E3A8A', '#10B981', '#8B5CF6', '#F59E0B', '#EC4899', '#06B6D4', '#14B8A6'];
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+    UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
 export default function CategoryServices({ route, navigation }) {
     const { theme, isDarkMode } = useTheme();
@@ -58,6 +62,8 @@ export default function CategoryServices({ route, navigation }) {
     const [cartId, setCartId] = useState(globalCartId || null);
     const [adding, setAdding] = useState(false);
     const [expandedServiceId, setExpandedServiceId] = useState(null);
+    /** categoryId -> expanded; initially all collapsed */
+    const [expandedCategoryIds, setExpandedCategoryIds] = useState({});
     const [showContactModal, setShowContactModal] = useState(false);
     const [contactModalForm, setContactModalForm] = useState({
         contact_name: user?.user_metadata?.full_name || user?.user_metadata?.name || '',
@@ -381,10 +387,23 @@ export default function CategoryServices({ route, navigation }) {
                         {Object.entries(servicesByCategory).map(([catId, catData], catIdx) => {
                             const sectionColor = SECTION_COLORS[catIdx % SECTION_COLORS.length];
                             if (catData.services.length === 0) return null;
+                            const catExpanded = expandedCategoryIds[catId] === true;
                             return (
                                 <View key={catId} style={styles.categoryGroup}>
-                                    {/* Category Section Header */}
-                                    <View style={styles.catSectionHeader}>
+                                    <TouchableOpacity
+                                        style={styles.catSectionHeader}
+                                        activeOpacity={0.75}
+                                        onPress={() => {
+                                            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                                            setExpandedCategoryIds((p) => ({ ...p, [catId]: !catExpanded }));
+                                        }}
+                                    >
+                                        <Ionicons
+                                            name={catExpanded ? 'chevron-down' : 'chevron-forward'}
+                                            size={22}
+                                            color={sectionColor}
+                                            style={{ marginRight: 6 }}
+                                        />
                                         <View style={[styles.catSectionDot, { backgroundColor: sectionColor }]} />
                                         <View style={styles.catSectionTitleWrap}>
                                             <Text style={[styles.catSectionTitle, { color: theme.text }]}>
@@ -392,13 +411,13 @@ export default function CategoryServices({ route, navigation }) {
                                             </Text>
                                             <Text style={[styles.catSectionCount, { color: theme.textLight }]}>
                                                 {catData.services.length} {catData.services.length === 1 ? 'service' : 'services'}
+                                                {!catExpanded ? ' · tap to expand' : ''}
                                             </Text>
                                         </View>
                                         <View style={[styles.catSectionLine, { backgroundColor: sectionColor + '30' }]} />
-                                    </View>
+                                    </TouchableOpacity>
 
-                                    {/* Service Cards */}
-                                    {catData.services.map(item => {
+                                    {catExpanded && catData.services.map(item => {
                                         const tierPrices = getServiceTierPrices(item);
                                         const isSelected = selectedServices.has(item.id);
                                         const selected = selectedServices.get(item.id);

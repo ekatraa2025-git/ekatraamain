@@ -11,14 +11,23 @@ import {
     Share,
     StyleSheet,
     Dimensions,
+    Switch,
+    LayoutAnimation,
+    Platform,
+    UIManager,
 } from 'react-native';
 import Slider from '@react-native-community/slider';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useTheme } from '../context/ThemeContext';
 import { api } from '../services/api';
 import { sanitizeAiDisplayText } from '../utils/sanitizeAiDisplayText';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+    UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
 const MIN_BUDGET_INR = 100000;
 const MAX_BUDGET_INR = 20000000;
@@ -106,6 +115,7 @@ export default function RecommendationBudgetModal({
     refreshCartCount,
     formSnapshot,
 }) {
+    const { isDarkMode } = useTheme();
     const [modalBudgetInr, setModalBudgetInr] = useState(MIN_BUDGET_INR);
     const [categoryEdits, setCategoryEdits] = useState(null);
     const [narrative, setNarrative] = useState(null);
@@ -117,6 +127,10 @@ export default function RecommendationBudgetModal({
     const [addingCart, setAddingCart] = useState(false);
     const [helpOpen, setHelpOpen] = useState(true);
     const [recRefreshLoading, setRecRefreshLoading] = useState(false);
+    /** categoryId -> expanded (services visible); initially all collapsed */
+    const [expandedRecCats, setExpandedRecCats] = useState({});
+    /** categoryId -> included in plan */
+    const [includedCats, setIncludedCats] = useState({});
     const debounceRef = useRef(null);
     const prevVisibleRef = useRef(false);
 
@@ -159,8 +173,21 @@ export default function RecommendationBudgetModal({
             setNarrative(null);
             setNarrativeAiMeta(null);
             setNarrativeError(null);
+            setExpandedRecCats({});
         }
     }, [visible, data?.total_budget]);
+
+    useEffect(() => {
+        const cats = data?.categories;
+        if (!cats?.length) return;
+        setIncludedCats((prev) => {
+            const next = { ...prev };
+            cats.forEach((c) => {
+                if (next[c.id] === undefined) next[c.id] = true;
+            });
+            return next;
+        });
+    }, [data?.categories]);
 
     useEffect(() => {
         if (!visible || !data?.allocation_summary?.length || !occasionName) return;
@@ -363,7 +390,7 @@ export default function RecommendationBudgetModal({
             }
             refreshCartCount?.(cid);
             Alert.alert('Added to cart', `${selected.size} item(s) added.`, [
-                { text: 'OK', onPress: () => onClose(true) },
+                { text: 'OK', onPress: () => onClose('cart') },
             ]);
         } catch (e) {
             Alert.alert('Cart', e?.message || 'Could not add to cart.');
@@ -412,6 +439,74 @@ export default function RecommendationBudgetModal({
                         showsVerticalScrollIndicator
                         bounces
                     >
+                        {narrativeLoading && (
+                            <View style={[styles.narrativeLoadingCard, { borderColor: theme.border }]}>
+                                <ActivityIndicator color={colors.primary} />
+                                <Text style={[styles.narrativeLoadingText, { color: theme.textLight }]}>
+                                    Shaping your personalised budget story…
+                                </Text>
+                            </View>
+                        )}
+                        {narrativeError ? <Text style={styles.errText}>{String(narrativeError)}</Text> : null}
+                        {narrative ? (
+                            <LinearGradient
+                                colors={[
+                                    isDarkMode ? '#1e1b4b' : '#FFF7ED',
+                                    isDarkMode ? '#312e81' + 'cc' : '#FFEDD5',
+                                    theme.card,
+                                ]}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 1 }}
+                                style={[styles.narrativeHero, { borderColor: colors.primary + '66' }]}
+                            >
+                                <View style={styles.narrativeHeroAccent} />
+                                <View style={styles.narrativeBadgeRow}>
+                                    <LinearGradient
+                                        colors={[colors.primary, colors.secondary || '#F97316']}
+                                        start={{ x: 0, y: 0 }}
+                                        end={{ x: 1, y: 0 }}
+                                        style={styles.narrativeBadgeGrad}
+                                    >
+                                        <Ionicons name="sparkles" size={16} color="#FFF" />
+                                        <Text style={styles.narrativeBadgeText}>AI plan insight</Text>
+                                    </LinearGradient>
+                                </View>
+                                <Text style={[styles.narrativeIntro, { color: theme.text }]}>
+                                    {sanitizeAiDisplayText(narrative.intro)}
+                                </Text>
+                                {(narrative.tips || []).length > 0 && (
+                                    <View style={styles.narrativeTipsGrid}>
+                                        {(narrative.tips || []).map((tip, i) => (
+                                            <View
+                                                key={i}
+                                                style={[
+                                                    styles.narrativeTipPill,
+                                                    { backgroundColor: isDarkMode ? '#1F2333' : '#FFF', borderColor: colors.primary + '33' },
+                                                ]}
+                                            >
+                                                <Ionicons name="checkmark-circle" size={16} color={colors.primary} />
+                                                <Text style={[styles.narrativeTipText, { color: theme.text }]}>
+                                                    {sanitizeAiDisplayText(tip)}
+                                                </Text>
+                                            </View>
+                                        ))}
+                                    </View>
+                                )}
+                                {(narrative.planning_reminders || []).length > 0 && (
+                                    <View style={[styles.narrativeRemindBox, { backgroundColor: isDarkMode ? '#0f172a88' : '#FFF8F0' }]}>
+                                        {(narrative.planning_reminders || []).map((tip, i) => (
+                                            <Text key={`p-${i}`} style={[styles.narrativeRemindLine, { color: theme.textLight }]}>
+                                                → {sanitizeAiDisplayText(tip)}
+                                            </Text>
+                                        ))}
+                                    </View>
+                                )}
+                                <Text style={[styles.nDisclaimer, { color: theme.textLight }]}>
+                                    {sanitizeAiDisplayText(narrative.disclaimer)}
+                                </Text>
+                            </LinearGradient>
+                        ) : null}
+
                         <TouchableOpacity
                             style={[styles.helpToggle, { borderColor: theme.border }]}
                             onPress={() => setHelpOpen(!helpOpen)}
@@ -426,34 +521,9 @@ export default function RecommendationBudgetModal({
                                     Use the budget slider to set your overall spend. Category sliders adjust how much of
                                     that total goes to each area; other categories rebalance automatically to stay at
                                     100%. Pick a pricing tier per service; tiers marked as fitting stay within that
-                                    category&apos;s slice.
+                                    category&apos;s slice. Expand each category to review services — use the switch to
+                                    include or skip a whole category.
                                 </Text>
-                                {narrativeLoading && (
-                                    <ActivityIndicator style={{ marginTop: 12 }} color={colors.primary} />
-                                )}
-                                {narrativeError ? (
-                                    <Text style={styles.errText}>{String(narrativeError)}</Text>
-                                ) : null}
-                                {narrative ? (
-                                    <View style={{ marginTop: 12 }}>
-                                        <Text style={[styles.nIntro, { color: theme.text }]}>
-                                            {sanitizeAiDisplayText(narrative.intro)}
-                                        </Text>
-                                        {(narrative.tips || []).map((tip, i) => (
-                                            <Text key={i} style={[styles.nBullet, { color: theme.textLight }]}>
-                                                • {sanitizeAiDisplayText(tip)}
-                                            </Text>
-                                        ))}
-                                        {(narrative.planning_reminders || []).map((tip, i) => (
-                                            <Text key={`p-${i}`} style={[styles.nBullet, { color: theme.textLight }]}>
-                                                ◦ {sanitizeAiDisplayText(tip)}
-                                            </Text>
-                                        ))}
-                                        <Text style={[styles.nDisclaimer, { color: theme.textLight }]}>
-                                            {sanitizeAiDisplayText(narrative.disclaimer)}
-                                        </Text>
-                                    </View>
-                                ) : null}
                             </View>
                         )}
 
@@ -484,24 +554,68 @@ export default function RecommendationBudgetModal({
 
                         {categories.map((cat) => {
                             const allocated = cat.allocated_budget || 0;
-                            const ids = categories.map((c) => c.id);
                             const current = {};
                             categories.forEach((c) => {
                                 current[c.id] =
                                     categoryEdits && categoryEdits[c.id] != null ? categoryEdits[c.id] : c.percentage;
                             });
                             const pctVal = current[cat.id] ?? cat.percentage;
+                            const expanded = expandedRecCats[cat.id] === true;
+                            const included = includedCats[cat.id] !== false;
                             return (
-                                <View key={cat.id} style={[styles.recCatBlock, { borderColor: theme.border }]}>
-                                    <View style={styles.catHeaderRow}>
-                                        <Text style={[styles.recCatName, { color: theme.text }]}>{cat.name}</Text>
-                                        {allocated > 0 && (
-                                            <Text style={[styles.recCatBudget, { color: colors.primary }]}>
-                                                ₹{(allocated / 1000).toFixed(0)}k allocated
-                                            </Text>
-                                        )}
+                                <View
+                                    key={cat.id}
+                                    style={[
+                                        styles.recCatBlock,
+                                        { borderColor: theme.border, opacity: included ? 1 : 0.5 },
+                                    ]}
+                                >
+                                    <View style={styles.catHeaderMainRow}>
+                                        <TouchableOpacity
+                                            style={styles.catExpandHit}
+                                            onPress={() => {
+                                                LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                                                setExpandedRecCats((p) => ({ ...p, [cat.id]: !expanded }));
+                                            }}
+                                            activeOpacity={0.7}
+                                        >
+                                            <Ionicons
+                                                name={expanded ? 'chevron-down' : 'chevron-forward'}
+                                                size={22}
+                                                color={colors.primary}
+                                            />
+                                            <View style={{ flex: 1, marginLeft: 6 }}>
+                                                <Text style={[styles.recCatName, { color: theme.text }]}>{cat.name}</Text>
+                                                <Text style={[styles.recCatBudget, { color: colors.primary }]}>
+                                                    {allocated > 0
+                                                        ? `₹${(allocated / 1000).toFixed(0)}k allocated · `
+                                                        : ''}
+                                                    {(cat.services || []).length} service
+                                                    {(cat.services || []).length !== 1 ? 's' : ''}
+                                                    {!expanded ? ' · tap to expand' : ''}
+                                                </Text>
+                                            </View>
+                                        </TouchableOpacity>
+                                        <View style={styles.catIncludeWrap}>
+                                            <Text style={[styles.includeLabel, { color: theme.textLight }]}>Include</Text>
+                                            <Switch
+                                                value={included}
+                                                onValueChange={(v) => {
+                                                    setIncludedCats((p) => ({ ...p, [cat.id]: v }));
+                                                    if (!v) {
+                                                        setSelected((prev) => {
+                                                            const next = new Map(prev);
+                                                            (cat.services || []).forEach((s) => next.delete(s.id));
+                                                            return next;
+                                                        });
+                                                    }
+                                                }}
+                                                trackColor={{ false: theme.border, true: colors.primary + '88' }}
+                                                thumbColor={included ? colors.primary : '#f4f3f4'}
+                                            />
+                                        </View>
                                     </View>
-                                    {categories.length > 1 && (
+                                    {expanded && included && categories.length > 1 && (
                                         <>
                                             <Text style={[styles.sliderLabelSmall, { color: theme.textLight }]}>
                                                 Share of total ({pctVal.toFixed(1)}%)
@@ -520,124 +634,131 @@ export default function RecommendationBudgetModal({
                                             />
                                         </>
                                     )}
-                                    {(cat.services || []).length === 0 ? (
-                                        <Text style={[styles.recSvcName, { color: theme.textLight }]}>
-                                            No services in budget for this category
+                                    {expanded && !included && (
+                                        <Text style={[styles.recSvcName, { color: theme.textLight, paddingVertical: 8 }]}>
+                                            Category excluded — toggle Include to plan services here.
                                         </Text>
-                                    ) : (
-                                        (cat.services || []).map((svc) => {
-                                            const isOn = selected.has(svc.id);
-                                            const row = selected.get(svc.id);
-                                            const tiers = svc.tiers || [];
-                                            return (
-                                                <View
-                                                    key={svc.id}
-                                                    style={[
-                                                        styles.svcCard,
-                                                        {
-                                                            borderColor: isOn ? colors.primary : theme.border,
-                                                            backgroundColor: isOn ? colors.primary + '08' : 'transparent',
-                                                        },
-                                                    ]}
-                                                >
-                                                    <TouchableOpacity
-                                                        style={styles.svcRowTop}
-                                                        onPress={() => toggleSelect(svc, cat.name)}
-                                                    >
-                                                        <Ionicons
-                                                            name={isOn ? 'checkbox' : 'square-outline'}
-                                                            size={22}
-                                                            color={isOn ? colors.primary : theme.textLight}
-                                                        />
-                                                        <View style={{ flex: 1, marginLeft: 8 }}>
-                                                            <Text style={[styles.recNearestName, { color: theme.text }]}>
-                                                                {svc.name}
-                                                            </Text>
-                                                            {svc.selection_note ? (
-                                                                <Text
-                                                                    style={[styles.noteSmall, { color: theme.textLight }]}
-                                                                >
-                                                                    {svc.selection_note}
-                                                                </Text>
-                                                            ) : null}
-                                                            {!isOn && tiers.some((t) => numPrice(t.price) != null) ? (
-                                                                <Text style={[styles.tierPriceHint, { color: theme.textLight }]}>
-                                                                    Tier pricing:{' '}
-                                                                    {tiers
-                                                                        .filter((t) => numPrice(t.price) != null)
-                                                                        .map((t) => `${t.label} ${formatRupees(t.price)}`)
-                                                                        .join(' · ')}
-                                                                </Text>
-                                                            ) : null}
-                                                        </View>
-                                                    </TouchableOpacity>
-                                                    {isOn && tiers.length > 0 && (
-                                                        <View style={styles.tierRow}>
-                                                            {tiers.map((t) => {
-                                                                const p = numPrice(t.price);
-                                                                if (p == null) return null;
-                                                                const active = row?.tierKey === t.key;
-                                                                return (
-                                                                    <TouchableOpacity
-                                                                        key={t.key}
-                                                                        style={[
-                                                                            styles.tierChip,
-                                                                            {
-                                                                                borderColor: active
-                                                                                    ? colors.primary
-                                                                                    : theme.border,
-                                                                                backgroundColor: active
-                                                                                    ? colors.primary + '18'
-                                                                                    : 'transparent',
-                                                                            },
-                                                                        ]}
-                                                                        onPress={() =>
-                                                                            setTierForService(
-                                                                                svc.id,
-                                                                                t.key,
-                                                                                p,
-                                                                                svc.name,
-                                                                                cat.name
-                                                                            )
-                                                                        }
-                                                                    >
-                                                                        <Text
-                                                                            style={{
-                                                                                fontSize: 10,
-                                                                                fontWeight: '700',
-                                                                                color: theme.text,
-                                                                            }}
-                                                                        >
-                                                                            {t.label}
-                                                                        </Text>
-                                                                        <Text
-                                                                            style={{
-                                                                                fontSize: 10,
-                                                                                fontWeight: '800',
-                                                                                color: theme.text,
-                                                                            }}
-                                                                        >
-                                                                            {formatRupees(p)}
-                                                                        </Text>
-                                                                        <Text
-                                                                            style={{
-                                                                                fontSize: 9,
-                                                                                color: t.fits_allocation
-                                                                                    ? '#059669'
-                                                                                    : theme.textLight,
-                                                                            }}
-                                                                        >
-                                                                            {t.fits_allocation ? 'Within slice' : 'Above slice'}
-                                                                        </Text>
-                                                                    </TouchableOpacity>
-                                                                );
-                                                            })}
-                                                        </View>
-                                                    )}
-                                                </View>
-                                            );
-                                        })
                                     )}
+                                    {expanded &&
+                                        included &&
+                                        ((cat.services || []).length === 0 ? (
+                                            <Text style={[styles.recSvcName, { color: theme.textLight }]}>
+                                                No services in budget for this category
+                                            </Text>
+                                        ) : (
+                                            (cat.services || []).map((svc) => {
+                                                const isOn = selected.has(svc.id);
+                                                const row = selected.get(svc.id);
+                                                const tiers = svc.tiers || [];
+                                                return (
+                                                    <View
+                                                        key={svc.id}
+                                                        style={[
+                                                            styles.svcCard,
+                                                            {
+                                                                borderColor: isOn ? colors.primary : theme.border,
+                                                                backgroundColor: isOn ? colors.primary + '08' : 'transparent',
+                                                            },
+                                                        ]}
+                                                    >
+                                                        <TouchableOpacity
+                                                            style={styles.svcRowTop}
+                                                            onPress={() => toggleSelect(svc, cat.name)}
+                                                        >
+                                                            <Ionicons
+                                                                name={isOn ? 'checkbox' : 'square-outline'}
+                                                                size={22}
+                                                                color={isOn ? colors.primary : theme.textLight}
+                                                            />
+                                                            <View style={{ flex: 1, marginLeft: 8 }}>
+                                                                <Text style={[styles.recNearestName, { color: theme.text }]}>
+                                                                    {svc.name}
+                                                                </Text>
+                                                                {svc.selection_note ? (
+                                                                    <Text
+                                                                        style={[styles.noteSmall, { color: theme.textLight }]}
+                                                                    >
+                                                                        {svc.selection_note}
+                                                                    </Text>
+                                                                ) : null}
+                                                                {!isOn && tiers.some((t) => numPrice(t.price) != null) ? (
+                                                                    <Text style={[styles.tierPriceHint, { color: theme.textLight }]}>
+                                                                        Tier pricing:{' '}
+                                                                        {tiers
+                                                                            .filter((t) => numPrice(t.price) != null)
+                                                                            .map((t) => `${t.label} ${formatRupees(t.price)}`)
+                                                                            .join(' · ')}
+                                                                    </Text>
+                                                                ) : null}
+                                                            </View>
+                                                        </TouchableOpacity>
+                                                        {isOn && tiers.length > 0 && (
+                                                            <View style={styles.tierRow}>
+                                                                {tiers.map((t) => {
+                                                                    const p = numPrice(t.price);
+                                                                    if (p == null) return null;
+                                                                    const active = row?.tierKey === t.key;
+                                                                    return (
+                                                                        <TouchableOpacity
+                                                                            key={t.key}
+                                                                            style={[
+                                                                                styles.tierChip,
+                                                                                {
+                                                                                    borderColor: active
+                                                                                        ? colors.primary
+                                                                                        : theme.border,
+                                                                                    backgroundColor: active
+                                                                                        ? colors.primary + '18'
+                                                                                        : 'transparent',
+                                                                                },
+                                                                            ]}
+                                                                            onPress={() =>
+                                                                                setTierForService(
+                                                                                    svc.id,
+                                                                                    t.key,
+                                                                                    p,
+                                                                                    svc.name,
+                                                                                    cat.name
+                                                                                )
+                                                                            }
+                                                                        >
+                                                                            <Text
+                                                                                style={{
+                                                                                    fontSize: 10,
+                                                                                    fontWeight: '700',
+                                                                                    color: theme.text,
+                                                                                }}
+                                                                            >
+                                                                                {t.label}
+                                                                            </Text>
+                                                                            <Text
+                                                                                style={{
+                                                                                    fontSize: 10,
+                                                                                    fontWeight: '800',
+                                                                                    color: theme.text,
+                                                                                }}
+                                                                            >
+                                                                                {formatRupees(p)}
+                                                                            </Text>
+                                                                            <Text
+                                                                                style={{
+                                                                                    fontSize: 9,
+                                                                                    color: t.fits_allocation
+                                                                                        ? '#059669'
+                                                                                        : theme.textLight,
+                                                                                }}
+                                                                            >
+                                                                                {t.fits_allocation ? 'Within slice' : 'Above slice'}
+                                                                            </Text>
+                                                                        </TouchableOpacity>
+                                                                    );
+                                                                })}
+                                                            </View>
+                                                        )}
+                                                    </View>
+                                                );
+                                            })
+                                        ))}
                                 </View>
                             );
                         })}
@@ -752,9 +873,55 @@ const styles = StyleSheet.create({
     helpBox: { borderWidth: 1, borderRadius: 12, padding: 12, marginBottom: 16 },
     helpBody: { fontSize: 13, lineHeight: 20 },
     errText: { color: '#DC2626', marginTop: 8, fontSize: 13 },
-    nIntro: { fontSize: 14, lineHeight: 22, marginBottom: 8 },
-    nBullet: { fontSize: 13, lineHeight: 20, marginTop: 4 },
-    nDisclaimer: { fontSize: 12, marginTop: 10, fontStyle: 'italic' },
+    narrativeLoadingCard: {
+        borderWidth: 1,
+        borderRadius: 14,
+        padding: 20,
+        alignItems: 'center',
+        marginBottom: 14,
+    },
+    narrativeLoadingText: { marginTop: 10, fontSize: 13 },
+    narrativeHero: {
+        borderWidth: 2,
+        borderRadius: 16,
+        padding: 16,
+        marginBottom: 16,
+        overflow: 'hidden',
+    },
+    narrativeHeroAccent: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        height: 4,
+        backgroundColor: '#FF7A00',
+        opacity: 0.9,
+    },
+    narrativeBadgeRow: { marginBottom: 12 },
+    narrativeBadgeGrad: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        alignSelf: 'flex-start',
+        gap: 6,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 999,
+    },
+    narrativeBadgeText: { color: '#FFF', fontSize: 12, fontWeight: '800', letterSpacing: 0.3 },
+    narrativeIntro: { fontSize: 16, lineHeight: 24, fontWeight: '600', marginBottom: 12 },
+    narrativeTipsGrid: { gap: 8, marginBottom: 10 },
+    narrativeTipPill: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 8,
+        borderWidth: 1,
+        borderRadius: 12,
+        padding: 10,
+    },
+    narrativeTipText: { flex: 1, fontSize: 13, lineHeight: 19 },
+    narrativeRemindBox: { borderRadius: 10, padding: 10, marginBottom: 10 },
+    narrativeRemindLine: { fontSize: 12, lineHeight: 18, marginBottom: 4 },
+    nDisclaimer: { fontSize: 12, marginTop: 6, fontStyle: 'italic' },
     sliderLabel: { fontSize: 14, fontWeight: '700', marginTop: 8 },
     sliderLabelSmall: { fontSize: 12, marginTop: 8 },
     sliderValue: { fontSize: 16, fontWeight: '800', marginBottom: 4 },
@@ -775,12 +942,15 @@ const styles = StyleSheet.create({
         padding: 12,
         marginBottom: 14,
     },
-    catHeaderRow: {
+    catHeaderMainRow: {
         flexDirection: 'row',
-        justifyContent: 'space-between',
         alignItems: 'center',
-        marginBottom: 8,
+        justifyContent: 'space-between',
+        marginBottom: 4,
     },
+    catExpandHit: { flex: 1, flexDirection: 'row', alignItems: 'center', paddingVertical: 4 },
+    catIncludeWrap: { alignItems: 'center', paddingLeft: 8 },
+    includeLabel: { fontSize: 10, marginBottom: 2, fontWeight: '600' },
     recCatName: { fontSize: 16, fontWeight: '700' },
     recCatBudget: { fontSize: 12, fontWeight: '600' },
     recSvcName: { fontSize: 13 },

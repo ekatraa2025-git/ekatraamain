@@ -14,6 +14,7 @@ import ServiceDetail from '../screens/home/ServiceDetail';
 import VendorsList from '../screens/home/VendorsList';
 import VendorDetail from '../screens/home/VendorDetail';
 import CategoryServices from '../screens/home/CategoryServices';
+import SpecialServices from '../screens/home/SpecialServices';
 import Menu from '../screens/menu/Menu';
 import MyBookings from '../screens/bookings/MyBookings';
 import MyProfile from '../screens/profile/MyProfile';
@@ -77,6 +78,11 @@ export default function AppNavigator() {
                 <Stack.Screen
                     name="CategoryServices"
                     component={CategoryServices}
+                    options={{ animation: 'slide_from_right' }}
+                />
+                <Stack.Screen
+                    name="SpecialServices"
+                    component={SpecialServices}
                     options={{ animation: 'slide_from_right' }}
                 />
                 <Stack.Screen

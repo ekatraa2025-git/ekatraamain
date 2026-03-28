@@ -25,6 +25,7 @@ import { useAppData } from '../../context/AppDataContext';
 import BottomTabBar from '../../components/BottomTabBar';
 import Logo from '../../components/Logo';
 import RecommendationBudgetModal from '../../components/RecommendationBudgetModal';
+import LocationMapPickerModal from '../../components/LocationMapPickerModal';
 import Slider from '@react-native-community/slider';
 
 const { width } = Dimensions.get('window');
@@ -91,6 +92,9 @@ export default function Home({ navigation }) {
     const [plannedBudgetInr, setPlannedBudgetInr] = useState(800000);
     const [recommendationFormSnapshot, setRecommendationFormSnapshot] = useState(null);
     const [formSubmitting, setFormSubmitting] = useState(false);
+    const [mapPickerVisible, setMapPickerVisible] = useState(false);
+    const [eventLocLoading, setEventLocLoading] = useState(false);
+    const [testimonials, setTestimonials] = useState([]);
     const useApi = useBackendApi();
 
     const [form, setForm] = useState({
@@ -102,6 +106,8 @@ export default function Home({ navigation }) {
         guest_count: '',
         location_preference: '',
         venue_preference: '',
+        location_kind: '',
+        venue_detail: '',
         planned_budget: '',
     });
 
@@ -133,6 +139,18 @@ export default function Home({ navigation }) {
     useEffect(() => {
         fetchData();
     }, [currentCity]);
+
+    useEffect(() => {
+        if (!useApi) return;
+        let cancelled = false;
+        (async () => {
+            const { data } = await api.getTestimonials();
+            if (!cancelled && Array.isArray(data) && data.length) setTestimonials(data);
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [useApi]);
 
     useEffect(() => {
         const mapped = BUDGET_CHIP_TO_INR[form.planned_budget];
@@ -219,6 +237,40 @@ export default function Home({ navigation }) {
         setLocationPickerVisible(false);
     };
 
+    const handleEventCurrentLocationPress = useCallback(async () => {
+        setEventLocLoading(true);
+        try {
+            const { status } = await Location.requestForegroundPermissionsAsync();
+            if (status !== 'granted') {
+                Alert.alert('Permission needed', 'Allow location to pin your event area.');
+                return;
+            }
+            const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+            const [rev] = await Location.reverseGeocodeAsync({
+                latitude: pos.coords.latitude,
+                longitude: pos.coords.longitude,
+            });
+            const parts = [
+                rev?.name,
+                rev?.street,
+                rev?.district,
+                rev?.city,
+                rev?.subregion,
+                rev?.region,
+                rev?.postalCode,
+            ].filter(Boolean);
+            const line = parts.length ? [...new Set(parts)].join(', ') : '';
+            setForm((p) => ({
+                ...p,
+                location_preference: line || [rev?.city, rev?.region].filter(Boolean).join(', ') || 'Current location',
+            }));
+        } catch (e) {
+            Alert.alert('Location', e?.message || 'Could not get your position.');
+        } finally {
+            setEventLocLoading(false);
+        }
+    }, []);
+
     const handleEventTypePress = (typeObj) => {
         const id = typeof typeObj === 'object' ? typeObj.id : typeObj;
         const newId = id === selectedType ? null : id;
@@ -244,6 +296,12 @@ export default function Home({ navigation }) {
             MAX_PLANNED_BUDGET_INR,
             Math.max(MIN_PLANNED_BUDGET_INR, Math.round(plannedBudgetInr))
         );
+        const venuePref =
+            form.location_kind === 'venue'
+                ? form.venue_detail?.trim() || null
+                : form.location_kind === 'own_place'
+                  ? 'Own place'
+                  : form.venue_preference || null;
         const payload = {
             role: form.role || null,
             contact_name: form.contact_name.trim(),
@@ -251,8 +309,8 @@ export default function Home({ navigation }) {
             contact_email: form.contact_email?.trim() || null,
             event_date: form.event_date || null,
             guest_count: form.guest_count ? parseInt(form.guest_count, 10) : null,
-            location_preference: form.location_preference || null,
-            venue_preference: form.venue_preference || null,
+            location_preference: form.location_preference?.trim() || null,
+            venue_preference: venuePref,
             planned_budget: budgetLabel,
         };
         setEventForm(payload);
@@ -668,6 +726,35 @@ export default function Home({ navigation }) {
                             <Text style={[styles.formSectionSubtitle, { color: theme.textLight }]}>
                                 Help us show you the best categories for {selectedOccasionObj?.name || 'your occasion'}
                             </Text>
+                            <TouchableOpacity
+                                style={styles.specialSkipWrap}
+                                onPress={() =>
+                                    navigation.navigate('SpecialServices', {
+                                        occasionId: selectedType,
+                                        occasionName: selectedOccasionObj?.name,
+                                        city: currentCity,
+                                    })
+                                }
+                                activeOpacity={0.92}
+                            >
+                                <LinearGradient
+                                    colors={['#4F46E5', '#7C3AED', '#A855F7']}
+                                    start={{ x: 0, y: 0 }}
+                                    end={{ x: 1, y: 1 }}
+                                    style={styles.specialSkipGradient}
+                                >
+                                    <View style={styles.specialSkipIconCircle}>
+                                        <Ionicons name="sparkles" size={22} color="#4F46E5" />
+                                    </View>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={styles.specialSkipTitle}>Skip form · Special add-ons</Text>
+                                        <Text style={styles.specialSkipSub}>
+                                            Odiya Bhara, Puja Samagri, party poppers, beverages & more — all occasions
+                                        </Text>
+                                    </View>
+                                    <Ionicons name="chevron-forward" size={22} color="#FFF" />
+                                </LinearGradient>
+                            </TouchableOpacity>
                             <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
                                 <View style={styles.formGroup}>
                                     <Text style={[styles.formLabel, { color: theme.textLight }]}>I am the</Text>
@@ -775,6 +862,116 @@ export default function Home({ navigation }) {
                                             />
                                         </View>
                                     </View>
+                                </View>
+                                <View style={styles.formGroup}>
+                                    <Text style={[styles.formLabel, { color: theme.textLight }]}>Event location</Text>
+                                    <Text style={[styles.formHint, { color: theme.textLight }]}>
+                                        Will the gathering be at your own place or a venue?
+                                    </Text>
+                                    <View style={styles.roleRow}>
+                                        {[
+                                            { key: 'own_place', label: 'Own place' },
+                                            { key: 'venue', label: 'Venue' },
+                                        ].map((opt) => (
+                                            <TouchableOpacity
+                                                key={opt.key}
+                                                style={[
+                                                    styles.roleChip,
+                                                    {
+                                                        backgroundColor: isDarkMode ? '#252840' : '#FFF',
+                                                        borderColor: theme.border,
+                                                    },
+                                                    form.location_kind === opt.key && {
+                                                        backgroundColor: colors.primary,
+                                                        borderColor: colors.primary,
+                                                    },
+                                                ]}
+                                                onPress={() =>
+                                                    setForm((p) => ({
+                                                        ...p,
+                                                        location_kind: opt.key,
+                                                    }))
+                                                }
+                                            >
+                                                <Text
+                                                    style={[
+                                                        styles.roleText,
+                                                        { color: theme.text },
+                                                        form.location_kind === opt.key && { color: '#FFF', fontWeight: '700' },
+                                                    ]}
+                                                >
+                                                    {opt.label}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        ))}
+                                    </View>
+                                    {form.location_kind ? (
+                                        <>
+                                            <View style={styles.locActionRow}>
+                                                <TouchableOpacity
+                                                    style={[
+                                                        styles.locActionBtn,
+                                                        { borderColor: theme.border, backgroundColor: isDarkMode ? '#1F2333' : '#FFF' },
+                                                    ]}
+                                                    onPress={handleEventCurrentLocationPress}
+                                                    disabled={eventLocLoading}
+                                                >
+                                                    {eventLocLoading ? (
+                                                        <ActivityIndicator size="small" color={colors.primary} />
+                                                    ) : (
+                                                        <Ionicons name="navigate" size={18} color={colors.primary} />
+                                                    )}
+                                                    <Text style={[styles.locActionText, { color: theme.text }]}>
+                                                        Use current location
+                                                    </Text>
+                                                </TouchableOpacity>
+                                                <TouchableOpacity
+                                                    style={[
+                                                        styles.locActionBtn,
+                                                        { borderColor: theme.border, backgroundColor: isDarkMode ? '#1F2333' : '#FFF' },
+                                                    ]}
+                                                    onPress={() => setMapPickerVisible(true)}
+                                                >
+                                                    <Ionicons name="map" size={18} color={colors.primary} />
+                                                    <Text style={[styles.locActionText, { color: theme.text }]}>
+                                                        Select on map
+                                                    </Text>
+                                                </TouchableOpacity>
+                                            </View>
+                                            {form.location_preference ? (
+                                                <View style={[styles.locPreview, { borderColor: theme.border, backgroundColor: isDarkMode ? '#1A1D27' : '#F9FAFB' }]}>
+                                                    <Ionicons name="location" size={16} color={colors.primary} />
+                                                    <Text style={[styles.locPreviewText, { color: theme.text }]} numberOfLines={3}>
+                                                        {form.location_preference}
+                                                    </Text>
+                                                </View>
+                                            ) : (
+                                                <Text style={[styles.formHint, { color: theme.textLight, marginTop: 6 }]}>
+                                                    Pick current GPS or search on the map to set your event address.
+                                                </Text>
+                                            )}
+                                            {form.location_kind === 'venue' && (
+                                                <View style={{ marginTop: 10 }}>
+                                                    <Text style={[styles.formLabel, { color: theme.textLight }]}>Venue name (optional)</Text>
+                                                    <View
+                                                        style={[
+                                                            styles.inputWrap,
+                                                            { backgroundColor: isDarkMode ? '#1F2333' : '#FFF', borderColor: theme.border },
+                                                        ]}
+                                                    >
+                                                        <Ionicons name="business-outline" size={16} color={theme.textLight} />
+                                                        <TextInput
+                                                            style={[styles.input, { color: theme.text }]}
+                                                            placeholder="e.g. Hotel / banquet name"
+                                                            placeholderTextColor={theme.textLight}
+                                                            value={form.venue_detail}
+                                                            onChangeText={(t) => setForm((p) => ({ ...p, venue_detail: t }))}
+                                                        />
+                                                    </View>
+                                                </View>
+                                            )}
+                                        </>
+                                    ) : null}
                                 </View>
                                 <View style={styles.formGroup}>
                                     <Text style={[styles.formLabel, { color: theme.textLight }]}>Budget (excl. Gold & Apparels)</Text>
@@ -1029,23 +1226,111 @@ export default function Home({ navigation }) {
                         </LinearGradient>
                     </TouchableOpacity>
 
-                    {/* Thank You from Ekatraa */}
-                    <View style={[styles.thankYouSection, { backgroundColor: theme.card, borderColor: theme.border }]}>
-                        <LinearGradient
-                            colors={[colors.primary + '12', colors.secondary + '08']}
-                            style={styles.thankYouGradient}
-                            start={{ x: 0, y: 0 }}
-                            end={{ x: 1, y: 1 }}
-                        >
-                            <View style={{ marginBottom: 10 }}>
-                                <Logo width={40} height={40} />
+                    {testimonials.length > 0 ? (
+                        <View style={[styles.testimonialsSection, { borderColor: theme.border, backgroundColor: theme.card }]}>
+                            <View style={styles.testimonialsHeader}>
+                                <Text style={[styles.testimonialsKicker, { color: colors.primary }]}>Real celebrations</Text>
+                                <Text style={[styles.testimonialsTitle, { color: theme.text }]}>Stories that inspire us</Text>
+                                <Text style={[styles.testimonialsSubtitle, { color: theme.textLight }]}>
+                                    Families who planned with Ekatraa
+                                </Text>
                             </View>
-                            <Text style={[styles.thankYouTitle, { color: theme.text }]}>Thank you from Ekatraa</Text>
-                            <Text style={[styles.thankYouText, { color: theme.textLight }]}>
-                                We're honoured to be part of your special occasion. Your trust means the world to us—here's to creating memories that last a lifetime.
-                            </Text>
-                        </LinearGradient>
-                    </View>
+                            <ScrollView
+                                horizontal
+                                showsHorizontalScrollIndicator={false}
+                                contentContainerStyle={styles.testimonialsScroll}
+                                decelerationRate="fast"
+                                snapToInterval={width * 0.86}
+                            >
+                                {testimonials.map((t) => (
+                                    <LinearGradient
+                                        key={t.id}
+                                        colors={isDarkMode ? ['#1e293b', '#0f172a'] : ['#FFFFFF', '#FFF8F0']}
+                                        start={{ x: 0, y: 0 }}
+                                        end={{ x: 1, y: 1 }}
+                                        style={[
+                                            styles.testimonialCard,
+                                            { borderColor: isDarkMode ? '#334155' : colors.primary + '35' },
+                                        ]}
+                                    >
+                                        <View style={styles.testimonialTop}>
+                                            {t.image_url ? (
+                                                <Image source={{ uri: t.image_url }} style={styles.testimonialImg} />
+                                            ) : (
+                                                <LinearGradient
+                                                    colors={[colors.primary, colors.secondary]}
+                                                    style={styles.testimonialAvatar}
+                                                >
+                                                    <Text style={styles.testimonialAvatarText}>
+                                                        {(t.display_name || '?').charAt(0).toUpperCase()}
+                                                    </Text>
+                                                </LinearGradient>
+                                            )}
+                                            <View style={{ flex: 1 }}>
+                                                <Text style={[styles.testimonialName, { color: theme.text }]} numberOfLines={1}>
+                                                    {t.display_name}
+                                                </Text>
+                                                <View style={styles.testimonialActions}>
+                                                    {t.video_url ? (
+                                                        <TouchableOpacity
+                                                            style={styles.tMiniBtn}
+                                                            onPress={() => Linking.openURL(t.video_url)}
+                                                        >
+                                                            <Ionicons name="logo-youtube" size={16} color="#EF4444" />
+                                                            <Text
+                                                                style={[
+                                                                    styles.tMiniBtnText,
+                                                                    { color: isDarkMode ? '#FECACA' : '#5B21B6' },
+                                                                ]}
+                                                            >
+                                                                Video
+                                                            </Text>
+                                                        </TouchableOpacity>
+                                                    ) : null}
+                                                    {t.voice_recording_url ? (
+                                                        <TouchableOpacity
+                                                            style={styles.tMiniBtn}
+                                                            onPress={() => Linking.openURL(t.voice_recording_url)}
+                                                        >
+                                                            <Ionicons name="mic" size={16} color={colors.primary} />
+                                                            <Text
+                                                                style={[
+                                                                    styles.tMiniBtnText,
+                                                                    { color: isDarkMode ? '#C4B5FD' : '#5B21B6' },
+                                                                ]}
+                                                            >
+                                                                Voice
+                                                            </Text>
+                                                        </TouchableOpacity>
+                                                    ) : null}
+                                                </View>
+                                            </View>
+                                        </View>
+                                        {t.testimonial_text ? (
+                                            <Text style={[styles.testimonialQuote, { color: theme.text }]}>"{t.testimonial_text}"</Text>
+                                        ) : null}
+                                    </LinearGradient>
+                                ))}
+                            </ScrollView>
+                        </View>
+                    ) : (
+                        <View style={[styles.thankYouSection, { backgroundColor: theme.card, borderColor: theme.border }]}>
+                            <LinearGradient
+                                colors={[colors.primary + '12', colors.secondary + '08']}
+                                style={styles.thankYouGradient}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 1 }}
+                            >
+                                <View style={{ marginBottom: 10 }}>
+                                    <Logo width={40} height={40} />
+                                </View>
+                                <Text style={[styles.thankYouTitle, { color: theme.text }]}>Thank you from Ekatraa</Text>
+                                <Text style={[styles.thankYouText, { color: theme.textLight }]}>
+                                    We're honoured to be part of your special occasion. Your trust means the world to us—here's to creating memories that last a lifetime.
+                                </Text>
+                            </LinearGradient>
+                        </View>
+                    )}
 
                     <View style={{ height: 80 }} />
                 </ScrollView>
@@ -1058,6 +1343,14 @@ export default function Home({ navigation }) {
                 occasionId={selectedType}
                 occasionName={selectedOccasionObj?.name}
                 plannedBudgetInr={plannedBudgetInr}
+            />
+
+            <LocationMapPickerModal
+                visible={mapPickerVisible}
+                onClose={() => setMapPickerVisible(false)}
+                onConfirm={({ address }) => {
+                    setForm((p) => ({ ...p, location_preference: address || p.location_preference }));
+                }}
             />
 
             <RecommendationBudgetModal
@@ -1074,6 +1367,8 @@ export default function Home({ navigation }) {
                             occasionName: selectedOccasionObj?.name,
                             cartId,
                         });
+                    } else if (result === 'cart') {
+                        navigation.navigate('Cart');
                     }
                 }}
                 theme={theme}
@@ -1474,6 +1769,30 @@ const styles = StyleSheet.create({
     },
     formGroup: { marginBottom: 14 },
     formLabel: { fontSize: 11, fontWeight: '700', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.8 },
+    formHint: { fontSize: 12, lineHeight: 17, marginBottom: 10 },
+    locActionRow: { flexDirection: 'row', gap: 10, marginTop: 4, marginBottom: 8 },
+    locActionBtn: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        paddingVertical: 12,
+        paddingHorizontal: 10,
+        borderRadius: 12,
+        borderWidth: 1,
+    },
+    locActionText: { fontSize: 13, fontWeight: '700' },
+    locPreview: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 8,
+        padding: 12,
+        borderRadius: 12,
+        borderWidth: 1,
+        marginTop: 4,
+    },
+    locPreviewText: { flex: 1, fontSize: 13, lineHeight: 19, fontWeight: '600' },
     formRow: { flexDirection: 'row', gap: 10, marginBottom: 12 },
     formCol: { flex: 1 },
     inputWrap: {
@@ -1638,6 +1957,138 @@ const styles = StyleSheet.create({
     guestManagerDesc: {
         fontSize: 12,
         lineHeight: 17,
+    },
+    specialSkipWrap: {
+        marginHorizontal: 16,
+        marginBottom: 14,
+        borderRadius: 18,
+        overflow: 'hidden',
+        shadowColor: '#7C3AED',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.35,
+        shadowRadius: 16,
+        elevation: 8,
+    },
+    specialSkipGradient: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 14,
+        paddingHorizontal: 14,
+        gap: 12,
+    },
+    specialSkipIconCircle: {
+        width: 44,
+        height: 44,
+        borderRadius: 14,
+        backgroundColor: 'rgba(255,255,255,0.95)',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    specialSkipTitle: {
+        color: '#FFF',
+        fontSize: 15,
+        fontWeight: '800',
+        letterSpacing: 0.2,
+    },
+    specialSkipSub: {
+        color: 'rgba(255,255,255,0.88)',
+        fontSize: 11,
+        lineHeight: 15,
+        marginTop: 3,
+    },
+    testimonialsSection: {
+        marginHorizontal: 16,
+        marginBottom: 20,
+        borderRadius: 22,
+        borderWidth: 1,
+        paddingBottom: 18,
+        overflow: 'hidden',
+    },
+    testimonialsHeader: {
+        paddingHorizontal: 18,
+        paddingTop: 20,
+        paddingBottom: 12,
+    },
+    testimonialsKicker: {
+        fontSize: 11,
+        fontWeight: '800',
+        letterSpacing: 1.2,
+        textTransform: 'uppercase',
+        marginBottom: 6,
+    },
+    testimonialsTitle: {
+        fontSize: 22,
+        fontWeight: '800',
+        letterSpacing: -0.3,
+    },
+    testimonialsSubtitle: {
+        fontSize: 13,
+        marginTop: 4,
+    },
+    testimonialsScroll: {
+        paddingHorizontal: 16,
+        paddingBottom: 8,
+        gap: 12,
+    },
+    testimonialCard: {
+        width: width * 0.82,
+        borderRadius: 20,
+        borderWidth: 1,
+        padding: 18,
+        marginRight: 12,
+    },
+    testimonialTop: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 12,
+        marginBottom: 12,
+    },
+    testimonialImg: {
+        width: 56,
+        height: 56,
+        borderRadius: 16,
+    },
+    testimonialAvatar: {
+        width: 56,
+        height: 56,
+        borderRadius: 16,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    testimonialAvatarText: {
+        color: '#FFF',
+        fontSize: 22,
+        fontWeight: '800',
+    },
+    testimonialName: {
+        fontSize: 16,
+        fontWeight: '700',
+    },
+    testimonialActions: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 8,
+        marginTop: 6,
+    },
+    tMiniBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        backgroundColor: 'rgba(124,58,237,0.12)',
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+        borderRadius: 999,
+    },
+    tMiniBtnText: {
+        fontSize: 11,
+        fontWeight: '700',
+        color: '#5B21B6',
+    },
+    testimonialQuote: {
+        fontSize: 14,
+        lineHeight: 22,
+        fontStyle: 'italic',
+        opacity: 0.95,
     },
     thankYouSection: {
         marginHorizontal: 16,

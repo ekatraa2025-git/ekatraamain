@@ -151,6 +151,15 @@ export const api = {
     async getCategories(occasionId) {
         return get('/api/public/categories', occasionId ? { occasion_id: occasionId } : {});
     },
+    async getMapsConfig() {
+        return get('/api/public/config/maps');
+    },
+    async getSpecialServices() {
+        return get('/api/public/special-services');
+    },
+    async getTestimonials() {
+        return get('/api/public/testimonials');
+    },
     async getServices(params = {}) {
         const q = {};
         if (params.occasion_id) q.occasion_id = params.occasion_id;
