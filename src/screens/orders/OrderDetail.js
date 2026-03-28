@@ -20,6 +20,7 @@ import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import BottomTabBar from '../../components/BottomTabBar';
+import { formatFriendlyDate, formatFriendlyDateTime } from '../../utils/formatFriendlyDate';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -151,12 +152,24 @@ export default function OrderDetail({ route, navigation }) {
                             Advance paid: ₹{advancePaid.toLocaleString()}
                         </Text>
                     )}
+                    {order?.event_name ? (
+                        <Text style={[styles.occasionLine, { color: theme.text }]}>
+                            Occasion: {order.event_name}
+                        </Text>
+                    ) : null}
                     {order?.contact_name && (
                         <Text style={[styles.meta, { color: theme.textLight }]}>{order.contact_name}</Text>
                     )}
-                    {order?.event_date && (
-                        <Text style={[styles.meta, { color: theme.textLight }]}>Event: {order.event_date}</Text>
-                    )}
+                    {order?.event_date ? (
+                        <Text style={[styles.meta, { color: theme.textLight }]}>
+                            Event date: {formatFriendlyDate(order.event_date)}
+                        </Text>
+                    ) : null}
+                    {order?.created_at ? (
+                        <Text style={[styles.meta, { color: theme.textLight }]}>
+                            Ordered: {formatFriendlyDateTime(order.created_at)}
+                        </Text>
+                    ) : null}
                     {order?.completion_otp && (
                         <View style={[styles.completionOtpBox, { backgroundColor: colors.primary + '20', borderColor: colors.primary }]}>
                             <Text style={[styles.completionOtpLabel, { color: theme.textLight }]}>Completion OTP (share with vendor)</Text>
@@ -206,7 +219,7 @@ export default function OrderDetail({ route, navigation }) {
                                     <Text style={[styles.historyNote, { color: theme.textLight }]}>{h.note}</Text>
                                 ) : null}
                                 <Text style={[styles.historyDate, { color: theme.textLight }]}>
-                                    {h.created_at ? new Date(h.created_at).toLocaleString() : ''}
+                                    {h.created_at ? formatFriendlyDateTime(h.created_at) : ''}
                                 </Text>
                             </View>
                         ))}
@@ -351,11 +364,12 @@ const styles = StyleSheet.create({
     scrollContent: { padding: 16, paddingBottom: 24, flexGrow: 1 },
     bottomSpacer: { height: 80 },
     card: {
-        padding: 16,
-        borderRadius: 16,
-        marginBottom: 16,
+        padding: 14,
+        borderRadius: 14,
+        marginBottom: 12,
         borderWidth: 1,
     },
+    occasionLine: { fontSize: 16, fontWeight: '700', marginBottom: 6 },
     statusRow: {
         flexDirection: 'row',
         alignItems: 'center',

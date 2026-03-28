@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, StyleSheet, Modal, TouchableOpacity, TextInput, FlatList, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
 import { api } from '../services/api';
@@ -18,6 +19,7 @@ function buildWelcomeMessages(city, occasionName) {
 
 export default function ChatModal({ visible, onClose, city, occasionId, occasionName, plannedBudgetInr }) {
     const { theme, isDarkMode } = useTheme();
+    const insets = useSafeAreaInsets();
     const [messages, setMessages] = useState(() => buildWelcomeMessages(city, occasionName));
     const [inputText, setInputText] = useState('');
     const [isTyping, setIsTyping] = useState(false);
@@ -135,8 +137,21 @@ export default function ChatModal({ visible, onClose, city, occasionId, occasion
                 />
 
                 {/* Input Area */}
-                <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} keyboardVerticalOffset={Platform.OS === "ios" ? 100 : 0}>
-                    <View style={[styles.inputContainer, { borderTopColor: theme.border, backgroundColor: theme.card }]}>
+                <KeyboardAvoidingView
+                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                    keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : Math.max(insets.bottom, 12) + 12}
+                >
+                    <View
+                        style={[
+                            styles.inputContainer,
+                            {
+                                borderTopColor: theme.border,
+                                backgroundColor: theme.card,
+                                paddingBottom: Math.max(insets.bottom, 10),
+                                paddingTop: 10,
+                            },
+                        ]}
+                    >
                         <TextInput
                             style={[styles.input, { backgroundColor: theme.inputBackground, color: theme.text, borderColor: theme.border }]}
                             value={inputText}
@@ -194,7 +209,7 @@ const styles = StyleSheet.create({
     },
     inputContainer: {
         flexDirection: 'row',
-        padding: 16,
+        paddingHorizontal: 16,
         borderTopWidth: 1,
         alignItems: 'center',
     },

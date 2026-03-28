@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
     View,
     Text,
@@ -31,6 +32,7 @@ export default function SavedRecommendations({ navigation }) {
     const [refreshing, setRefreshing] = useState(false);
     const [items, setItems] = useState([]);
     const [occasionNames, setOccasionNames] = useState({});
+    const [loadError, setLoadError] = useState(null);
 
     const loadOccasions = useCallback(async () => {
         if (!useApi) return;
@@ -45,21 +47,29 @@ export default function SavedRecommendations({ navigation }) {
     }, [useApi]);
 
     const load = useCallback(async () => {
+        setLoadError(null);
         if (!useApi || !isAuthenticated) {
             setItems([]);
             setLoading(false);
             return;
         }
-        const { data: sessionData } = await authService.getSession();
-        const token = sessionData?.session?.access_token;
+        const { session } = await authService.getSession();
+        const token = session?.access_token;
         if (!token) {
             setItems([]);
+            setLoadError('No session token. Try signing out and back in.');
             setLoading(false);
             return;
         }
         const { data, error } = await api.getBudgetRecommendationSnapshots(token);
-        if (!error && Array.isArray(data)) setItems(data);
-        else setItems([]);
+        if (error) {
+            setItems([]);
+            setLoadError(error.message || 'Could not load saved plans.');
+        } else if (Array.isArray(data)) {
+            setItems(data);
+        } else {
+            setItems([]);
+        }
         setLoading(false);
         setRefreshing(false);
     }, [useApi, isAuthenticated]);
@@ -68,10 +78,16 @@ export default function SavedRecommendations({ navigation }) {
         loadOccasions();
     }, [loadOccasions]);
 
-    useEffect(() => {
-        setLoading(true);
-        load();
-    }, [load]);
+    useFocusEffect(
+        useCallback(() => {
+            if (!useApi || !isAuthenticated) {
+                setLoading(false);
+                return;
+            }
+            setLoading(true);
+            load();
+        }, [useApi, isAuthenticated, load])
+    );
 
     const onRefresh = () => {
         setRefreshing(true);
@@ -100,9 +116,12 @@ export default function SavedRecommendations({ navigation }) {
                     <ActivityIndicator size="large" color={colors.primary} />
                 </View>
             ) : items.length === 0 ? (
-                <Text style={[styles.hint, { color: theme.textLight }]}>
-                    No saved plans yet. Save from the recommendations screen after you generate a budget.
-                </Text>
+                <View style={styles.emptyWrap}>
+                    <Text style={[styles.hint, { color: theme.textLight }]}>
+                        {loadError ||
+                            'No saved plans yet. Save from the recommendations screen after you generate a budget.'}
+                    </Text>
+                </View>
             ) : (
                 <FlatList
                     data={items}
@@ -172,7 +191,8 @@ const styles = StyleSheet.create({
     },
     headerTitle: { fontSize: 18, fontWeight: '800', flex: 1 },
     centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-    hint: { padding: 24, textAlign: 'center', fontSize: 14, lineHeight: 21 },
+    emptyWrap: { flex: 1, justifyContent: 'center', paddingHorizontal: 24 },
+    hint: { textAlign: 'center', fontSize: 14, lineHeight: 21 },
     list: { padding: 16, paddingBottom: 100 },
     card: {
         borderRadius: 16,

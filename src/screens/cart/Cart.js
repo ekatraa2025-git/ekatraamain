@@ -9,7 +9,7 @@ import {
     RefreshControl,
     Alert,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { useTheme } from '../../context/ThemeContext';
@@ -40,10 +40,13 @@ function getTierLabel(options) {
     return TIER_LABELS[normalized] || (normalized.charAt(0).toUpperCase() + normalized.slice(1));
 }
 
+const TAB_BAR_CONTENT_HEIGHT = 56;
+
 export default function Cart({ route, navigation }) {
     const { theme } = useTheme();
+    const insets = useSafeAreaInsets();
     const { isAuthenticated, user } = useAuth();
-    const { cartId: globalCartId, refreshCartCount } = useCart();
+    const { cartId: globalCartId, refreshCartCount, clearCart } = useCart();
     const cartId = route.params?.cartId || globalCartId;
 
     const [cart, setCart] = useState(null);
@@ -100,6 +103,32 @@ export default function Cart({ route, navigation }) {
         });
     };
 
+    const handleClearCart = () => {
+        if (!items.length) return;
+        Alert.alert('Clear cart?', 'Remove every item from your cart.', [
+            { text: 'Cancel', style: 'cancel' },
+            {
+                text: 'Clear all',
+                style: 'destructive',
+                onPress: async () => {
+                    try {
+                        for (const row of items) {
+                            const { error } = await api.removeCartItem(row.id);
+                            if (error) throw new Error(error.message);
+                        }
+                        await clearCart();
+                        setCart(null);
+                        await refreshCartCount();
+                    } catch (e) {
+                        Alert.alert('Cart', e?.message || 'Could not clear cart.');
+                    }
+                },
+            },
+        ]);
+    };
+
+    const footerBottom = TAB_BAR_CONTENT_HEIGHT + Math.max(insets.bottom, 4) + 6;
+
     if (!cartId) {
         return (
             <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top', 'left', 'right']}>
@@ -155,15 +184,30 @@ export default function Cart({ route, navigation }) {
                     </TouchableOpacity>
                 </View>
             ) : (
-                <>
+                <View style={styles.mainCol}>
                     <View style={[styles.summaryHeader, { borderBottomColor: theme.border }]}>
-                        <Text style={[styles.summaryTitle, { color: theme.text }]}>Order summary</Text>
-                        <Text style={[styles.summaryCount, { color: theme.textLight }]}>{items.length} {items.length === 1 ? 'item' : 'items'}</Text>
+                        <View>
+                            <Text style={[styles.summaryTitle, { color: theme.text }]}>Order summary</Text>
+                            {cart?.event_name ? (
+                                <Text style={[styles.occasionHint, { color: theme.textLight }]} numberOfLines={1}>
+                                    {cart.event_name}
+                                </Text>
+                            ) : null}
+                        </View>
+                        <View style={styles.summaryRight}>
+                            <Text style={[styles.summaryCount, { color: theme.textLight }]}>
+                                {items.length} {items.length === 1 ? 'item' : 'items'}
+                            </Text>
+                            <TouchableOpacity onPress={handleClearCart} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                                <Text style={styles.clearLink}>Clear cart</Text>
+                            </TouchableOpacity>
+                        </View>
                     </View>
+                    <View style={styles.listWrap}>
                     <FlatList
                         data={items}
                         keyExtractor={(item) => item.id}
-                        contentContainerStyle={styles.listContent}
+                        contentContainerStyle={[styles.listContent, { paddingBottom: footerBottom + 120 }]}
                         refreshControl={
                             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
                         }
@@ -206,14 +250,24 @@ export default function Cart({ route, navigation }) {
                             );
                         }}
                     />
-                    <View style={[styles.footer, { borderTopColor: theme.border, backgroundColor: theme.card }]}>
+                    </View>
+                    <View
+                        style={[
+                            styles.footer,
+                            {
+                                borderTopColor: theme.border,
+                                backgroundColor: theme.card,
+                                bottom: footerBottom,
+                            },
+                        ]}
+                    >
                         <Text style={[styles.totalLabel, { color: theme.text }]}>Total</Text>
                         <Text style={[styles.totalValue, { color: theme.text }]}>₹{total.toLocaleString()}</Text>
                         <TouchableOpacity style={styles.checkoutBtn} onPress={handleCheckout}>
                             <Text style={styles.checkoutBtnText}>Proceed to Checkout</Text>
                         </TouchableOpacity>
                     </View>
-                </>
+                </View>
             )}
             <BottomTabBar navigation={navigation} activeRoute="Cart" cartItemCount={items.length} />
         </SafeAreaView>
@@ -222,6 +276,7 @@ export default function Cart({ route, navigation }) {
 
 const styles = StyleSheet.create({
     container: { flex: 1 },
+    mainCol: { flex: 1 },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -235,14 +290,18 @@ const styles = StyleSheet.create({
     summaryHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
-        alignItems: 'center',
+        alignItems: 'flex-start',
         paddingHorizontal: 16,
         paddingVertical: 12,
         borderBottomWidth: 1,
     },
+    summaryRight: { alignItems: 'flex-end', gap: 4 },
     summaryTitle: { fontSize: 16, fontWeight: '600' },
+    occasionHint: { fontSize: 12, marginTop: 4, maxWidth: 200 },
     summaryCount: { fontSize: 14 },
-    listContent: { padding: 16, paddingBottom: 170 },
+    clearLink: { fontSize: 13, fontWeight: '700', color: colors.primary },
+    listWrap: { flex: 1 },
+    listContent: { padding: 16 },
     itemCard: {
         padding: 16,
         borderRadius: 12,
@@ -262,9 +321,10 @@ const styles = StyleSheet.create({
     qtyBtn: { width: 32, height: 32, borderRadius: 8, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
     qtyText: { fontSize: 16, fontWeight: '600', minWidth: 24, textAlign: 'center' },
     footer: {
-        marginHorizontal: 16,
-        marginBottom: 78,
-        padding: 16,
+        position: 'absolute',
+        left: 16,
+        right: 16,
+        padding: 14,
         borderWidth: 1,
         borderRadius: 16,
         shadowColor: '#000',

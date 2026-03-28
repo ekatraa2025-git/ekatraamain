@@ -30,8 +30,8 @@ export default function SavedRecommendationDetail({ route, navigation }) {
             setLoading(false);
             return;
         }
-        const { data: sessionData } = await authService.getSession();
-        const token = sessionData?.session?.access_token;
+        const { session } = await authService.getSession();
+        const token = session?.access_token;
         if (!token) {
             setSnap(null);
             setLoading(false);
