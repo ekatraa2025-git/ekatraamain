@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Modal, TouchableOpacity, TextInput, FlatList, K
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
 import { api } from '../services/api';
+import { sanitizeAiDisplayText } from '../utils/sanitizeAiDisplayText';
 
 const INITIAL_MESSAGES = [
     { id: '1', text: "Namaste! 🙏 I am Ekatraa AI.", sender: 'bot' },
@@ -36,18 +37,17 @@ export default function ChatModal({ visible, onClose }) {
                 history,
             });
             if (error) {
+                const rawErr = error.message || 'Could not reach Ekatraa AI. Check your connection and API settings.';
                 const botMsg = {
                     id: (Date.now() + 1).toString(),
-                    text: error.message || 'Could not reach Ekatraa AI. Check your connection and API settings.',
+                    text: sanitizeAiDisplayText(rawErr) || 'Could not complete this chat. Try again shortly.',
                     sender: 'bot',
                 };
                 setMessages((prev) => [...prev, botMsg]);
                 return;
             }
-            let reply = typeof data?.reply === 'string' ? data.reply.trim() : '';
-            if (/^model\s*:\s*claude/i.test(reply) && reply.length < 160) {
-                reply = '';
-            }
+            const raw = typeof data?.reply === 'string' ? data.reply : ''
+            let reply = sanitizeAiDisplayText(raw)
             const botMsg = {
                 id: (Date.now() + 1).toString(),
                 text: reply || 'No reply from AI.',
@@ -57,7 +57,7 @@ export default function ChatModal({ visible, onClose }) {
         } catch (e) {
             const botMsg = {
                 id: (Date.now() + 1).toString(),
-                text: e?.message || 'Something went wrong.',
+                text: sanitizeAiDisplayText(e?.message || '') || 'Something went wrong.',
                 sender: 'bot',
             };
             setMessages((prev) => [...prev, botMsg]);

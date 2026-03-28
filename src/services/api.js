@@ -1,3 +1,5 @@
+import { sanitizeAiDisplayText } from '../utils/sanitizeAiDisplayText';
+
 /**
  * Backend API client for Ekatraa app.
  * When EXPO_PUBLIC_API_URL is set, uses new flow: occasions → categories → services → cart → checkout → orders.
@@ -7,25 +9,29 @@ const REQUEST_TIMEOUT_MS = 15000;
 
 /** Ensures error messages are strings (APIs sometimes return nested objects). */
 function stringifyApiError(raw) {
-    if (raw == null) return '';
-    if (typeof raw === 'string') return raw;
-    if (typeof raw === 'object') {
-        if (typeof raw.message === 'string') return raw.message;
-        if (typeof raw.error === 'string') return raw.error;
-        if (raw.error && typeof raw.error === 'object' && typeof raw.error.message === 'string') {
-            return raw.error.message;
+    let msg = '';
+    if (raw == null) msg = '';
+    else if (typeof raw === 'string') msg = raw;
+    else if (typeof raw === 'object') {
+        if (typeof raw.message === 'string') msg = raw.message;
+        else if (typeof raw.error === 'string') msg = raw.error;
+        else if (raw.error && typeof raw.error === 'object' && typeof raw.error.message === 'string') {
+            msg = raw.error.message;
+        } else {
+            const keys = Object.keys(raw);
+            if (keys.length === 1 && typeof raw.model === 'string') {
+                msg = 'Could not complete this request. Check the app backend and AI settings.';
+            } else {
+                try {
+                    msg = JSON.stringify(raw);
+                } catch {
+                    msg = 'Request failed';
+                }
+            }
         }
-        const keys = Object.keys(raw);
-        if (keys.length === 1 && typeof raw.model === 'string') {
-            return 'Could not complete this request. Check the app backend and AI settings.';
-        }
-        try {
-            return JSON.stringify(raw);
-        } catch {
-            return 'Request failed';
-        }
-    }
-    return String(raw);
+    } else msg = String(raw);
+    const cleaned = sanitizeAiDisplayText(msg);
+    return cleaned || msg || 'Request failed';
 }
 
 function buildError(e) {

@@ -16,6 +16,7 @@ import Slider from '@react-native-community/slider';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { api } from '../services/api';
+import { sanitizeAiDisplayText } from '../utils/sanitizeAiDisplayText';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -238,7 +239,7 @@ export default function RecommendationBudgetModal({
             t += '\n';
         });
         if (narrative?.intro) {
-            t += `${narrative.intro}\n`;
+            t += `${sanitizeAiDisplayText(narrative.intro)}\n`;
         }
         return t;
     };
@@ -428,23 +429,27 @@ export default function RecommendationBudgetModal({
                                     <ActivityIndicator style={{ marginTop: 12 }} color={colors.primary} />
                                 )}
                                 {narrativeError ? (
-                                    <Text style={styles.errText}>{narrativeError}</Text>
+                                    <Text style={styles.errText}>
+                                        {sanitizeAiDisplayText(String(narrativeError)) || 'Something went wrong.'}
+                                    </Text>
                                 ) : null}
                                 {narrative ? (
                                     <View style={{ marginTop: 12 }}>
-                                        <Text style={[styles.nIntro, { color: theme.text }]}>{narrative.intro}</Text>
+                                        <Text style={[styles.nIntro, { color: theme.text }]}>
+                                            {sanitizeAiDisplayText(narrative.intro)}
+                                        </Text>
                                         {(narrative.tips || []).map((tip, i) => (
                                             <Text key={i} style={[styles.nBullet, { color: theme.textLight }]}>
-                                                • {tip}
+                                                • {sanitizeAiDisplayText(tip)}
                                             </Text>
                                         ))}
                                         {(narrative.planning_reminders || []).map((tip, i) => (
                                             <Text key={`p-${i}`} style={[styles.nBullet, { color: theme.textLight }]}>
-                                                ◦ {tip}
+                                                ◦ {sanitizeAiDisplayText(tip)}
                                             </Text>
                                         ))}
                                         <Text style={[styles.nDisclaimer, { color: theme.textLight }]}>
-                                            {narrative.disclaimer}
+                                            {sanitizeAiDisplayText(narrative.disclaimer)}
                                         </Text>
                                     </View>
                                 ) : null}
