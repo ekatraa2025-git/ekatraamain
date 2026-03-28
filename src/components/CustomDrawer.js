@@ -36,7 +36,7 @@ export default function CustomDrawer(props) {
                         style={styles.profileImage}
                     />
                     <Text style={styles.profileName}>Suraj Kumar</Text>
-                    <Text style={styles.profilePhone}>+91 98765 43210</Text>
+                    <Text style={styles.profilePhone}>+91 84229 48781</Text>
                 </View>
 
                 {/* Default Drawer Items (Home, etc) can go here if we used standard items, 

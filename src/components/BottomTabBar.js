@@ -3,19 +3,21 @@ import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../context/ThemeContext';
+import { useLocale } from '../context/LocaleContext';
 import { useCart } from '../context/CartContext';
 import { colors } from '../theme/colors';
 
 const TABS = [
-    { key: 'Home', icon: 'home', iconOutline: 'home-outline', label: 'Home' },
-    { key: 'MyOrders', icon: 'receipt', iconOutline: 'receipt-outline', label: 'Orders' },
-    { key: 'Cart', icon: 'cart', iconOutline: 'cart-outline', label: 'Cart' },
-    { key: 'About', icon: 'information-circle', iconOutline: 'information-circle-outline', label: 'About' },
-    { key: 'Menu', icon: 'menu', iconOutline: 'menu-outline', label: 'More' },
+    { key: 'Home', icon: 'home', iconOutline: 'home-outline', labelKey: 'tab_home' },
+    { key: 'MyOrders', icon: 'receipt', iconOutline: 'receipt-outline', labelKey: 'tab_orders' },
+    { key: 'Cart', icon: 'cart', iconOutline: 'cart-outline', labelKey: 'tab_cart' },
+    { key: 'About', icon: 'information-circle', iconOutline: 'information-circle-outline', labelKey: 'tab_about' },
+    { key: 'Menu', icon: 'menu', iconOutline: 'menu-outline', labelKey: 'tab_more' },
 ];
 
 export default function BottomTabBar({ navigation, activeRoute, cartItemCount: propCount }) {
     const { theme, isDarkMode } = useTheme();
+    const { t } = useLocale();
     const { cartItemCount: contextCount } = useCart();
     const cartItemCount = propCount ?? contextCount ?? 0;
     const insets = useSafeAreaInsets();
@@ -71,7 +73,7 @@ export default function BottomTabBar({ navigation, activeRoute, cartItemCount: p
                             { color: iconColor },
                             isActive && { color: colors.primary, fontWeight: '700' },
                         ]}>
-                            {tab.label}
+                            {t(tab.labelKey)}
                         </Text>
                     </TouchableOpacity>
                 );

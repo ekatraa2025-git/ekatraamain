@@ -4,12 +4,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { useTheme } from '../../context/ThemeContext';
+import { useLocale } from '../../context/LocaleContext';
 import { useAuth } from '../../context/AuthContext';
 import { useBackendApi } from '../../services/api';
 import BottomTabBar from '../../components/BottomTabBar';
 
 export default function Menu({ navigation }) {
     const { isDarkMode, toggleTheme, theme } = useTheme();
+    const { t: tr } = useLocale();
     const { user, isAuthenticated, signOut } = useAuth();
     const useApi = useBackendApi();
 
@@ -39,12 +41,12 @@ export default function Menu({ navigation }) {
 
     const handleLogout = () => {
         Alert.alert(
-            "Logout",
-            "Are you sure you want to logout?",
+            tr('menu_logout'),
+            tr('menu_logout_confirm'),
             [
-                { text: "Cancel", style: "cancel" },
+                { text: tr('button_cancel'), style: "cancel" },
                 {
-                    text: "Logout",
+                    text: tr('menu_logout'),
                     style: 'destructive',
                     onPress: async () => {
                         await signOut();
@@ -66,7 +68,7 @@ export default function Menu({ navigation }) {
     return (
         <SafeAreaView style={containerStyle} edges={['top', 'left', 'right']}>
             <View style={[styles.header, borderStyle]}>
-                <Text style={[styles.title, textStyle]}>Menu</Text>
+                <Text style={[styles.title, textStyle]}>{tr('menu_title')}</Text>
                 <TouchableOpacity onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.replace('Home')} style={styles.closeBtn}>
                     <Ionicons name="close" size={28} color={theme.text} />
                 </TouchableOpacity>
@@ -103,9 +105,9 @@ export default function Menu({ navigation }) {
                             <Ionicons name="person-outline" size={32} color={theme.textLight} />
                         </View>
                         <View style={{ flex: 1 }}>
-                            <Text style={[styles.profileName, textStyle]}>Welcome, Guest</Text>
+                            <Text style={[styles.profileName, textStyle]}>{tr('menu_welcome_guest')}</Text>
                             <Text style={[styles.loginText, { color: colors.primary }]}>
-                                Tap to login →
+                                {tr('menu_tap_login')}
                             </Text>
                         </View>
                     </TouchableOpacity>
@@ -113,16 +115,16 @@ export default function Menu({ navigation }) {
 
                 <View style={[styles.divider, { backgroundColor: theme.border }]} />
 
-                <Text style={[styles.sectionLabel, { color: theme.textLight }]}>Menu items</Text>
+                <Text style={[styles.sectionLabel, { color: theme.textLight }]}>{tr('menu_items_label')}</Text>
 
                 {useApi ? (
                     <TouchableOpacity
                         style={[styles.menuItem, borderStyle]}
                         onPress={() => {
                             if (!isAuthenticated) {
-                                Alert.alert('Sign in', 'Sign in to view saved budget plans and AI recommendations.', [
-                                    { text: 'Cancel', style: 'cancel' },
-                                    { text: 'Login', onPress: () => navigation.navigate('Login') },
+                                Alert.alert(tr('menu_sign_in_title'), tr('menu_sign_in_msg'), [
+                                    { text: tr('button_cancel'), style: 'cancel' },
+                                    { text: tr('button_login'), onPress: () => navigation.navigate('Login') },
                                 ]);
                                 return;
                             }
@@ -132,9 +134,9 @@ export default function Menu({ navigation }) {
                         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                             <Ionicons name="albums-outline" size={22} color={theme.text} style={{ marginRight: 10 }} />
                             <View style={{ flex: 1 }}>
-                                <Text style={[styles.menuText, textStyle]}>Saved budget plans</Text>
+                                <Text style={[styles.menuText, textStyle]}>{tr('menu_saved_plans')}</Text>
                                 <Text style={[styles.menuSub, { color: theme.textLight }]}>
-                                    Budgets, categories & AI insight
+                                    {tr('menu_saved_plans_sub')}
                                 </Text>
                             </View>
                         </View>
@@ -146,7 +148,7 @@ export default function Menu({ navigation }) {
                 <View style={[styles.menuItem, borderStyle]}>
                     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                         <Ionicons name="moon-outline" size={22} color={theme.text} style={{ marginRight: 10 }} />
-                        <Text style={[styles.menuText, textStyle]}>Dark Mode</Text>
+                        <Text style={[styles.menuText, textStyle]}>{tr('menu_dark_mode')}</Text>
                     </View>
                     <Switch
                         value={isDarkMode}
@@ -159,7 +161,7 @@ export default function Menu({ navigation }) {
                 <TouchableOpacity style={[styles.menuItem, borderStyle]} onPress={() => navigation.navigate('MyProfile')}>
                     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                         <Ionicons name="person-outline" size={22} color={theme.text} style={{ marginRight: 10 }} />
-                        <Text style={[styles.menuText, textStyle]}>My Profile</Text>
+                        <Text style={[styles.menuText, textStyle]}>{tr('menu_profile')}</Text>
                     </View>
                     <Ionicons name="chevron-forward" size={20} color={theme.textLight} />
                 </TouchableOpacity>
@@ -167,7 +169,7 @@ export default function Menu({ navigation }) {
                 <TouchableOpacity style={[styles.menuItem, borderStyle]} onPress={() => navigation.navigate('MyOrders')}>
                     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                         <Ionicons name="receipt-outline" size={22} color={theme.text} style={{ marginRight: 10 }} />
-                        <Text style={[styles.menuText, textStyle]}>My Orders</Text>
+                        <Text style={[styles.menuText, textStyle]}>{tr('menu_orders')}</Text>
                     </View>
                     <Ionicons name="chevron-forward" size={20} color={theme.textLight} />
                 </TouchableOpacity>
@@ -175,7 +177,7 @@ export default function Menu({ navigation }) {
                 <TouchableOpacity style={[styles.menuItem, borderStyle]} onPress={() => navigation.navigate('GuestManage')}>
                     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                         <Ionicons name="people-outline" size={22} color={theme.text} style={{ marginRight: 10 }} />
-                        <Text style={[styles.menuText, textStyle]}>Guest Manager</Text>
+                        <Text style={[styles.menuText, textStyle]}>{tr('menu_guest')}</Text>
                     </View>
                     <Ionicons name="chevron-forward" size={20} color={theme.textLight} />
                 </TouchableOpacity>
@@ -183,7 +185,7 @@ export default function Menu({ navigation }) {
                 <TouchableOpacity style={[styles.menuItem, borderStyle]} onPress={() => navigation.navigate('HelpSupport')}>
                     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                         <Ionicons name="help-circle-outline" size={22} color={theme.text} style={{ marginRight: 10 }} />
-                        <Text style={[styles.menuText, textStyle]}>Help & Support</Text>
+                        <Text style={[styles.menuText, textStyle]}>{tr('menu_help')}</Text>
                     </View>
                     <Ionicons name="chevron-forward" size={20} color={theme.textLight} />
                 </TouchableOpacity>
@@ -191,7 +193,7 @@ export default function Menu({ navigation }) {
                 <TouchableOpacity style={[styles.menuItem, borderStyle]} onPress={() => navigation.navigate('About')}>
                     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                         <Ionicons name="information-circle-outline" size={22} color={theme.text} style={{ marginRight: 10 }} />
-                        <Text style={[styles.menuText, textStyle]}>About</Text>
+                        <Text style={[styles.menuText, textStyle]}>{tr('menu_about')}</Text>
                     </View>
                     <Ionicons name="chevron-forward" size={20} color={theme.textLight} />
                 </TouchableOpacity>
@@ -202,12 +204,12 @@ export default function Menu({ navigation }) {
                 {isAuthenticated ? (
                     <TouchableOpacity onPress={handleLogout} style={[styles.logoutBtn, { backgroundColor: isDarkMode ? '#2D1012' : '#FEF2F2' }]}>
                         <Ionicons name="log-out-outline" size={20} color={theme.error} style={{ marginRight: 8 }} />
-                        <Text style={[styles.logoutText, { color: theme.error }]}>Logout</Text>
+                        <Text style={[styles.logoutText, { color: theme.error }]}>{tr('menu_logout')}</Text>
                     </TouchableOpacity>
                 ) : (
                     <TouchableOpacity onPress={() => navigation.navigate('Login')} style={[styles.loginBtn, { backgroundColor: colors.primary }]}>
                         <Ionicons name="log-in-outline" size={20} color="#FFF" style={{ marginRight: 8 }} />
-                        <Text style={styles.loginBtnText}>Login / Sign Up</Text>
+                        <Text style={styles.loginBtnText}>{tr('menu_login_signup')}</Text>
                     </TouchableOpacity>
                 )}
                 <Text style={styles.version}>v1.0.0</Text>

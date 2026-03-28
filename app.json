@@ -59,7 +59,8 @@
     },
     "plugins": [
       "@react-native-community/datetimepicker",
-      "expo-location"
+      "expo-location",
+      "expo-web-browser"
     ],
     "updates": {
       "enabled": false,

@@ -37,7 +37,23 @@ function getTierLabel(options) {
 
 export default function OrderSummary({ route, navigation }) {
     const { theme } = useTheme();
-    const { orderId, order, cartItems = [], totalAmount = 0, advanceAmount, balanceAmount, plannedBudget, paymentMode } = route.params || {};
+    const {
+        orderId,
+        order,
+        cartItems = [],
+        totalAmount = 0,
+        servicesSubtotal,
+        protectionAmount: protectionParam,
+        grandTotal: grandParam,
+        advanceAmount,
+        balanceAmount,
+        plannedBudget,
+        paymentMode,
+    } = route.params || {};
+
+    const svcSub = servicesSubtotal != null ? Number(servicesSubtotal) : null;
+    const prot = protectionParam != null ? Number(protectionParam) : 0;
+    const displayGrand = grandParam != null ? Number(grandParam) : Number(totalAmount);
 
     const itemCount = cartItems.length;
     // Placeholder: number of vendors that can fulfill the selection (per service type). In future from API.
@@ -87,9 +103,21 @@ export default function OrderSummary({ route, navigation }) {
                 })}
 
                 <View style={[styles.totalCard, { backgroundColor: theme.card }]}>
+                    {svcSub != null && prot > 0 ? (
+                        <>
+                            <View style={styles.totalRow}>
+                                <Text style={[styles.totalLabel, { color: theme.textLight }]}>Services subtotal</Text>
+                                <Text style={[styles.totalValue, { color: theme.text }]}>₹{svcSub.toLocaleString()}</Text>
+                            </View>
+                            <View style={styles.totalRow}>
+                                <Text style={[styles.totalLabel, { color: theme.textLight }]}>Booking protection</Text>
+                                <Text style={[styles.totalValue, { color: theme.text }]}>₹{prot.toLocaleString()}</Text>
+                            </View>
+                        </>
+                    ) : null}
                     <View style={styles.totalRow}>
                         <Text style={[styles.totalLabel, { color: theme.text }]}>Total amount</Text>
-                        <Text style={[styles.totalValue, { color: theme.text }]}>₹{Number(totalAmount).toLocaleString()}</Text>
+                        <Text style={[styles.totalValue, { color: theme.text }]}>₹{displayGrand.toLocaleString()}</Text>
                     </View>
                     {advanceAmount != null && advanceAmount > 0 && (
                         <View style={styles.totalRow}>

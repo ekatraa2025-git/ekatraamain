@@ -5,10 +5,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { colors } from '../../theme/colors';
 import { useTheme } from '../../context/ThemeContext';
+import { useLocale } from '../../context/LocaleContext';
 import BottomTabBar from '../../components/BottomTabBar';
 
 export default function About({ navigation }) {
     const { theme, isDarkMode } = useTheme();
+    const { t: tr } = useLocale();
 
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top', 'left', 'right']}>
@@ -16,7 +18,7 @@ export default function About({ navigation }) {
                 <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
                     <Ionicons name="arrow-back" size={24} color={theme.text} />
                 </TouchableOpacity>
-                <Text style={[styles.headerTitle, { color: theme.text }]}>About Ekatraa</Text>
+                <Text style={[styles.headerTitle, { color: theme.text }]}>{tr('about_title')}</Text>
                 <View style={{ width: 32 }} />
             </View>
 
@@ -30,45 +32,45 @@ export default function About({ navigation }) {
                     </View>
                     <Text style={[styles.appName, { color: theme.text }]}>Ekatraa</Text>
                     <Text style={[styles.tagline, { color: theme.textLight }]}>
-                        Your one-stop platform for planning weddings, pujas, celebrations & all life events.
+                        {tr('about_tagline')}
                     </Text>
                     <Text style={[styles.version, { color: theme.textLight }]}>Version 1.0.0</Text>
                 </LinearGradient>
 
                 <View style={[styles.infoCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
-                    <Text style={[styles.sectionTitle, { color: theme.text }]}>What We Do</Text>
+                    <Text style={[styles.sectionTitle, { color: theme.text }]}>{tr('about_what_title')}</Text>
                     <Text style={[styles.body, { color: theme.textLight }]}>
-                        Ekatraa connects you with verified vendors for every occasion — from venue booking and catering to décor, photography, priests, and more. We make event planning effortless, so you can focus on making memories.
+                        {tr('about_what_body')}
                     </Text>
                 </View>
 
                 <View style={[styles.infoCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
-                    <Text style={[styles.sectionTitle, { color: theme.text }]}>Our Mission</Text>
+                    <Text style={[styles.sectionTitle, { color: theme.text }]}>{tr('about_mission_title')}</Text>
                     <Text style={[styles.body, { color: theme.textLight }]}>
-                        To simplify event planning across India by providing a curated marketplace of trusted service providers with transparent pricing.
+                        {tr('about_mission_body')}
                     </Text>
                 </View>
 
                 <View style={[styles.infoCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
-                    <Text style={[styles.sectionTitle, { color: theme.text }]}>Contact</Text>
+                    <Text style={[styles.sectionTitle, { color: theme.text }]}>{tr('about_contact_title')}</Text>
                     <TouchableOpacity
                         style={styles.contactRow}
-                        onPress={() => Linking.openURL('mailto:support@ekatraa.com')}
+                        onPress={() => Linking.openURL('mailto:help@ekatraa.in')}
                     >
                         <Ionicons name="mail-outline" size={18} color={colors.primary} />
-                        <Text style={[styles.contactText, { color: colors.primary }]}>support@ekatraa.com</Text>
+                        <Text style={[styles.contactText, { color: colors.primary }]}>help@ekatraa.in</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                         style={styles.contactRow}
-                        onPress={() => Linking.openURL('tel:+919876543210')}
+                        onPress={() => Linking.openURL('tel:+918422948781')}
                     >
                         <Ionicons name="call-outline" size={18} color={colors.primary} />
-                        <Text style={[styles.contactText, { color: colors.primary }]}>+91 98765 43210</Text>
+                        <Text style={[styles.contactText, { color: colors.primary }]}>+91 84229 48781</Text>
                     </TouchableOpacity>
                 </View>
 
                 <Text style={[styles.copyright, { color: theme.textLight }]}>
-                    © 2025 Ekatraa. All rights reserved.
+                    {tr('about_copyright')}
                 </Text>
                 <View style={{ height: 80 }} />
             </ScrollView>

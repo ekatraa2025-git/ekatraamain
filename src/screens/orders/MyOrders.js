@@ -14,18 +14,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { useTheme } from '../../context/ThemeContext';
+import { useLocale } from '../../context/LocaleContext';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import BottomTabBar from '../../components/BottomTabBar';
 import { formatFriendlyDate } from '../../utils/formatFriendlyDate';
 import { getOccasionAndApplicant } from '../../utils/orderDisplay';
-
-const FILTERS = [
-    { key: 'all', label: 'All' },
-    { key: 'week', label: '7 days' },
-    { key: 'month', label: '30 days' },
-    { key: '90d', label: '90 days' },
-];
 
 function applyDateFilter(orders, filterKey) {
     if (filterKey === 'all' || !Array.isArray(orders)) return orders || [];
@@ -40,7 +34,17 @@ function applyDateFilter(orders, filterKey) {
 
 export default function MyOrders({ navigation }) {
     const { theme } = useTheme();
+    const { t: tr } = useLocale();
     const { isAuthenticated, user } = useAuth();
+    const filters = useMemo(
+        () => [
+            { key: 'all', label: tr('orders_filter_all') },
+            { key: 'week', label: tr('orders_filter_week') },
+            { key: 'month', label: tr('orders_filter_month') },
+            { key: '90d', label: tr('orders_filter_90d') },
+        ],
+        [tr]
+    );
     const [orders, setOrders] = useState([]);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
@@ -81,11 +85,11 @@ export default function MyOrders({ navigation }) {
                     <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
                         <Ionicons name="arrow-back" size={24} color={theme.text} />
                     </TouchableOpacity>
-                    <Text style={[styles.headerTitle, { color: theme.text }]}>My Orders</Text>
+                    <Text style={[styles.headerTitle, { color: theme.text }]}>{tr('orders_title')}</Text>
                     <View style={{ width: 40 }} />
                 </View>
                 <View style={styles.emptyContainer}>
-                    <Text style={[styles.emptyText, { color: theme.text }]}>Sign in to see your orders.</Text>
+                    <Text style={[styles.emptyText, { color: theme.text }]}>{tr('orders_sign_in')}</Text>
                 </View>
                 <BottomTabBar navigation={navigation} activeRoute="MyOrders" />
             </SafeAreaView>
@@ -108,16 +112,16 @@ export default function MyOrders({ navigation }) {
                 <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
                     <Ionicons name="arrow-back" size={24} color={theme.text} />
                 </TouchableOpacity>
-                <Text style={[styles.headerTitle, { color: theme.text }]}>My Orders</Text>
+                <Text style={[styles.headerTitle, { color: theme.text }]}>{tr('orders_title')}</Text>
                 <View style={{ width: 40 }} />
             </View>
 
             {orders.length === 0 ? (
                 <View style={styles.emptyContainer}>
                     <Ionicons name="receipt-outline" size={56} color={theme.textLight} />
-                    <Text style={[styles.emptyTitle, { color: theme.text }]}>No orders yet</Text>
+                    <Text style={[styles.emptyTitle, { color: theme.text }]}>{tr('orders_empty_title')}</Text>
                     <Text style={[styles.emptySubtitle, { color: theme.textLight }]}>
-                        Orders from checkout will appear here.
+                        {tr('orders_empty_sub')}
                     </Text>
                 </View>
             ) : (
@@ -129,7 +133,7 @@ export default function MyOrders({ navigation }) {
                         style={styles.filterScroll}
                         keyboardShouldPersistTaps="handled"
                     >
-                        {FILTERS.map((f) => {
+                        {filters.map((f) => {
                             const on = filterKey === f.key;
                             return (
                                 <TouchableOpacity
@@ -156,8 +160,9 @@ export default function MyOrders({ navigation }) {
                         })}
                     </ScrollView>
                     <Text style={[styles.filterHint, { color: theme.textLight }]}>
-                        {filteredOrders.length} order{filteredOrders.length === 1 ? '' : 's'}
-                        {filterKey !== 'all' ? ' in range' : ''}
+                        {filteredOrders.length}{' '}
+                        {filteredOrders.length === 1 ? tr('orders_order') : tr('orders_orders')}
+                        {filterKey !== 'all' ? ` ${tr('orders_in_range')}` : ''}
                     </Text>
                     <FlatList
                         style={styles.orderList}

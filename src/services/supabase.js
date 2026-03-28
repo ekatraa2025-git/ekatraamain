@@ -1,6 +1,10 @@
 import 'react-native-url-polyfill/auto';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
+import * as Linking from 'expo-linking';
+import * as WebBrowser from 'expo-web-browser';
+
+WebBrowser.maybeCompleteAuthSession();
 
 // Get Supabase credentials from environment (support both EXPO_PUBLIC_ and NEXT_PUBLIC_ prefixes)
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
@@ -103,28 +107,82 @@ export const authService = {
         return { data, error };
     },
 
-    // Google OAuth sign in
+    // Google OAuth — Expo: in-app browser + deep link (matches app.json scheme `ekatraa`, host `auth-callback` on Android)
     async signInWithGoogle() {
         try {
-            // Use Supabase's built-in OAuth with redirect
+            const redirectTo = Linking.createURL('auth-callback');
             const { data, error } = await supabase.auth.signInWithOAuth({
                 provider: 'google',
                 options: {
-                    redirectTo: 'ekatraa://auth/callback',
-                    skipBrowserRedirect: false,
-                }
+                    redirectTo,
+                    skipBrowserRedirect: true,
+                },
             });
-            
-            if (error) {
-                return { data: null, error };
+
+            if (error) return { data: null, error };
+            if (!data?.url) return { data: null, error: { message: 'Could not start Google sign-in.' } };
+
+            const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
+
+            if (result.type !== 'success' || !result.url) {
+                return {
+                    data: null,
+                    error:
+                        result.type === 'cancel' || result.type === 'dismiss'
+                            ? { silent: true, message: 'CANCELLED' }
+                            : { message: 'Google sign-in was cancelled or failed.' },
+                };
             }
-            
-            return { data, error: null };
+
+            const callbackUrl = result.url;
+            let code = null;
+            let access_token = null;
+            let refresh_token = '';
+            try {
+                const u = new URL(callbackUrl);
+                code = u.searchParams.get('code');
+                const hash = (u.hash && u.hash.length > 1) ? u.hash.substring(1) : '';
+                if (hash) {
+                    const sp = new URLSearchParams(hash);
+                    access_token = sp.get('access_token');
+                    refresh_token = sp.get('refresh_token') || '';
+                }
+            } catch {
+                /* fall through */
+            }
+
+            if (code) {
+                const exchanged = await supabase.auth.exchangeCodeForSession(code);
+                if (exchanged.error) return { data: null, error: exchanged.error };
+                return { data: exchanged.data, error: null };
+            }
+
+            if (!access_token && callbackUrl.includes('access_token=')) {
+                const m = callbackUrl.match(/access_token=([^&]+)/);
+                if (m) access_token = decodeURIComponent(m[1]);
+                const mr = callbackUrl.match(/refresh_token=([^&]+)/);
+                if (mr) refresh_token = decodeURIComponent(mr[1]);
+            }
+
+            if (!access_token) {
+                return {
+                    data: null,
+                    error: {
+                        message:
+                            'Could not complete Google sign-in. Add this redirect URL in Supabase Auth → URL Configuration: ' +
+                            String(Linking.createURL('auth-callback')),
+                    },
+                };
+            }
+
+            const sessionRes = await supabase.auth.setSession({ access_token, refresh_token });
+            if (sessionRes.error) return { data: null, error: sessionRes.error };
+            return { data: sessionRes.data, error: null };
         } catch (error) {
             console.error('Google OAuth error:', error);
-            return { 
-                data: null, 
-                error: { message: 'Google sign-in failed. Please try again or use OTP.' } 
+            return {
+                data: null,
+                error: { message: error?.message || 'Google sign-in failed. Please try again or use OTP.' },
             };
         }
     },

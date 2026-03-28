@@ -9,6 +9,8 @@ import {
     ActivityIndicator,
     KeyboardAvoidingView,
     Platform,
+    Modal,
+    Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,6 +21,17 @@ import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import { useCart } from '../../context/CartContext';
 import BottomTabBar from '../../components/BottomTabBar';
+import {
+    ADVANCE_PAYMENT_POLICY,
+    CANCELLATION_POLICY,
+    REFUND_POLICY,
+    TERMS_AND_CONDITIONS,
+    PROTECTION_PLAN_DETAILS,
+    PROTECTION_HEADLINE,
+    PROTECTION_SUB,
+    POLICY_MODAL_LABELS,
+} from '../../content/checkoutPolicyTexts';
+import { computeProtectionAmountInr, computeAdvanceInrFromBase } from '../../utils/bookingProtection';
 
 const ADVANCE_HEADLINE = 'Pay 20% advance & confirm booking now. (Recommended)';
 const ADVANCE_BULLETS = [
@@ -38,6 +51,16 @@ const LATER_BULLETS = [
 ];
 const LATER_FOOTER = 'High-demand vendors get booked quickly. Confirm now to avoid unavailability.';
 
+const POLICY_CONTENT = {
+    advance: ADVANCE_PAYMENT_POLICY,
+    cancellation: CANCELLATION_POLICY,
+    refund: REFUND_POLICY,
+    terms: TERMS_AND_CONDITIONS,
+    protection: PROTECTION_PLAN_DETAILS,
+};
+
+const POLICY_KEYS = ['advance', 'cancellation', 'refund', 'terms', 'protection'];
+
 export default function Checkout({ route, navigation }) {
     const { openCheckout, closeCheckout, RazorpayUI } = useRazorpay();
     const { theme } = useTheme();
@@ -49,6 +72,25 @@ export default function Checkout({ route, navigation }) {
     const [saving, setSaving] = useState(false);
     const [cartDetails, setCartDetails] = useState(null);
     const [loadingCart, setLoadingCart] = useState(true);
+    const [protectionPlanEnabled, setProtectionPlanEnabled] = useState(true);
+    const [protectionSettings, setProtectionSettings] = useState(null);
+    const [policyModal, setPolicyModal] = useState(null);
+    const [agreements, setAgreements] = useState({
+        advance: false,
+        cancellation: false,
+        refund: false,
+        terms: false,
+        protection: false,
+    });
+
+    const allPoliciesAgreed = POLICY_KEYS.every((k) => agreements[k]);
+
+    const approvePolicyModal = () => {
+        if (policyModal && POLICY_KEYS.includes(policyModal)) {
+            setAgreements((prev) => ({ ...prev, [policyModal]: true }));
+        }
+        setPolicyModal(null);
+    };
 
     useEffect(() => {
         if (!cartId) {
@@ -62,12 +104,26 @@ export default function Checkout({ route, navigation }) {
         })();
     }, [cartId]);
 
+    useEffect(() => {
+        (async () => {
+            const { data } = await api.getBookingProtection();
+            if (data) setProtectionSettings(data);
+        })();
+    }, []);
+
     const eventInfo = cartDetails || cart || {};
     const items = eventInfo.items || cart?.items || [];
     const totalAmount = items.reduce((s, i) => s + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0), 0);
 
-    const advanceAmount = Math.round((totalAmount * 20) / 100);
-    const balanceAmount = totalAmount - advanceAmount;
+    const getServiceDisplayName = (item) =>
+        item?.service?.name || item?.offerable_services?.name || item?.name || 'Service';
+
+    const getCategoryName = (item) => item?.service?.category?.name || null;
+
+    const protectionAmount = computeProtectionAmountInr(totalAmount, protectionSettings, protectionPlanEnabled);
+    const grandTotal = totalAmount + protectionAmount;
+    const advanceAmount = computeAdvanceInrFromBase(totalAmount, protectionAmount, 20);
+    const balanceAmount = grandTotal - advanceAmount;
 
     const handleSubmit = async () => {
         const uid = paramUserId || (isAuthenticated && user?.id ? user.id : null);
@@ -81,12 +137,22 @@ export default function Checkout({ route, navigation }) {
             return;
         }
 
+        if (!allPoliciesAgreed) {
+            const pending = POLICY_KEYS.filter((k) => !agreements[k]).map((k) => POLICY_MODAL_LABELS[k] || k);
+            Alert.alert(
+                'Review policies',
+                `Please open each policy below and tap “I have read and agree”. Pending: ${pending.join(', ')}.`
+            );
+            return;
+        }
+
         if (paymentMode === 'on_finalization') {
             setSaving(true);
             const { data: order, error } = await api.checkout({
                 cart_id: cartId,
                 user_id: uid,
                 payment_mode: 'on_finalization',
+                booking_protection: protectionPlanEnabled,
             });
             setSaving(false);
             if (error) {
@@ -98,11 +164,15 @@ export default function Checkout({ route, navigation }) {
                 orderId: order?.id,
                 order,
                 cartItems: items,
-                totalAmount,
+                totalAmount: grandTotal,
+                servicesSubtotal: totalAmount,
+                protectionAmount,
+                grandTotal,
                 advanceAmount: 0,
-                balanceAmount: totalAmount,
+                balanceAmount: grandTotal,
                 plannedBudget: eventInfo.planned_budget || null,
                 paymentMode: 'on_finalization',
+                bookingProtection: protectionPlanEnabled,
             });
             return;
         }
@@ -111,6 +181,7 @@ export default function Checkout({ route, navigation }) {
         const { data: paymentData, error: paymentErr } = await api.createPaymentOrder({
             cart_id: cartId,
             user_id: uid,
+            booking_protection: protectionPlanEnabled,
         });
         setSaving(false);
         if (paymentErr || !paymentData?.razorpay_order_id) {
@@ -131,7 +202,7 @@ export default function Checkout({ route, navigation }) {
                 currency: 'INR',
                 order_id: paymentData.razorpay_order_id,
                 name: 'Ekatraa',
-                description: `Advance payment (20%) - ₹${advanceAmount.toLocaleString()}`,
+                description: `Advance payment (20%) - ₹${(paymentData.advance_amount ?? advanceAmount).toLocaleString()}`,
                 prefill: {
                     name: eventInfo.contact_name || '',
                     email: eventInfo.contact_email || user?.email || '',
@@ -149,6 +220,7 @@ export default function Checkout({ route, navigation }) {
                         razorpay_signature: data.razorpay_signature,
                         cart_id: cartId,
                         user_id: uid,
+                        booking_protection: protectionPlanEnabled,
                     });
                     setSaving(false);
                     if (verifyErr) {
@@ -156,14 +228,21 @@ export default function Checkout({ route, navigation }) {
                         return;
                     }
                     clearCart();
+                    const advPaid =
+                        order?.advance_amount != null ? Number(order.advance_amount) : advanceAmount;
+                    const balDue = Math.max(0, grandTotal - advPaid);
                     navigation.replace('OrderSummary', {
                         orderId: order?.id,
                         order,
                         cartItems: items,
-                        totalAmount,
-                        advanceAmount,
-                        balanceAmount,
+                        totalAmount: grandTotal,
+                        servicesSubtotal: totalAmount,
+                        protectionAmount,
+                        grandTotal,
+                        advanceAmount: advPaid,
+                        balanceAmount: balDue,
                         plannedBudget: eventInfo.planned_budget || null,
+                        bookingProtection: protectionPlanEnabled,
                     });
                 },
                 onFailure: (err) => {
@@ -208,24 +287,74 @@ export default function Checkout({ route, navigation }) {
                         {items.length > 0 && (
                             <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>
                                 <Text style={[styles.cardTitle, { color: theme.text }]}>Order Summary</Text>
-                                {items.map((item, idx) => (
-                                    <View key={item.id || idx} style={[styles.itemRow, { borderBottomColor: theme.border }]}>
-                                        <View style={{ flex: 1 }}>
-                                            <Text style={[styles.itemName, { color: theme.text }]}>{item.name || item.offerable_services?.name || 'Service'}</Text>
-                                            {item.options?.tier && (
-                                                <Text style={[styles.itemTier, { color: theme.textLight }]}>
-                                                    {item.options.tier.replace('price_', '').replace(/_/g, ' ')}
+                                {(eventInfo.event_name || eventInfo.event_role) && (
+                                    <View
+                                        style={[
+                                            styles.orderSummaryMeta,
+                                            { backgroundColor: theme.background, borderColor: theme.border },
+                                        ]}
+                                    >
+                                        {eventInfo.event_name ? (
+                                            <View style={styles.orderMetaRow}>
+                                                <Text style={[styles.orderMetaLabel, { color: theme.textLight }]}>
+                                                    Occasion
                                                 </Text>
-                                            )}
-                                        </View>
-                                        <Text style={[styles.itemPrice, { color: theme.text }]}>
-                                            ₹{(Number(item.unit_price || 0) * Number(item.quantity || 1)).toLocaleString()}
-                                        </Text>
+                                                <Text style={[styles.orderMetaValue, { color: theme.text }]} numberOfLines={2}>
+                                                    {eventInfo.event_name}
+                                                </Text>
+                                            </View>
+                                        ) : null}
+                                        {eventInfo.event_role ? (
+                                            <View style={styles.orderMetaRow}>
+                                                <Text style={[styles.orderMetaLabel, { color: theme.textLight }]}>Role</Text>
+                                                <Text style={[styles.orderMetaValue, { color: theme.text }]} numberOfLines={2}>
+                                                    {eventInfo.event_role}
+                                                </Text>
+                                            </View>
+                                        ) : null}
                                     </View>
-                                ))}
+                                )}
+                                <Text style={[styles.servicesSectionTitle, { color: theme.text }]}>Services</Text>
+                                {items.map((item, idx) => {
+                                    const cat = getCategoryName(item);
+                                    const occ = eventInfo.event_name;
+                                    const metaParts = [cat, occ].filter(Boolean);
+                                    return (
+                                        <View key={item.id || idx} style={[styles.itemRow, { borderBottomColor: theme.border }]}>
+                                            <View style={{ flex: 1 }}>
+                                                <Text style={[styles.itemName, { color: theme.text }]}>
+                                                    {getServiceDisplayName(item)}
+                                                </Text>
+                                                {metaParts.length > 0 ? (
+                                                    <Text style={[styles.itemCategoryOccasion, { color: theme.textLight }]}>
+                                                        {metaParts.join(' · ')}
+                                                    </Text>
+                                                ) : null}
+                                                {item.options?.tier && (
+                                                    <Text style={[styles.itemTier, { color: theme.textLight }]}>
+                                                        {item.options.tier.replace('price_', '').replace(/_/g, ' ')}
+                                                    </Text>
+                                                )}
+                                            </View>
+                                            <Text style={[styles.itemPrice, { color: theme.text }]}>
+                                                ₹{(Number(item.unit_price || 0) * Number(item.quantity || 1)).toLocaleString()}
+                                            </Text>
+                                        </View>
+                                    );
+                                })}
                                 <View style={styles.totalRow}>
-                                    <Text style={[styles.totalLabel, { color: theme.text }]}>Total</Text>
-                                    <Text style={[styles.totalValue, { color: colors.primary }]}>₹{totalAmount.toLocaleString()}</Text>
+                                    <Text style={[styles.totalLabel, { color: theme.textLight }]}>Services subtotal</Text>
+                                    <Text style={[styles.totalValue, { color: theme.text, fontSize: 16 }]}>₹{totalAmount.toLocaleString()}</Text>
+                                </View>
+                                {protectionAmount > 0 ? (
+                                    <View style={styles.totalRow}>
+                                        <Text style={[styles.totalLabel, { color: theme.textLight }]}>Booking protection</Text>
+                                        <Text style={[styles.totalValue, { color: theme.text, fontSize: 16 }]}>₹{protectionAmount.toLocaleString()}</Text>
+                                    </View>
+                                ) : null}
+                                <View style={styles.totalRow}>
+                                    <Text style={[styles.totalLabel, { color: theme.text }]}>Order total</Text>
+                                    <Text style={[styles.totalValue, { color: colors.primary }]}>₹{grandTotal.toLocaleString()}</Text>
                                 </View>
                             </View>
                         )}
@@ -317,6 +446,74 @@ export default function Checkout({ route, navigation }) {
                             </TouchableOpacity>
                         </View>
 
+                        <View style={[styles.policyCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+                            <Text style={[styles.policyCardTitle, { color: theme.text }]}>Payment options</Text>
+                            <Text style={[styles.protectionHeadline, { color: theme.text }]}>{PROTECTION_HEADLINE}</Text>
+                            <Text style={[styles.protectionSub, { color: theme.textLight }]}>{PROTECTION_SUB}</Text>
+                            <View style={styles.protectionRow}>
+                                <Text style={[styles.protectionLabel, { color: theme.text }]}>
+                                    {protectionPlanEnabled ? 'Protection plan on' : 'Protection plan off'}
+                                </Text>
+                                <Switch
+                                    value={protectionPlanEnabled}
+                                    onValueChange={setProtectionPlanEnabled}
+                                    trackColor={{ false: theme.border, true: colors.primary + '88' }}
+                                    thumbColor={protectionPlanEnabled ? colors.primary : '#f4f3f4'}
+                                />
+                            </View>
+                            <Text style={[styles.protectionHint, { color: theme.textLight }]}>
+                                {protectionPlanEnabled
+                                    ? protectionAmount > 0
+                                        ? `Add-on: ₹${protectionAmount.toLocaleString()} (included in order total & 20% advance).`
+                                        : 'You may be eligible for cancellation/rescheduling benefits per policy.'
+                                    : 'Without protection, advances are non-refundable on cancellation/rescheduling (see policies).'}
+                            </Text>
+                            <TouchableOpacity
+                                style={styles.policyLinkBtn}
+                                onPress={() => setPolicyModal('protection')}
+                                activeOpacity={0.7}
+                            >
+                                <Ionicons
+                                    name={agreements.protection ? 'checkmark-circle' : 'ellipse-outline'}
+                                    size={18}
+                                    color={agreements.protection ? '#16A34A' : theme.textLight}
+                                />
+                                <Text style={[styles.policyLinkText, { color: colors.primary }]}>
+                                    {POLICY_MODAL_LABELS.protection}
+                                </Text>
+                                <Ionicons name="chevron-forward" size={16} color={theme.textLight} />
+                            </TouchableOpacity>
+
+                            <Text style={[styles.policyLinksIntro, { color: theme.textLight }]}>
+                                Policies — open each link and approve to continue:
+                            </Text>
+                            {['advance', 'cancellation', 'refund', 'terms'].map((key) => (
+                                <TouchableOpacity
+                                    key={key}
+                                    style={styles.policyLinkBtn}
+                                    onPress={() => setPolicyModal(key)}
+                                    activeOpacity={0.7}
+                                >
+                                    <Ionicons
+                                        name={agreements[key] ? 'checkmark-circle' : 'ellipse-outline'}
+                                        size={18}
+                                        color={agreements[key] ? '#16A34A' : theme.textLight}
+                                    />
+                                    <Text style={[styles.policyLinkText, { color: colors.primary }]}>
+                                        {POLICY_MODAL_LABELS[key]}
+                                    </Text>
+                                    <Ionicons name="chevron-forward" size={16} color={theme.textLight} />
+                                </TouchableOpacity>
+                            ))}
+                            {!allPoliciesAgreed ? (
+                                <Text style={[styles.policyWarning, { color: theme.textLight }]}>
+                                    All policies above must be opened and accepted before payment.
+                                </Text>
+                            ) : (
+                                <Text style={[styles.policyOk, { color: '#16A34A' }]}>All policies accepted.</Text>
+                            )}
+                        </View>
+
                         <TouchableOpacity
                             style={[styles.placeOrderBtn, saving && styles.placeOrderBtnDisabled]}
                             onPress={handleSubmit}
@@ -333,6 +530,35 @@ export default function Checkout({ route, navigation }) {
                     </ScrollView>
                 )}
                 {RazorpayUI}
+
+                <Modal visible={policyModal != null} animationType="slide" transparent={false} onRequestClose={() => setPolicyModal(null)}>
+                    <SafeAreaView style={[styles.modalRoot, { backgroundColor: theme.background }]}>
+                        <View style={[styles.modalHeader, { borderBottomColor: theme.border }]}>
+                            <TouchableOpacity onPress={() => setPolicyModal(null)} style={styles.modalCloseHit} hitSlop={12}>
+                                <Ionicons name="close" size={26} color={theme.text} />
+                            </TouchableOpacity>
+                            <Text style={[styles.modalTitle, { color: theme.text }]} numberOfLines={2}>
+                                {policyModal ? POLICY_MODAL_LABELS[policyModal] : ''}
+                            </Text>
+                            <View style={{ width: 40 }} />
+                        </View>
+                        <ScrollView
+                            style={styles.modalScroll}
+                            contentContainerStyle={styles.modalScrollContent}
+                            showsVerticalScrollIndicator
+                        >
+                            <Text style={[styles.modalBody, { color: theme.text }]}>
+                                {policyModal ? POLICY_CONTENT[policyModal] : ''}
+                            </Text>
+                        </ScrollView>
+                        <View style={[styles.modalFooter, { borderTopColor: theme.border, backgroundColor: theme.card }]}>
+                            <TouchableOpacity style={[styles.modalAgreeBtn, { backgroundColor: colors.primary }]} onPress={approvePolicyModal}>
+                                <Text style={styles.modalAgreeBtnText}>I have read and agree</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </SafeAreaView>
+                </Modal>
+
                 <BottomTabBar navigation={navigation} activeRoute="Cart" cartItemCount={cartItemCount} />
             </KeyboardAvoidingView>
         </SafeAreaView>
@@ -359,6 +585,17 @@ const styles = StyleSheet.create({
         marginBottom: 16,
     },
     cardTitle: { fontSize: 17, fontWeight: '700', marginBottom: 12 },
+    orderSummaryMeta: {
+        borderRadius: 12,
+        borderWidth: 1,
+        padding: 12,
+        marginBottom: 14,
+        gap: 10,
+    },
+    orderMetaRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+    orderMetaLabel: { fontSize: 12, fontWeight: '600', width: 72, textTransform: 'uppercase', letterSpacing: 0.3 },
+    orderMetaValue: { flex: 1, fontSize: 15, fontWeight: '700', lineHeight: 21 },
+    servicesSectionTitle: { fontSize: 14, fontWeight: '700', marginBottom: 8 },
     hint: { fontSize: 13, lineHeight: 18, marginBottom: 12 },
     itemRow: {
         flexDirection: 'row',
@@ -369,6 +606,7 @@ const styles = StyleSheet.create({
     },
     itemName: { fontSize: 14, fontWeight: '600' },
     itemTier: { fontSize: 12, marginTop: 2, textTransform: 'capitalize' },
+    itemCategoryOccasion: { fontSize: 12, marginTop: 2, lineHeight: 17 },
     itemPrice: { fontSize: 14, fontWeight: '700' },
     totalRow: {
         flexDirection: 'row',
@@ -434,4 +672,56 @@ const styles = StyleSheet.create({
     },
     placeOrderBtnDisabled: { opacity: 0.7 },
     placeOrderBtnText: { color: '#FFF', fontSize: 16, fontWeight: '600' },
+    policyCard: {
+        borderRadius: 16,
+        borderWidth: 1,
+        padding: 16,
+        marginBottom: 16,
+    },
+    policyCardTitle: { fontSize: 17, fontWeight: '700', marginBottom: 10 },
+    protectionHeadline: { fontSize: 15, fontWeight: '700', lineHeight: 21, marginBottom: 6 },
+    protectionSub: { fontSize: 13, lineHeight: 19, marginBottom: 12 },
+    protectionRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 8,
+    },
+    protectionLabel: { fontSize: 14, fontWeight: '600', flex: 1, marginRight: 12 },
+    protectionHint: { fontSize: 12, lineHeight: 18, marginBottom: 12 },
+    policyLinksIntro: { fontSize: 12, marginBottom: 8, marginTop: 4 },
+    policyLinkBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 10,
+        gap: 8,
+    },
+    policyLinkText: { flex: 1, fontSize: 14, fontWeight: '600' },
+    policyWarning: { fontSize: 12, marginTop: 10 },
+    policyOk: { fontSize: 13, fontWeight: '600', marginTop: 10 },
+    modalRoot: { flex: 1 },
+    modalHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 8,
+        paddingVertical: 10,
+        borderBottomWidth: 1,
+    },
+    modalCloseHit: { padding: 8 },
+    modalTitle: { flex: 1, fontSize: 16, fontWeight: '700', textAlign: 'center', paddingHorizontal: 8 },
+    modalScroll: { flex: 1 },
+    modalScrollContent: { padding: 16, paddingBottom: 32 },
+    modalBody: { fontSize: 14, lineHeight: 22 },
+    modalFooter: {
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        borderTopWidth: 1,
+    },
+    modalAgreeBtn: {
+        paddingVertical: 14,
+        borderRadius: 12,
+        alignItems: 'center',
+    },
+    modalAgreeBtnText: { color: '#FFF', fontSize: 16, fontWeight: '700' },
 });

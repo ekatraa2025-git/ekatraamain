@@ -14,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { EVENT_TYPES as MOCK_EVENT_TYPES, CITIES } from '../../data/mockData';
 import { useTheme } from '../../context/ThemeContext';
+import { useLocale } from '../../context/LocaleContext';
 import { useAuth } from '../../context/AuthContext';
 import { useEventForm } from '../../context/EventFormContext';
 import ChatModal from '../../components/ChatModal';
@@ -89,6 +90,7 @@ function bannerBentoTileSize(count, index, screenW) {
 
 export default function Home({ navigation }) {
     const { theme, isDarkMode } = useTheme();
+    const { t: tr, language, setLanguage } = useLocale();
     const { isAuthenticated, user } = useAuth();
     const { setEventForm } = useEventForm();
 
@@ -118,6 +120,7 @@ export default function Home({ navigation }) {
     const [recommendationFormSnapshot, setRecommendationFormSnapshot] = useState(null);
     const [formSubmitting, setFormSubmitting] = useState(false);
     const [mapPickerVisible, setMapPickerVisible] = useState(false);
+    const [langModalVisible, setLangModalVisible] = useState(false);
     const [eventLocLoading, setEventLocLoading] = useState(false);
     const [testimonials, setTestimonials] = useState([]);
     const useApi = useBackendApi();
@@ -465,7 +468,7 @@ export default function Home({ navigation }) {
                             </View>
                             <TouchableOpacity onPress={() => setLocationPickerVisible(true)} style={styles.locationBtn}>
                                 <View style={{ flex: 1 }}>
-                                    <Text style={[styles.locationLabel, { color: theme.textLight }]}>Your Location</Text>
+                                    <Text style={[styles.locationLabel, { color: theme.textLight }]}>{tr('home_your_location')}</Text>
                                     <View style={styles.locationRow}>
                                         <Ionicons name="location" size={14} color={colors.primary} />
                                         <Text style={[styles.locationValue, { color: theme.text }]}>{locationName}</Text>
@@ -475,6 +478,13 @@ export default function Home({ navigation }) {
                             </TouchableOpacity>
                         </View>
                         <View style={styles.headerActions}>
+                            <TouchableOpacity
+                                style={[styles.headerIconBtn, { backgroundColor: isDarkMode ? '#1F2333' : '#F3F4F6' }]}
+                                onPress={() => setLangModalVisible(true)}
+                                activeOpacity={0.7}
+                            >
+                                <Ionicons name="language-outline" size={22} color={theme.text} />
+                            </TouchableOpacity>
                             <TouchableOpacity
                                 style={[styles.headerIconBtn, { backgroundColor: isDarkMode ? '#1F2333' : '#F3F4F6' }]}
                                 onPress={() => navigation.navigate('Cart')}
@@ -495,7 +505,7 @@ export default function Home({ navigation }) {
                         <TouchableOpacity style={styles.modalOverlay} onPress={() => setLocationPickerVisible(false)} activeOpacity={1}>
                             <View style={[styles.pickerContent, { backgroundColor: theme.card }]} onStartShouldSetResponder={() => true}>
                                 <View style={styles.pickerHandle} />
-                                <Text style={[styles.pickerTitle, { color: theme.text }]}>Select City</Text>
+                                <Text style={[styles.pickerTitle, { color: theme.text }]}>{tr('home_select_city')}</Text>
                                 <ScrollView style={styles.pickerScroll} contentContainerStyle={styles.pickerScrollContent} showsVerticalScrollIndicator keyboardShouldPersistTaps="handled">
                                     {[...new Set(cities)].map((city, index) => {
                                         const isCurrentCity = locationName === city;
@@ -524,6 +534,44 @@ export default function Home({ navigation }) {
                         </TouchableOpacity>
                     </Modal>
 
+                    <Modal visible={langModalVisible} animationType="fade" transparent>
+                        <TouchableOpacity style={styles.modalOverlay} onPress={() => setLangModalVisible(false)} activeOpacity={1}>
+                            <View style={[styles.pickerContent, { backgroundColor: theme.card }]} onStartShouldSetResponder={() => true}>
+                                <View style={styles.pickerHandle} />
+                                <Text style={[styles.pickerTitle, { color: theme.text }]}>{tr('select_language')}</Text>
+                                {[
+                                    { code: 'en', label: tr('lang_en') },
+                                    { code: 'hi', label: tr('lang_hi') },
+                                    { code: 'or', label: tr('lang_or') },
+                                ].map((opt) => {
+                                    const isSel = language === opt.code;
+                                    return (
+                                        <TouchableOpacity
+                                            key={opt.code}
+                                            style={[
+                                                styles.pickerItem,
+                                                { borderBottomColor: theme.border },
+                                                isSel && { backgroundColor: colors.primary + '10' },
+                                            ]}
+                                            onPress={() => {
+                                                setLanguage(opt.code);
+                                                setLangModalVisible(false);
+                                            }}
+                                        >
+                                            <Ionicons name="globe-outline" size={18} color={isSel ? colors.primary : theme.textLight} />
+                                            <Text style={[
+                                                styles.pickerItemText,
+                                                { color: theme.text },
+                                                isSel && { color: colors.primary, fontWeight: '700' },
+                                            ]}>{opt.label}</Text>
+                                            {isSel ? <Ionicons name="checkmark-circle" size={20} color={colors.primary} /> : null}
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </View>
+                        </TouchableOpacity>
+                    </Modal>
+
                     {/* AI Chat Input */}
                     <TouchableOpacity
                         style={[styles.aiChatBar, { backgroundColor: theme.inputBackground, borderColor: colors.primary + '40' }]}
@@ -534,7 +582,7 @@ export default function Home({ navigation }) {
                             <Ionicons name="sparkles" size={18} color={colors.primary} />
                         </View>
                         <Text style={[styles.aiPlaceholder, { color: theme.textLight }]}>
-                            Tell us about your event and we'll find the best services...
+                            {tr('home_ai_placeholder')}
                         </Text>
                         <Ionicons name="arrow-forward-circle" size={24} color={colors.primary} />
                     </TouchableOpacity>
@@ -637,8 +685,8 @@ export default function Home({ navigation }) {
                     <View style={styles.section}>
                         <View style={styles.sectionTitleRow}>
                             <View>
-                                <Text style={[styles.sectionTitle, { color: theme.text }]}>Plan Your Occasion</Text>
-                                <Text style={[styles.sectionSubtitle, { color: theme.textLight }]}>Choose an event to get started</Text>
+                                <Text style={[styles.sectionTitle, { color: theme.text }]}>{tr('home_plan_occasion')}</Text>
+                                <Text style={[styles.sectionSubtitle, { color: theme.textLight }]}>{tr('home_plan_subtitle')}</Text>
                             </View>
                         </View>
                         {loading ? (
@@ -817,9 +865,9 @@ export default function Home({ navigation }) {
                     {/* User Info Form - shown when occasion selected, before categories */}
                     {selectedType && !formSubmitted && !skipForm && (
                         <View style={[styles.formSection, { backgroundColor: theme.card, borderColor: theme.border }]}>
-                            <Text style={[styles.formSectionTitle, { color: theme.text }]}>Tell us about your event</Text>
+                            <Text style={[styles.formSectionTitle, { color: theme.text }]}>{tr('home_form_title')}</Text>
                             <Text style={[styles.formSectionSubtitle, { color: theme.textLight }]}>
-                                Help us show you the best categories for {selectedOccasionObj?.name || 'your occasion'}
+                                {tr('home_form_help')} {selectedOccasionObj?.name || tr('home_your_occasion')}
                             </Text>
                             <TouchableOpacity
                                 style={styles.specialSkipWrap}
@@ -842,7 +890,7 @@ export default function Home({ navigation }) {
                                         <Ionicons name="sparkles" size={22} color="#4F46E5" />
                                     </View>
                                     <View style={{ flex: 1 }}>
-                                        <Text style={styles.specialSkipTitle}>Skip form · Special add-ons</Text>
+                                        <Text style={styles.specialSkipTitle}>{tr('home_special_skip')}</Text>
                                         <Text style={styles.specialSkipSub}>
                                             Odiya Bhara, Puja Samagri, party poppers, beverages & more — all occasions
                                         </Text>
@@ -852,9 +900,14 @@ export default function Home({ navigation }) {
                             </TouchableOpacity>
                             <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
                                 <View style={styles.formGroup}>
-                                    <Text style={[styles.formLabel, { color: theme.textLight }]}>I am the</Text>
+                                    <Text style={[styles.formLabel, { color: theme.textLight }]}>{tr('home_i_am')}</Text>
                                     <View style={styles.roleRow}>
-                                        {['Groom', 'Bride', 'Host', 'Other'].map(role => (
+                                        {[
+                                            { key: 'Groom', label: tr('home_role_groom') },
+                                            { key: 'Bride', label: tr('home_role_bride') },
+                                            { key: 'Host', label: tr('home_role_host') },
+                                            { key: 'Other', label: tr('home_role_other') },
+                                        ].map(({ key: role, label: roleLabel }) => (
                                             <TouchableOpacity
                                                 key={role}
                                                 style={[
@@ -868,14 +921,14 @@ export default function Home({ navigation }) {
                                                     styles.roleText,
                                                     { color: theme.text },
                                                     form.role === role && { color: '#FFF', fontWeight: '700' },
-                                                ]}>{role}</Text>
+                                                ]}>{roleLabel}</Text>
                                             </TouchableOpacity>
                                         ))}
                                     </View>
                                 </View>
                                 <View style={styles.formRow}>
                                     <View style={styles.formCol}>
-                                        <Text style={[styles.formLabel, { color: theme.textLight }]}>Name *</Text>
+                                        <Text style={[styles.formLabel, { color: theme.textLight }]}>{tr('home_name')}</Text>
                                         <View style={[styles.inputWrap, { backgroundColor: isDarkMode ? '#1F2333' : '#FFF', borderColor: theme.border }]}>
                                             <Ionicons name="person-outline" size={16} color={theme.textLight} />
                                             <TextInput
@@ -888,7 +941,7 @@ export default function Home({ navigation }) {
                                         </View>
                                     </View>
                                     <View style={styles.formCol}>
-                                        <Text style={[styles.formLabel, { color: theme.textLight }]}>Phone *</Text>
+                                        <Text style={[styles.formLabel, { color: theme.textLight }]}>{tr('home_phone')}</Text>
                                         <View style={[styles.inputWrap, { backgroundColor: isDarkMode ? '#1F2333' : '#FFF', borderColor: theme.border }]}>
                                             <Ionicons name="call-outline" size={16} color={theme.textLight} />
                                             <TextInput
@@ -904,7 +957,7 @@ export default function Home({ navigation }) {
                                 </View>
                                 <View style={styles.formRow}>
                                     <View style={styles.formCol}>
-                                        <Text style={[styles.formLabel, { color: theme.textLight }]}>Email</Text>
+                                        <Text style={[styles.formLabel, { color: theme.textLight }]}>{tr('home_email')}</Text>
                                         <View style={[styles.inputWrap, { backgroundColor: isDarkMode ? '#1F2333' : '#FFF', borderColor: theme.border }]}>
                                             <Ionicons name="mail-outline" size={16} color={theme.textLight} />
                                             <TextInput
@@ -918,14 +971,14 @@ export default function Home({ navigation }) {
                                         </View>
                                     </View>
                                     <View style={styles.formCol}>
-                                        <Text style={[styles.formLabel, { color: theme.textLight }]}>Event Date</Text>
+                                        <Text style={[styles.formLabel, { color: theme.textLight }]}>{tr('home_event_date')}</Text>
                                         <TouchableOpacity
                                             style={[styles.inputWrap, styles.dateBtn, { backgroundColor: isDarkMode ? '#1F2333' : '#FFF', borderColor: theme.border }]}
                                             onPress={() => setShowDatePicker(true)}
                                         >
                                             <Ionicons name="calendar-outline" size={16} color={theme.textLight} />
                                             <Text style={[styles.dateText, { color: form.event_date ? theme.text : theme.textLight }]}>
-                                                {form.event_date ? new Date(form.event_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : 'Select date'}
+                                                {form.event_date ? new Date(form.event_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : tr('home_select_date')}
                                             </Text>
                                         </TouchableOpacity>
                                         {showDatePicker && (
@@ -944,7 +997,7 @@ export default function Home({ navigation }) {
                                 </View>
                                 <View style={styles.formRow}>
                                     <View style={styles.formCol}>
-                                        <Text style={[styles.formLabel, { color: theme.textLight }]}>Guest Count</Text>
+                                        <Text style={[styles.formLabel, { color: theme.textLight }]}>{tr('home_guest_count')}</Text>
                                         <View style={[styles.inputWrap, { backgroundColor: isDarkMode ? '#1F2333' : '#FFF', borderColor: theme.border }]}>
                                             <Ionicons name="people-outline" size={16} color={theme.textLight} />
                                             <TextInput
@@ -959,14 +1012,14 @@ export default function Home({ navigation }) {
                                     </View>
                                 </View>
                                 <View style={styles.formGroup}>
-                                    <Text style={[styles.formLabel, { color: theme.textLight }]}>Event location</Text>
+                                    <Text style={[styles.formLabel, { color: theme.textLight }]}>{tr('home_event_location')}</Text>
                                     <Text style={[styles.formHint, { color: theme.textLight }]}>
-                                        Will the gathering be at your own place or a venue?
+                                        {tr('home_event_location_hint')}
                                     </Text>
                                     <View style={styles.roleRow}>
                                         {[
-                                            { key: 'own_place', label: 'Own place' },
-                                            { key: 'venue', label: 'Venue' },
+                                            { key: 'own_place', label: tr('home_own_place') },
+                                            { key: 'venue', label: tr('home_venue') },
                                         ].map((opt) => (
                                             <TouchableOpacity
                                                 key={opt.key}
@@ -1017,7 +1070,7 @@ export default function Home({ navigation }) {
                                                         <Ionicons name="navigate" size={18} color={colors.primary} />
                                                     )}
                                                     <Text style={[styles.locActionText, { color: theme.text }]}>
-                                                        Use current location
+                                                        {tr('home_use_current_location')}
                                                     </Text>
                                                 </TouchableOpacity>
                                                 <TouchableOpacity
@@ -1029,7 +1082,7 @@ export default function Home({ navigation }) {
                                                 >
                                                     <Ionicons name="map" size={18} color={colors.primary} />
                                                     <Text style={[styles.locActionText, { color: theme.text }]}>
-                                                        Select on map
+                                                        {tr('home_select_on_map')}
                                                     </Text>
                                                 </TouchableOpacity>
                                             </View>
@@ -1042,12 +1095,12 @@ export default function Home({ navigation }) {
                                                 </View>
                                             ) : (
                                                 <Text style={[styles.formHint, { color: theme.textLight, marginTop: 6 }]}>
-                                                    Pick current GPS or search on the map to set your event address.
+                                                    {tr('home_pick_location_hint')}
                                                 </Text>
                                             )}
                                             {form.location_kind === 'venue' && (
                                                 <View style={{ marginTop: 10 }}>
-                                                    <Text style={[styles.formLabel, { color: theme.textLight }]}>Venue name (optional)</Text>
+                                                    <Text style={[styles.formLabel, { color: theme.textLight }]}>{tr('home_venue_optional')}</Text>
                                                     <View
                                                         style={[
                                                             styles.inputWrap,
@@ -1057,7 +1110,7 @@ export default function Home({ navigation }) {
                                                         <Ionicons name="business-outline" size={16} color={theme.textLight} />
                                                         <TextInput
                                                             style={[styles.input, { color: theme.text }]}
-                                                            placeholder="e.g. Hotel / banquet name"
+                                                            placeholder={tr('home_venue_ph')}
                                                             placeholderTextColor={theme.textLight}
                                                             value={form.venue_detail}
                                                             onChangeText={(t) => setForm((p) => ({ ...p, venue_detail: t }))}
@@ -1069,9 +1122,9 @@ export default function Home({ navigation }) {
                                     ) : null}
                                 </View>
                                 <View style={styles.formGroup}>
-                                    <Text style={[styles.formLabel, { color: theme.textLight }]}>Budget (excl. Gold & Apparels)</Text>
+                                    <Text style={[styles.formLabel, { color: theme.textLight }]}>{tr('home_budget_label')}</Text>
                                     <Text style={[styles.budgetSliderHint, { color: theme.textLight }]}>
-                                        Slide between ₹1 Lac and ₹2 Cr, or pick a quick range below.
+                                        {tr('home_budget_slider_hint')}
                                     </Text>
                                     <Text style={[styles.budgetSliderValue, { color: colors.primary }]}>
                                         {formatBudgetInrLabel(plannedBudgetInr)} (₹{Math.round(plannedBudgetInr).toLocaleString('en-IN')})
@@ -1121,7 +1174,7 @@ export default function Home({ navigation }) {
                                         onPress={handleSkipForm}
                                         activeOpacity={0.8}
                                     >
-                                        <Text style={[styles.skipBtnText, { color: theme.text }]}>Skip & Browse All</Text>
+                                        <Text style={[styles.skipBtnText, { color: theme.text }]}>{tr('home_skip_browse')}</Text>
                                     </TouchableOpacity>
                                     <TouchableOpacity
                                         style={styles.submitBtn}
@@ -1136,7 +1189,7 @@ export default function Home({ navigation }) {
                                             style={styles.submitBtnGradient}
                                         >
                                             {formSubmitting && <ActivityIndicator size="small" color="#FFF" style={{ marginRight: 8 }} />}
-                                            <Text style={styles.submitBtnText}>Continue</Text>
+                                            <Text style={styles.submitBtnText}>{tr('home_continue')}</Text>
                                             <Ionicons name="arrow-forward" size={18} color="#FFF" />
                                         </LinearGradient>
                                     </TouchableOpacity>
@@ -1154,8 +1207,8 @@ export default function Home({ navigation }) {
                                 start={{ x: 0, y: 0 }}
                                 end={{ x: 1, y: 1 }}
                             >
-                                <Text style={[styles.categoryTitle, { color: theme.text }]}>What do you need?</Text>
-                                <Text style={[styles.categorySubtitle, { color: theme.textLight, marginBottom: 20 }]}>Loading categories...</Text>
+                                <Text style={[styles.categoryTitle, { color: theme.text }]}>{tr('home_what_need')}</Text>
+                                <Text style={[styles.categorySubtitle, { color: theme.textLight, marginBottom: 20 }]}>{tr('home_loading_categories')}</Text>
                                 <View style={styles.categoryLoaderRow}>
                                     {[1, 2, 3, 4].map(i => (
                                         <View key={i} style={[styles.categoryBox, { backgroundColor: isDarkMode ? '#1A1D27' : '#FFFFFF', borderColor: isDarkMode ? '#2D3142' : '#E5E7EB', width: 100 }]}>
@@ -1186,10 +1239,10 @@ export default function Home({ navigation }) {
                                 <View style={styles.categoryHeaderRow}>
                                     <View>
                                         <Text style={[styles.categoryTitle, { color: theme.text }]}>
-                                            What do you need?
+                                            {tr('home_what_need')}
                                         </Text>
                                         <Text style={[styles.categorySubtitle, { color: theme.textLight }]}>
-                                            Select one or more categories for {selectedOccasionObj?.name || 'your event'}
+                                            {tr('home_pick_categories')} {selectedOccasionObj?.name || tr('home_your_event')}
                                         </Text>
                                     </View>
                                     {selectedCategories.size > 0 && (
@@ -1255,7 +1308,8 @@ export default function Home({ navigation }) {
                                             style={styles.exploreBtnGradient}
                                         >
                                             <Text style={styles.exploreBtnText}>
-                                                Explore {selectedCategories.size} {selectedCategories.size === 1 ? 'Category' : 'Categories'}
+                                                {tr('home_explore_categories')} {selectedCategories.size}{' '}
+                                                {selectedCategories.size === 1 ? tr('home_category_single') : tr('home_category_plural')}
                                             </Text>
                                             <Ionicons name="arrow-forward" size={20} color="#FFF" />
                                         </LinearGradient>
@@ -1267,29 +1321,29 @@ export default function Home({ navigation }) {
 
                     {/* Help & Contact Us */}
                     <View style={[styles.helpSection, { backgroundColor: theme.card, borderColor: theme.border }]}>
-                        <Text style={[styles.helpTitle, { color: theme.text }]}>Need Help?</Text>
-                        <Text style={[styles.helpSubtitle, { color: theme.textLight }]}>We're here to assist you with your event planning</Text>
+                        <Text style={[styles.helpTitle, { color: theme.text }]}>{tr('home_need_help')}</Text>
+                        <Text style={[styles.helpSubtitle, { color: theme.textLight }]}>{tr('home_help_subtitle')}</Text>
                         <View style={styles.helpButtons}>
                             <TouchableOpacity
                                 style={[styles.helpBtn, { backgroundColor: colors.primary + '10' }]}
                                 onPress={() => navigation.navigate('HelpSupport')}
                             >
                                 <Ionicons name="help-circle-outline" size={22} color={colors.primary} />
-                                <Text style={[styles.helpBtnText, { color: colors.primary }]}>Help & FAQ</Text>
+                                <Text style={[styles.helpBtnText, { color: colors.primary }]}>{tr('home_help_faq')}</Text>
                             </TouchableOpacity>
                             <TouchableOpacity
                                 style={[styles.helpBtn, { backgroundColor: '#25D366' + '15' }]}
-                                onPress={() => Linking.openURL('https://wa.me/919876543210')}
+                                onPress={() => Linking.openURL('https://wa.me/918422948781')}
                             >
                                 <Ionicons name="logo-whatsapp" size={22} color="#25D366" />
-                                <Text style={[styles.helpBtnText, { color: '#25D366' }]}>WhatsApp</Text>
+                                <Text style={[styles.helpBtnText, { color: '#25D366' }]}>{tr('home_help_whatsapp')}</Text>
                             </TouchableOpacity>
                             <TouchableOpacity
                                 style={[styles.helpBtn, { backgroundColor: '#3B82F6' + '12' }]}
-                                onPress={() => Linking.openURL('tel:+919876543210')}
+                                onPress={() => Linking.openURL('tel:+918422948781')}
                             >
                                 <Ionicons name="call-outline" size={22} color="#3B82F6" />
-                                <Text style={[styles.helpBtnText, { color: '#3B82F6' }]}>Call Us</Text>
+                                <Text style={[styles.helpBtnText, { color: '#3B82F6' }]}>{tr('home_help_call')}</Text>
                             </TouchableOpacity>
                         </View>
                     </View>
@@ -1311,9 +1365,9 @@ export default function Home({ navigation }) {
                                     <Ionicons name="people" size={26} color="#8B5CF6" />
                                 </View>
                                 <View style={{ flex: 1 }}>
-                                    <Text style={[styles.guestManagerTitle, { color: theme.text }]}>Guest Manager</Text>
+                                    <Text style={[styles.guestManagerTitle, { color: theme.text }]}>{tr('home_guest_manager_card')}</Text>
                                     <Text style={[styles.guestManagerDesc, { color: theme.textLight }]}>
-                                        Manage guest lists, track gifts & send digital invitations
+                                        {tr('home_guest_manager_desc')}
                                     </Text>
                                 </View>
                                 <Ionicons name="chevron-forward" size={22} color={theme.textLight} />
@@ -1324,10 +1378,10 @@ export default function Home({ navigation }) {
                     {testimonials.length > 0 ? (
                         <View style={[styles.testimonialsSection, { borderColor: theme.border, backgroundColor: theme.card }]}>
                             <View style={styles.testimonialsHeader}>
-                                <Text style={[styles.testimonialsKicker, { color: colors.primary }]}>Real celebrations</Text>
-                                <Text style={[styles.testimonialsTitle, { color: theme.text }]}>Stories that inspire us</Text>
+                                <Text style={[styles.testimonialsKicker, { color: colors.primary }]}>{tr('home_testimonials_kicker')}</Text>
+                                <Text style={[styles.testimonialsTitle, { color: theme.text }]}>{tr('home_testimonials_title')}</Text>
                                 <Text style={[styles.testimonialsSubtitle, { color: theme.textLight }]}>
-                                    Families who planned with Ekatraa
+                                    {tr('home_testimonials_sub')}
                                 </Text>
                             </View>
                             <ScrollView
@@ -1337,9 +1391,9 @@ export default function Home({ navigation }) {
                                 decelerationRate="fast"
                                 snapToInterval={width * 0.86}
                             >
-                                {testimonials.map((t) => (
+                                {testimonials.map((item) => (
                                     <LinearGradient
-                                        key={t.id}
+                                        key={item.id}
                                         colors={isDarkMode ? ['#1e293b', '#0f172a'] : ['#FFFFFF', '#FFF8F0']}
                                         start={{ x: 0, y: 0 }}
                                         end={{ x: 1, y: 1 }}
@@ -1349,27 +1403,27 @@ export default function Home({ navigation }) {
                                         ]}
                                     >
                                         <View style={styles.testimonialTop}>
-                                            {t.image_url ? (
-                                                <Image source={{ uri: t.image_url }} style={styles.testimonialImg} />
+                                            {item.image_url ? (
+                                                <Image source={{ uri: item.image_url }} style={styles.testimonialImg} />
                                             ) : (
                                                 <LinearGradient
                                                     colors={[colors.primary, colors.secondary]}
                                                     style={styles.testimonialAvatar}
                                                 >
                                                     <Text style={styles.testimonialAvatarText}>
-                                                        {(t.display_name || '?').charAt(0).toUpperCase()}
+                                                        {(item.display_name || '?').charAt(0).toUpperCase()}
                                                     </Text>
                                                 </LinearGradient>
                                             )}
                                             <View style={{ flex: 1 }}>
                                                 <Text style={[styles.testimonialName, { color: theme.text }]} numberOfLines={1}>
-                                                    {t.display_name}
+                                                    {item.display_name}
                                                 </Text>
                                                 <View style={styles.testimonialActions}>
-                                                    {t.video_url ? (
+                                                    {item.video_url ? (
                                                         <TouchableOpacity
                                                             style={styles.tMiniBtn}
-                                                            onPress={() => Linking.openURL(t.video_url)}
+                                                            onPress={() => Linking.openURL(item.video_url)}
                                                         >
                                                             <Ionicons name="logo-youtube" size={16} color="#EF4444" />
                                                             <Text
@@ -1378,14 +1432,14 @@ export default function Home({ navigation }) {
                                                                     { color: isDarkMode ? '#FECACA' : '#5B21B6' },
                                                                 ]}
                                                             >
-                                                                Video
+                                                                {tr('home_video')}
                                                             </Text>
                                                         </TouchableOpacity>
                                                     ) : null}
-                                                    {t.voice_recording_url ? (
+                                                    {item.voice_recording_url ? (
                                                         <TouchableOpacity
                                                             style={styles.tMiniBtn}
-                                                            onPress={() => Linking.openURL(t.voice_recording_url)}
+                                                            onPress={() => Linking.openURL(item.voice_recording_url)}
                                                         >
                                                             <Ionicons name="mic" size={16} color={colors.primary} />
                                                             <Text
@@ -1394,15 +1448,15 @@ export default function Home({ navigation }) {
                                                                     { color: isDarkMode ? '#C4B5FD' : '#5B21B6' },
                                                                 ]}
                                                             >
-                                                                Voice
+                                                                {tr('home_voice')}
                                                             </Text>
                                                         </TouchableOpacity>
                                                     ) : null}
                                                 </View>
                                             </View>
                                         </View>
-                                        {t.testimonial_text ? (
-                                            <Text style={[styles.testimonialQuote, { color: theme.text }]}>"{t.testimonial_text}"</Text>
+                                        {item.testimonial_text ? (
+                                            <Text style={[styles.testimonialQuote, { color: theme.text }]}>"{item.testimonial_text}"</Text>
                                         ) : null}
                                     </LinearGradient>
                                 ))}

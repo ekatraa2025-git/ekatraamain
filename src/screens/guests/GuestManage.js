@@ -1,23 +1,57 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
     View, Text, StyleSheet, ScrollView, TouchableOpacity,
     TextInput, Alert, FlatList, Modal, Share, ActivityIndicator,
+    Platform, Linking,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Contacts from 'expo-contacts';
 import { colors } from '../../theme/colors';
 import { useTheme } from '../../context/ThemeContext';
+import { useLocale } from '../../context/LocaleContext';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import BottomTabBar from '../../components/BottomTabBar';
 
 const TABS_LIST = ['Guests', 'Gifts', 'Invite'];
 
+function formatInviteDate(d) {
+    return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+function formatInviteTime(d) {
+    return d.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true });
+}
+function sanitizePhoneForWa(phone) {
+    const d = String(phone || '').replace(/\D/g, '');
+    if (d.length === 10) return `91${d}`;
+    if (d.length >= 12 && d.startsWith('91')) return d;
+    if (d.length >= 10) return d;
+    return '';
+}
+function chunkArr(arr, size) {
+    const out = [];
+    for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+    return out;
+}
+
+const INVITE_THEMES = {
+    rose: ['#FFF1F2', '#FFE4E6'],
+    gold: ['#FFF8F0', '#FFF0E6'],
+    navy: ['#EEF2FF', '#E0E7FF'],
+    emerald: ['#ECFDF5', '#D1FAE5'],
+    royal: ['#FAF5FF', '#F3E8FF'],
+};
+const COLOR_KEYS = ['rose', 'gold', 'navy', 'emerald', 'royal'];
+const VARIATION_KEYS = ['classic', 'modern', 'festive', 'minimal'];
+
 export default function GuestManage({ navigation }) {
+    const insets = useSafeAreaInsets();
     const { theme, isDarkMode } = useTheme();
+    const { t } = useLocale();
     const { user, isAuthenticated } = useAuth();
     const userId = user?.id;
     const [activeTab, setActiveTab] = useState('Guests');
@@ -47,6 +81,36 @@ export default function GuestManage({ navigation }) {
         hostNames: '',
         message: '',
     });
+    const [inviteDateValue, setInviteDateValue] = useState(() => new Date());
+    const [inviteTimeValue, setInviteTimeValue] = useState(() => {
+        const x = new Date();
+        x.setHours(19, 0, 0, 0);
+        return x;
+    });
+    const [showInviteDatePicker, setShowInviteDatePicker] = useState(false);
+    const [showInviteTimePicker, setShowInviteTimePicker] = useState(false);
+    const [inviteColorTheme, setInviteColorTheme] = useState('gold');
+    const [inviteVariation, setInviteVariation] = useState('classic');
+    const [inviteAiSamples, setInviteAiSamples] = useState([]);
+    const [inviteAiFinal, setInviteAiFinal] = useState('');
+    const [inviteAiLoadingSamples, setInviteAiLoadingSamples] = useState(false);
+    const [inviteAiLoadingFinal, setInviteAiLoadingFinal] = useState(false);
+    const [waModalVisible, setWaModalVisible] = useState(false);
+    const [waChunkIdx, setWaChunkIdx] = useState(0);
+
+    useEffect(() => {
+        setInviteForm(p => ({
+            ...p,
+            eventDate: formatInviteDate(inviteDateValue),
+            eventTime: formatInviteTime(inviteTimeValue),
+        }));
+    }, [inviteDateValue, inviteTimeValue]);
+
+    const guestsWithPhoneList = useMemo(
+        () => guests.filter(g => sanitizePhoneForWa(g.phone)),
+        [guests]
+    );
+    const waChunks = useMemo(() => chunkArr(guestsWithPhoneList, 5), [guestsWithPhoneList]);
 
     const loadData = useCallback(async () => {
         if (!userId) { setDataLoading(false); return; }
@@ -286,6 +350,9 @@ export default function GuestManage({ navigation }) {
     };
 
     const buildInvitationText = () => {
+        if (inviteAiFinal && String(inviteAiFinal).trim()) {
+            return `${String(inviteAiFinal).trim()}\n\n— Powered by Ekatraa`;
+        }
         const f = inviteForm;
         const lines = [];
         lines.push('✨ You are cordially invited! ✨');
@@ -306,6 +373,88 @@ export default function GuestManage({ navigation }) {
         lines.push('');
         lines.push('— Powered by Ekatraa');
         return lines.join('\n');
+    };
+
+    const openWhatsAppToNumber = async (digits, body) => {
+        const url = `https://wa.me/${digits}?text=${encodeURIComponent(body)}`;
+        const can = await Linking.canOpenURL(url);
+        if (can) await Linking.openURL(url);
+        else Alert.alert('WhatsApp', 'Could not open WhatsApp for this number.');
+    };
+
+    const runGenerateSamples = async () => {
+        if (!inviteForm.eventName.trim()) {
+            Alert.alert('Required', 'Please enter event name.');
+            return;
+        }
+        setInviteAiLoadingSamples(true);
+        setInviteAiSamples([]);
+        try {
+            const { data, error } = await api.generateInvitation({
+                mode: 'samples',
+                eventName: inviteForm.eventName,
+                eventDate: inviteForm.eventDate,
+                eventTime: inviteForm.eventTime,
+                venueName: inviteForm.venueName,
+                venueAddress: inviteForm.venueAddress,
+                hostNames: inviteForm.hostNames,
+                message: inviteForm.message,
+                colorTheme: inviteColorTheme,
+                variation: inviteVariation,
+            });
+            if (error) {
+                Alert.alert('Error', error.message || 'Could not generate samples.');
+                return;
+            }
+            if (data?.samples?.length) setInviteAiSamples(data.samples.slice(0, 3));
+            else Alert.alert('Samples', 'No samples returned. Try again.');
+        } finally {
+            setInviteAiLoadingSamples(false);
+        }
+    };
+
+    const runGenerateFinal = async () => {
+        if (!inviteForm.eventName.trim()) {
+            Alert.alert('Required', 'Please enter event name.');
+            return;
+        }
+        setInviteAiLoadingFinal(true);
+        try {
+            const { data, error } = await api.generateInvitation({
+                mode: 'final',
+                eventName: inviteForm.eventName,
+                eventDate: inviteForm.eventDate,
+                eventTime: inviteForm.eventTime,
+                venueName: inviteForm.venueName,
+                venueAddress: inviteForm.venueAddress,
+                hostNames: inviteForm.hostNames,
+                message: inviteForm.message,
+                colorTheme: inviteColorTheme,
+                variation: inviteVariation,
+                samples: inviteAiSamples,
+            });
+            if (error) {
+                Alert.alert('Error', error.message || 'Could not generate final invite.');
+                return;
+            }
+            if (data?.final) setInviteAiFinal(String(data.final));
+            else Alert.alert('Final', 'No final text returned.');
+        } finally {
+            setInviteAiLoadingFinal(false);
+        }
+    };
+
+    const startWhatsappBatches = () => {
+        if (!inviteForm.eventName.trim()) {
+            Alert.alert('Required', 'Please enter event name.');
+            return;
+        }
+        if (!guestsWithPhoneList.length) {
+            Alert.alert('WhatsApp', t('invite_wa_no_phone'));
+            return;
+        }
+        setWaChunkIdx(0);
+        setWaModalVisible(true);
     };
 
     const shareInvitation = async () => {
@@ -392,107 +541,209 @@ export default function GuestManage({ navigation }) {
         </View>
     );
 
+    const inviteCardGradient = isDarkMode
+        ? ['#181B25', '#1A1D27']
+        : (INVITE_THEMES[inviteColorTheme] || INVITE_THEMES.gold);
+    const previewGrad = INVITE_THEMES[inviteColorTheme] || INVITE_THEMES.gold;
+
     const renderInviteTab = () => (
         <ScrollView contentContainerStyle={styles.inviteScroll} showsVerticalScrollIndicator={false}>
-            <LinearGradient
-                colors={isDarkMode ? ['#181B25', '#1A1D27'] : ['#FFF8F0', '#FFF3E6']}
-                style={styles.inviteCard}
-            >
+            <LinearGradient colors={inviteCardGradient} style={styles.inviteCard}>
                 <View style={styles.inviteHeaderRow}>
                     <View style={[styles.inviteLogoWrap, { backgroundColor: colors.primary }]}>
                         <Text style={styles.inviteLogoText}>eK</Text>
                     </View>
-                    <Text style={[styles.inviteCardTitle, { color: theme.text }]}>Create Digital Invitation</Text>
+                    <Text style={[styles.inviteCardTitle, { color: theme.text }]}>{t('invite_title')}</Text>
                 </View>
                 <Text style={[styles.inviteDesc, { color: theme.textLight }]}>
-                    Design a beautiful invitation and share it with your guests via WhatsApp, SMS, or any app.
+                    {t('invite_desc')}
                 </Text>
 
                 <TextInput
                     style={[styles.input, { backgroundColor: theme.inputBackground, color: theme.text, borderColor: theme.border }]}
-                    placeholder="Event Name * (e.g. Wedding of Priya & Rahul)"
+                    placeholder={t('invite_event_name_ph')}
                     placeholderTextColor={theme.textLight}
                     value={inviteForm.eventName}
-                    onChangeText={t => setInviteForm(p => ({ ...p, eventName: t }))}
+                    onChangeText={txt => setInviteForm(p => ({ ...p, eventName: txt }))}
                 />
                 <View style={styles.inviteRow}>
-                    <TextInput
-                        style={[styles.input, styles.halfInput, { backgroundColor: theme.inputBackground, color: theme.text, borderColor: theme.border }]}
-                        placeholder="Date (e.g. 15 Apr 2026)"
-                        placeholderTextColor={theme.textLight}
-                        value={inviteForm.eventDate}
-                        onChangeText={t => setInviteForm(p => ({ ...p, eventDate: t }))}
-                    />
-                    <TextInput
-                        style={[styles.input, styles.halfInput, { backgroundColor: theme.inputBackground, color: theme.text, borderColor: theme.border }]}
-                        placeholder="Time (e.g. 7:00 PM)"
-                        placeholderTextColor={theme.textLight}
-                        value={inviteForm.eventTime}
-                        onChangeText={t => setInviteForm(p => ({ ...p, eventTime: t }))}
-                    />
+                    <TouchableOpacity
+                        style={[styles.input, styles.halfInput, { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: theme.inputBackground, borderColor: theme.border }]}
+                        onPress={() => setShowInviteDatePicker(true)}
+                    >
+                        <Ionicons name="calendar-outline" size={18} color={theme.textLight} />
+                        <Text style={{ color: theme.text, flex: 1, fontSize: 15 }}>{formatInviteDate(inviteDateValue)}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={[styles.input, styles.halfInput, { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: theme.inputBackground, borderColor: theme.border }]}
+                        onPress={() => setShowInviteTimePicker(true)}
+                    >
+                        <Ionicons name="time-outline" size={18} color={theme.textLight} />
+                        <Text style={{ color: theme.text, flex: 1, fontSize: 15 }}>{formatInviteTime(inviteTimeValue)}</Text>
+                    </TouchableOpacity>
                 </View>
+                {showInviteDatePicker ? (
+                    <DateTimePicker
+                        value={inviteDateValue}
+                        mode="date"
+                        display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                        onChange={(e, d) => {
+                            setShowInviteDatePicker(false);
+                            if (d) setInviteDateValue(d);
+                        }}
+                    />
+                ) : null}
+                {showInviteTimePicker ? (
+                    <DateTimePicker
+                        value={inviteTimeValue}
+                        mode="time"
+                        display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                        onChange={(e, d) => {
+                            setShowInviteTimePicker(false);
+                            if (d) setInviteTimeValue(d);
+                        }}
+                    />
+                ) : null}
+
+                <Text style={[styles.chipsLabel, { color: theme.textLight }]}>{t('invite_color_label')}</Text>
+                <View style={styles.chipRow}>
+                    {COLOR_KEYS.map(c => (
+                        <TouchableOpacity
+                            key={c}
+                            style={[
+                                styles.chip,
+                                { borderColor: theme.border, backgroundColor: theme.inputBackground },
+                                inviteColorTheme === c && { borderColor: colors.primary, backgroundColor: colors.primary + '18' },
+                            ]}
+                            onPress={() => setInviteColorTheme(c)}
+                        >
+                            <Text style={{ fontSize: 12, fontWeight: '700', color: inviteColorTheme === c ? colors.primary : theme.text }}>{c}</Text>
+                        </TouchableOpacity>
+                    ))}
+                </View>
+                <Text style={[styles.chipsLabel, { color: theme.textLight }]}>{t('invite_variation_label')}</Text>
+                <View style={styles.chipRow}>
+                    {VARIATION_KEYS.map(v => (
+                        <TouchableOpacity
+                            key={v}
+                            style={[
+                                styles.chip,
+                                { borderColor: theme.border, backgroundColor: theme.inputBackground },
+                                inviteVariation === v && { borderColor: colors.primary, backgroundColor: colors.primary + '18' },
+                            ]}
+                            onPress={() => setInviteVariation(v)}
+                        >
+                            <Text style={{ fontSize: 12, fontWeight: '700', color: inviteVariation === v ? colors.primary : theme.text }}>{v}</Text>
+                        </TouchableOpacity>
+                    ))}
+                </View>
+
                 <TextInput
                     style={[styles.input, { backgroundColor: theme.inputBackground, color: theme.text, borderColor: theme.border }]}
-                    placeholder="Venue Name"
+                    placeholder={t('invite_venue_name')}
                     placeholderTextColor={theme.textLight}
                     value={inviteForm.venueName}
-                    onChangeText={t => setInviteForm(p => ({ ...p, venueName: t }))}
+                    onChangeText={txt => setInviteForm(p => ({ ...p, venueName: txt }))}
                 />
                 <TextInput
                     style={[styles.input, { backgroundColor: theme.inputBackground, color: theme.text, borderColor: theme.border }]}
-                    placeholder="Venue Address"
+                    placeholder={t('invite_venue_address')}
                     placeholderTextColor={theme.textLight}
                     value={inviteForm.venueAddress}
-                    onChangeText={t => setInviteForm(p => ({ ...p, venueAddress: t }))}
+                    onChangeText={txt => setInviteForm(p => ({ ...p, venueAddress: txt }))}
                 />
                 <TextInput
                     style={[styles.input, { backgroundColor: theme.inputBackground, color: theme.text, borderColor: theme.border }]}
-                    placeholder="Hosted by (e.g. The Sharma Family)"
+                    placeholder={t('invite_hosts_ph')}
                     placeholderTextColor={theme.textLight}
                     value={inviteForm.hostNames}
-                    onChangeText={t => setInviteForm(p => ({ ...p, hostNames: t }))}
+                    onChangeText={txt => setInviteForm(p => ({ ...p, hostNames: txt }))}
                 />
                 <TextInput
                     style={[styles.input, styles.multilineInput, { backgroundColor: theme.inputBackground, color: theme.text, borderColor: theme.border }]}
-                    placeholder="Personal message (optional)"
+                    placeholder={t('invite_message_ph')}
                     placeholderTextColor={theme.textLight}
                     value={inviteForm.message}
-                    onChangeText={t => setInviteForm(p => ({ ...p, message: t }))}
+                    onChangeText={txt => setInviteForm(p => ({ ...p, message: txt }))}
                     multiline
                     numberOfLines={3}
                 />
+
+                <TouchableOpacity
+                    style={[styles.aiBtn, { backgroundColor: colors.primary + '20', borderColor: colors.primary + '50' }]}
+                    onPress={runGenerateSamples}
+                    disabled={inviteAiLoadingSamples}
+                >
+                    {inviteAiLoadingSamples ? <ActivityIndicator color={colors.primary} /> : <Ionicons name="sparkles" size={18} color={colors.primary} />}
+                    <Text style={[styles.aiBtnText, { color: colors.primary }]}>{t('invite_gen_samples')}</Text>
+                </TouchableOpacity>
+                {inviteAiSamples.length > 0 ? (
+                    <View style={styles.samplesBox}>
+                        <Text style={[styles.samplesTitle, { color: theme.text }]}>{t('invite_samples_heading')}</Text>
+                        {inviteAiSamples.map((s, idx) => (
+                            <View key={idx} style={[styles.sampleCard, { borderColor: theme.border, backgroundColor: theme.card }]}>
+                                <Text style={[styles.sampleText, { color: theme.text }]} numberOfLines={8}>{s}</Text>
+                            </View>
+                        ))}
+                    </View>
+                ) : null}
+
+                <TouchableOpacity
+                    style={[styles.aiBtn, { backgroundColor: '#8B5CF620', borderColor: '#8B5CF650' }]}
+                    onPress={runGenerateFinal}
+                    disabled={inviteAiLoadingFinal}
+                >
+                    {inviteAiLoadingFinal ? <ActivityIndicator color="#8B5CF6" /> : <Ionicons name="color-wand-outline" size={18} color="#8B5CF6" />}
+                    <Text style={[styles.aiBtnText, { color: '#8B5CF6' }]}>{t('invite_gen_final')}</Text>
+                </TouchableOpacity>
+                {inviteAiFinal ? (
+                    <View style={[styles.finalBox, { borderColor: theme.border }]}>
+                        <Text style={[styles.samplesTitle, { color: theme.text }]}>{t('invite_final_heading')}</Text>
+                        <Text style={[styles.finalText, { color: theme.text }]}>{inviteAiFinal}</Text>
+                    </View>
+                ) : null}
             </LinearGradient>
 
             {inviteForm.eventName.trim() ? (
                 <View style={[styles.previewCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
-                    <Text style={[styles.previewLabel, { color: theme.textLight }]}>PREVIEW</Text>
-                    <LinearGradient
-                        colors={['#FFF8F0', '#FFF0E6']}
-                        style={styles.previewInner}
-                    >
-                        <Text style={styles.previewStar}>✨</Text>
-                        <Text style={styles.previewTitle}>You are cordially invited!</Text>
-                        <Text style={styles.previewEvent}>{inviteForm.eventName}</Text>
-                        {inviteForm.hostNames ? <Text style={styles.previewHost}>Hosted by: {inviteForm.hostNames}</Text> : null}
-                        <View style={styles.previewDivider} />
-                        {inviteForm.eventDate ? (
-                            <View style={styles.previewDetailRow}>
-                                <Ionicons name="calendar-outline" size={14} color="#8B6914" />
-                                <Text style={styles.previewDetail}>{inviteForm.eventDate}{inviteForm.eventTime ? ` at ${inviteForm.eventTime}` : ''}</Text>
-                            </View>
-                        ) : null}
-                        {inviteForm.venueName ? (
-                            <View style={styles.previewDetailRow}>
-                                <Ionicons name="location-outline" size={14} color="#8B6914" />
-                                <Text style={styles.previewDetail}>{inviteForm.venueName}{inviteForm.venueAddress ? `\n${inviteForm.venueAddress}` : ''}</Text>
-                            </View>
-                        ) : null}
-                        {inviteForm.message ? <Text style={styles.previewMessage}>{inviteForm.message}</Text> : null}
-                        <Text style={styles.previewFooter}>We look forward to your gracious presence!</Text>
-                        <View style={styles.previewBrand}>
-                            <View style={styles.previewBrandDot} />
-                            <Text style={styles.previewBrandText}>Powered by Ekatraa</Text>
-                        </View>
+                    <Text style={[styles.previewLabel, { color: theme.textLight }]}>{t('invite_preview')}</Text>
+                    <LinearGradient colors={previewGrad} style={styles.previewInner}>
+                        {inviteAiFinal ? (
+                            <>
+                                <Text style={styles.previewStar}>✨</Text>
+                                <Text style={[styles.previewAiBlock, { color: '#4A2800' }]}>{inviteAiFinal}</Text>
+                                <View style={styles.previewBrand}>
+                                    <View style={styles.previewBrandDot} />
+                                    <Text style={styles.previewBrandText}>Powered by Ekatraa</Text>
+                                </View>
+                            </>
+                        ) : (
+                            <>
+                                <Text style={styles.previewStar}>✨</Text>
+                                <Text style={styles.previewTitle}>{t('invite_preview_title')}</Text>
+                                <Text style={styles.previewEvent}>{inviteForm.eventName}</Text>
+                                {inviteForm.hostNames ? <Text style={styles.previewHost}>Hosted by: {inviteForm.hostNames}</Text> : null}
+                                <View style={styles.previewDivider} />
+                                {inviteForm.eventDate ? (
+                                    <View style={styles.previewDetailRow}>
+                                        <Ionicons name="calendar-outline" size={14} color="#8B6914" />
+                                        <Text style={styles.previewDetail}>{inviteForm.eventDate}{inviteForm.eventTime ? ` at ${inviteForm.eventTime}` : ''}</Text>
+                                    </View>
+                                ) : null}
+                                {inviteForm.venueName ? (
+                                    <View style={styles.previewDetailRow}>
+                                        <Ionicons name="location-outline" size={14} color="#8B6914" />
+                                        <Text style={styles.previewDetail}>{inviteForm.venueName}{inviteForm.venueAddress ? `\n${inviteForm.venueAddress}` : ''}</Text>
+                                    </View>
+                                ) : null}
+                                {inviteForm.message ? <Text style={styles.previewMessage}>{inviteForm.message}</Text> : null}
+                                <Text style={styles.previewFooter}>{t('invite_preview_footer')}</Text>
+                                <View style={styles.previewBrand}>
+                                    <View style={styles.previewBrandDot} />
+                                    <Text style={styles.previewBrandText}>Powered by Ekatraa</Text>
+                                </View>
+                            </>
+                        )}
                     </LinearGradient>
                 </View>
             ) : null}
@@ -503,14 +754,14 @@ export default function GuestManage({ navigation }) {
                     onPress={shareInvitation}
                 >
                     <Ionicons name="share-outline" size={20} color="#FFF" />
-                    <Text style={styles.shareBtnText}>Share Invitation</Text>
+                    <Text style={styles.shareBtnText}>{t('invite_share')}</Text>
                 </TouchableOpacity>
                 {guests.length > 0 && inviteForm.eventName.trim() ? (
                     <TouchableOpacity
                         style={[styles.shareBtnOutline, { borderColor: colors.primary }]}
                         onPress={() => {
                             Alert.alert(
-                                'Send to All Guests',
+                                t('invite_send_all'),
                                 `Share personalized invitations with ${guests.length} guest${guests.length !== 1 ? 's' : ''}?`,
                                 [
                                     { text: 'Cancel', style: 'cancel' },
@@ -520,7 +771,18 @@ export default function GuestManage({ navigation }) {
                         }}
                     >
                         <Ionicons name="people-outline" size={20} color={colors.primary} />
-                        <Text style={[styles.shareBtnOutlineText, { color: colors.primary }]}>Send to All Guests ({guests.length})</Text>
+                        <Text style={[styles.shareBtnOutlineText, { color: colors.primary }]}>{t('invite_send_all')} ({guests.length})</Text>
+                    </TouchableOpacity>
+                ) : null}
+                {guestsWithPhoneList.length > 0 && inviteForm.eventName.trim() ? (
+                    <TouchableOpacity
+                        style={[styles.shareBtnOutline, { borderColor: '#25D366' }]}
+                        onPress={startWhatsappBatches}
+                    >
+                        <Ionicons name="logo-whatsapp" size={20} color="#25D366" />
+                        <Text style={[styles.shareBtnOutlineText, { color: '#25D366' }]}>
+                            {t('invite_whatsapp_batches')} ({guestsWithPhoneList.length})
+                        </Text>
                     </TouchableOpacity>
                 ) : null}
             </View>
@@ -549,31 +811,31 @@ export default function GuestManage({ navigation }) {
     );
 
     return (
-        <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
+        <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top', 'left', 'right']}>
             <View style={[styles.header, { borderBottomColor: theme.border }]}>
                 <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
                     <Ionicons name="arrow-back" size={24} color={theme.text} />
                 </TouchableOpacity>
-                <Text style={[styles.headerTitle, { color: theme.text }]}>Guest Manager</Text>
+                <Text style={[styles.headerTitle, { color: theme.text }]}>{t('guest_manager_title')}</Text>
                 <View style={{ width: 32 }} />
             </View>
 
             <View style={styles.statsRow}>
                 <View style={[styles.statBox, { backgroundColor: colors.primary + '12' }]}>
                     <Text style={[styles.statNum, { color: colors.primary }]}>{guests.length}</Text>
-                    <Text style={[styles.statLabel, { color: theme.textLight }]}>Guests</Text>
+                    <Text style={[styles.statLabel, { color: theme.textLight }]}>{t('guest_stat_guests')}</Text>
                 </View>
                 <View style={[styles.statBox, { backgroundColor: '#22C55E18' }]}>
                     <Text style={[styles.statNum, { color: '#22C55E' }]}>{guests.filter(g => g.rsvp === 'confirmed').length}</Text>
-                    <Text style={[styles.statLabel, { color: theme.textLight }]}>Confirmed</Text>
+                    <Text style={[styles.statLabel, { color: theme.textLight }]}>{t('guest_stat_confirmed')}</Text>
                 </View>
                 <View style={[styles.statBox, { backgroundColor: '#F59E0B18' }]}>
                     <Text style={[styles.statNum, { color: '#F59E0B' }]}>{gifts.length}</Text>
-                    <Text style={[styles.statLabel, { color: theme.textLight }]}>Gifts</Text>
+                    <Text style={[styles.statLabel, { color: theme.textLight }]}>{t('guest_stat_gifts')}</Text>
                 </View>
                 <View style={[styles.statBox, { backgroundColor: '#8B5CF618' }]}>
                     <Text style={[styles.statNum, { color: '#8B5CF6' }]}>₹{totalGiftAmount.toLocaleString()}</Text>
-                    <Text style={[styles.statLabel, { color: theme.textLight }]}>Cash</Text>
+                    <Text style={[styles.statLabel, { color: theme.textLight }]}>{t('guest_stat_cash')}</Text>
                 </View>
             </View>
 
@@ -584,7 +846,9 @@ export default function GuestManage({ navigation }) {
                         style={[styles.tabBtn, activeTab === tab && { borderBottomColor: colors.primary, borderBottomWidth: 2 }]}
                         onPress={() => { setActiveTab(tab); setSearchQuery(''); }}
                     >
-                        <Text style={[styles.tabText, { color: activeTab === tab ? colors.primary : theme.textLight }]}>{tab}</Text>
+                        <Text style={[styles.tabText, { color: activeTab === tab ? colors.primary : theme.textLight }]}>
+                            {tab === 'Guests' ? t('guest_tab_guests') : tab === 'Gifts' ? t('guest_tab_gifts') : t('guest_tab_invite')}
+                        </Text>
                     </TouchableOpacity>
                 ))}
             </View>
@@ -594,7 +858,7 @@ export default function GuestManage({ navigation }) {
                     <Ionicons name="search-outline" size={18} color={theme.textLight} />
                     <TextInput
                         style={[styles.searchInput, { color: theme.text }]}
-                        placeholder={`Search ${activeTab.toLowerCase()}...`}
+                        placeholder={activeTab === 'Guests' ? t('guest_search_guests') : t('guest_search_gifts')}
                         placeholderTextColor={theme.textLight}
                         value={searchQuery}
                         onChangeText={setSearchQuery}
@@ -605,13 +869,13 @@ export default function GuestManage({ navigation }) {
             {dataLoading ? (
                 <View style={styles.loadingWrap}>
                     <ActivityIndicator size="large" color={colors.primary} />
-                    <Text style={[styles.loadingText, { color: theme.textLight }]}>Loading your guest data...</Text>
+                    <Text style={[styles.loadingText, { color: theme.textLight }]}>{t('invite_loading_guests')}</Text>
                 </View>
             ) : !isAuthenticated ? (
                 <View style={styles.emptyWrap}>
                     <Ionicons name="lock-closed-outline" size={48} color={theme.textLight} />
-                    <Text style={[styles.emptyText, { color: theme.textLight }]}>Login Required</Text>
-                    <Text style={[styles.emptyHint, { color: theme.textLight }]}>Please login to manage your guests</Text>
+                    <Text style={[styles.emptyText, { color: theme.textLight }]}>{t('invite_login_required')}</Text>
+                    <Text style={[styles.emptyHint, { color: theme.textLight }]}>{t('invite_login_hint')}</Text>
                     <TouchableOpacity
                         style={[styles.saveBtn, { backgroundColor: colors.primary, marginTop: 16, paddingHorizontal: 32 }]}
                         onPress={() => navigation.navigate('Login')}
@@ -681,17 +945,6 @@ export default function GuestManage({ navigation }) {
                 />
             ) : (
                 renderInviteTab()
-            )}
-
-            {activeTab !== 'Invite' && (
-                <TouchableOpacity
-                    style={styles.fab}
-                    onPress={() => activeTab === 'Guests' ? setShowAddGuest(true) : setShowAddGift(true)}
-                >
-                    <LinearGradient colors={[colors.primary, '#FFA040']} style={styles.fabGradient}>
-                        <Ionicons name="add" size={28} color="#FFF" />
-                    </LinearGradient>
-                </TouchableOpacity>
             )}
 
             {/* Add Guest Modal */}
@@ -877,7 +1130,81 @@ export default function GuestManage({ navigation }) {
                     </View>
                 </TouchableOpacity>
             </Modal>
+
+            <Modal visible={waModalVisible} animationType="slide" transparent>
+                <TouchableOpacity style={styles.modalOverlay} onPress={() => setWaModalVisible(false)} activeOpacity={1}>
+                    <View style={[styles.modalContent, styles.modalTall, { backgroundColor: theme.card }]} onStartShouldSetResponder={() => true}>
+                        <View style={styles.modalHandle} />
+                        <Text style={[styles.modalTitle, { color: theme.text, marginBottom: 8 }]}>
+                            {t('invite_wa_batch_title')} ({waChunkIdx + 1}/{Math.max(waChunks.length, 1)})
+                        </Text>
+                        <Text style={[styles.waHint, { color: theme.textLight }]}>
+                            {t('invite_wa_open')} — max 5 guests per batch
+                        </Text>
+                        <ScrollView style={{ maxHeight: 360 }} keyboardShouldPersistTaps="handled">
+                            {(waChunks[waChunkIdx] || []).map(g => {
+                                const digits = sanitizePhoneForWa(g.phone);
+                                return (
+                                    <TouchableOpacity
+                                        key={g.id}
+                                        style={[styles.waRow, { borderBottomColor: theme.border }]}
+                                        onPress={() => {
+                                            const msg = `Dear ${g.name},\n\n${buildInvitationText()}`;
+                                            if (digits) openWhatsAppToNumber(digits, msg);
+                                            else Alert.alert('No number', 'This guest has no valid phone number.');
+                                        }}
+                                    >
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={[styles.waName, { color: theme.text }]}>{g.name}</Text>
+                                            {g.phone ? <Text style={[styles.waPhone, { color: theme.textLight }]}>{g.phone}</Text> : null}
+                                        </View>
+                                        <Ionicons name="logo-whatsapp" size={22} color="#25D366" />
+                                    </TouchableOpacity>
+                                );
+                            })}
+                        </ScrollView>
+                        <View style={styles.waFooter}>
+                            <TouchableOpacity style={[styles.waSecondary, { borderColor: theme.border }]} onPress={() => setWaModalVisible(false)}>
+                                <Text style={{ color: theme.text, fontWeight: '600' }}>Close</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.saveBtn, { backgroundColor: '#25D366', flex: 1, marginTop: 0 }]}
+                                onPress={() => {
+                                    if (waChunkIdx < waChunks.length - 1) setWaChunkIdx(waChunkIdx + 1);
+                                    else setWaModalVisible(false);
+                                }}
+                            >
+                                <Text style={styles.saveBtnText}>
+                                    {waChunkIdx < waChunks.length - 1 ? t('invite_wa_next_batch') : t('invite_wa_done')}
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </TouchableOpacity>
+            </Modal>
+
             <BottomTabBar navigation={navigation} activeRoute="Home" />
+
+            {activeTab !== 'Invite' && (
+                <TouchableOpacity
+                    style={[
+                        styles.fab,
+                        {
+                            bottom:
+                                50 +
+                                Math.max(insets.bottom, 6) +
+                                12,
+                            zIndex: 100,
+                            ...(Platform.OS === 'android' ? { elevation: 16 } : {}),
+                        },
+                    ]}
+                    onPress={() => activeTab === 'Guests' ? setShowAddGuest(true) : setShowAddGift(true)}
+                >
+                    <LinearGradient colors={[colors.primary, '#FFA040']} style={styles.fabGradient}>
+                        <Ionicons name="add" size={28} color="#FFF" />
+                    </LinearGradient>
+                </TouchableOpacity>
+            )}
         </SafeAreaView>
     );
 }
@@ -913,7 +1240,7 @@ const styles = StyleSheet.create({
     emptyWrap: { alignItems: 'center', paddingTop: 60, gap: 8 },
     emptyText: { fontSize: 16, fontWeight: '600' },
     emptyHint: { fontSize: 13 },
-    fab: { position: 'absolute', bottom: 24, right: 20, borderRadius: 28, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 8 },
+    fab: { position: 'absolute', right: 20, borderRadius: 28, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 8 },
     fabGradient: { width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center' },
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
     modalContent: { borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingTop: 12, maxHeight: '80%' },
@@ -980,4 +1307,22 @@ const styles = StyleSheet.create({
     guestShareRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1 },
     guestShareName: { fontSize: 14, fontWeight: '500' },
     guestSharePhone: { fontSize: 12, marginTop: 2 },
+    chipsLabel: { fontSize: 12, fontWeight: '600', marginBottom: 8 },
+    chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14 },
+    chip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, borderWidth: 1.5 },
+    aiBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14, borderRadius: 14, borderWidth: 1.5, marginBottom: 10 },
+    aiBtnText: { fontSize: 14, fontWeight: '700' },
+    samplesBox: { marginBottom: 12 },
+    samplesTitle: { fontSize: 14, fontWeight: '700', marginBottom: 8 },
+    sampleCard: { borderRadius: 12, borderWidth: 1, padding: 12, marginBottom: 8 },
+    sampleText: { fontSize: 13, lineHeight: 20 },
+    finalBox: { borderWidth: 1, borderRadius: 12, padding: 12, marginBottom: 8 },
+    finalText: { fontSize: 13, lineHeight: 22 },
+    previewAiBlock: { fontSize: 13, lineHeight: 22, textAlign: 'center', marginVertical: 8 },
+    waHint: { fontSize: 12, marginBottom: 12 },
+    waRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1 },
+    waName: { fontSize: 15, fontWeight: '600' },
+    waPhone: { fontSize: 12, marginTop: 2 },
+    waFooter: { flexDirection: 'row', gap: 10, marginTop: 16, alignItems: 'center' },
+    waSecondary: { paddingVertical: 14, paddingHorizontal: 20, borderRadius: 14, borderWidth: 1 },
 });

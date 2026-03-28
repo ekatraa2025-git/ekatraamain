@@ -55,10 +55,84 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = REQUEST_TIMEOUT_M
 /** Coalesce identical in-flight GETs so parallel mounts do not duplicate network work. */
 const inflightGet = new Map();
 
+/** Short-lived GET response cache (TTL per path). Invalidated on successful mutations. */
+const getResponseCache = new Map();
+
+function pathOnlyFromUrl(url) {
+    try {
+        if (typeof url === 'string' && /^https?:\/\//i.test(url)) {
+            return new URL(url).pathname;
+        }
+    } catch {
+        /* fall through */
+    }
+    const q = url.indexOf('?');
+    const noQuery = q >= 0 ? url.slice(0, q) : url;
+    const api = noQuery.indexOf('/api/');
+    return api >= 0 ? noQuery.slice(api) : noQuery;
+}
+
+function getCacheTtlMsForPath(pathname) {
+    if (pathname.includes('/api/public/cart')) return 0;
+    if (pathname.includes('/api/public/orders')) return 0;
+    if (pathname.includes('/api/public/guests')) return 0;
+    if (pathname.includes('/api/public/gifts')) return 0;
+    if (pathname.includes('/api/public/recommendations')) return 0;
+    if (pathname.includes('/api/public/budget-recommendation-snapshots')) return 0;
+    if (pathname.includes('/api/translations')) return 30 * 60 * 1000;
+    if (pathname.includes('/api/public/config/maps')) return 30 * 60 * 1000;
+    if (pathname.includes('/api/public/banners')) return 15 * 60 * 1000;
+    if (pathname.includes('/api/public/testimonials')) return 15 * 60 * 1000;
+    if (pathname.includes('/api/public/occasions') || pathname.includes('/api/public/event-types')) return 10 * 60 * 1000;
+    if (pathname.includes('/api/public/categories')) return 10 * 60 * 1000;
+    if (pathname.includes('/api/public/special-services')) return 10 * 60 * 1000;
+    if (pathname.includes('/api/public/venues/featured')) return 5 * 60 * 1000;
+    if (pathname.includes('/api/public/booking-protection')) return 5 * 60 * 1000;
+    if (pathname.includes('/api/public/services')) return 5 * 60 * 1000;
+    return 60 * 1000;
+}
+
+function cloneApiResult(result) {
+    try {
+        return JSON.parse(JSON.stringify(result));
+    } catch {
+        return result;
+    }
+}
+
+export function invalidateAllGetCache() {
+    getResponseCache.clear();
+}
+
+/** Only clear caches after mutations that affect user/cart/order data — not AI/chat reads. */
+function shouldInvalidateCacheForMutation(path) {
+    const p = String(path || '').toLowerCase();
+    if (p.includes('/api/public/ai/')) return false;
+    if (p.includes('/api/public/recommendations/narrative')) return false;
+    if (p.includes('/api/public/invitations/generate')) return false;
+    return (
+        p.includes('/cart') ||
+        p.includes('/guests') ||
+        p.includes('/gifts') ||
+        p.includes('/orders') ||
+        p.includes('/checkout') ||
+        p.includes('/payment/') ||
+        p.includes('/quotation')
+    );
+}
+
 async function get(path, params = {}) {
     if (!API_BASE) return { data: null, error: { message: 'API URL not configured. Set EXPO_PUBLIC_API_URL in .env' } };
     const qs = new URLSearchParams(params).toString();
     const url = qs ? `${API_BASE}${path}?${qs}` : `${API_BASE}${path}`;
+    const pathname = pathOnlyFromUrl(url);
+    const ttl = getCacheTtlMsForPath(pathname);
+    if (ttl > 0) {
+        const hit = getResponseCache.get(url);
+        if (hit && hit.expires > Date.now() && hit.result && !hit.result.error) {
+            return Promise.resolve(cloneApiResult(hit.result));
+        }
+    }
     if (inflightGet.has(url)) return inflightGet.get(url);
 
     const promise = (async () => {
@@ -69,7 +143,11 @@ async function get(path, params = {}) {
                 const msg = stringifyApiError(data?.error) || res.statusText;
                 return { data: null, error: { message: msg } };
             }
-            return { data, error: null };
+            const result = { data, error: null };
+            if (ttl > 0) {
+                getResponseCache.set(url, { result, expires: Date.now() + ttl });
+            }
+            return result;
         } catch (e) {
             return { data: null, error: { message: buildError(e) } };
         } finally {
@@ -133,6 +211,7 @@ async function post(path, body = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
                     : res.statusText);
             return { data: null, error: { message: msg } };
         }
+        if (shouldInvalidateCacheForMutation(path)) invalidateAllGetCache();
         return { data, error: null };
     } catch (e) {
         return { data: null, error: { message: buildError(e) } };
@@ -152,6 +231,7 @@ async function patch(path, body = {}) {
             const msg = stringifyApiError(data?.error) || res.statusText;
             return { data: null, error: { message: msg } };
         }
+        if (shouldInvalidateCacheForMutation(path)) invalidateAllGetCache();
         return { data, error: null };
     } catch (e) {
         return { data: null, error: { message: buildError(e) } };
@@ -167,6 +247,7 @@ async function del(path) {
             const msg = stringifyApiError(data?.error) || res.statusText;
             return { data: null, error: { message: msg } };
         }
+        if (shouldInvalidateCacheForMutation(path)) invalidateAllGetCache();
         return { data: data || {}, error: null };
     } catch (e) {
         return { data: null, error: { message: buildError(e) } };
@@ -267,6 +348,11 @@ export const api = {
         return del(`/api/public/cart/items/${itemId}`);
     },
 
+    /** Public booking protection pricing config (admin-managed). */
+    async getBookingProtection() {
+        return get('/api/public/booking-protection');
+    },
+
     // Checkout & orders
     async checkout(body) {
         return post('/api/public/checkout', body);
@@ -309,6 +395,16 @@ export const api = {
     },
     async bulkImportGuests(body) {
         return post('/api/public/guests/bulk', body);
+    },
+
+    /** Public app copy (en / hi / or) from admin translations. */
+    async getTranslations() {
+        return get('/api/translations');
+    },
+
+    /** Claude-powered invitation samples or final text. */
+    async generateInvitation(body) {
+        return post('/api/public/invitations/generate', body, 90000);
     },
 
     // Gifts

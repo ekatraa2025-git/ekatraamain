@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, KeyboardAvoidingView, Platform, TouchableWithoutFeedback, Keyboard, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
+import UserTermsModal from '../../components/UserTermsModal';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -8,14 +9,17 @@ import { Input } from '../../components/Input';
 import { colors } from '../../theme/colors';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
+import { useLocale } from '../../context/LocaleContext';
 import Logo from '../../components/Logo';
 
 export default function Login({ navigation, route }) {
     const { theme } = useTheme();
+    const { t: tr } = useLocale();
     const { sendOtp, signInWithGoogle } = useAuth();
     const [phone, setPhone] = useState('');
     const [loading, setLoading] = useState(false);
     const [googleLoading, setGoogleLoading] = useState(false);
+    const [userTermsVisible, setUserTermsVisible] = useState(false);
 
     // Get redirect info if passed from booking flow
     const redirectAfterLogin = route?.params?.redirect;
@@ -57,7 +61,7 @@ export default function Login({ navigation, route }) {
                 } else {
                     navigation.replace('Home');
                 }
-            } else {
+            } else if (result.error) {
                 Alert.alert('Error', result.error || 'Google sign-in failed. Please try again.');
             }
         } catch (error) {
@@ -94,17 +98,17 @@ export default function Login({ navigation, route }) {
                         <View style={styles.logoContainer}>
                             <Logo width={80} height={80} />
                         </View>
-                        <Text style={[styles.title, { color: theme.text }]}>Welcome to Ekatraa</Text>
+                        <Text style={[styles.title, { color: theme.text }]}>{tr('login_welcome_title')}</Text>
                         <Text style={[styles.subtitle, { color: theme.textLight }]}>
-                            Sign in to book services and manage your events
+                            {tr('login_subtitle')}
                         </Text>
                     </View>
 
                     {/* Login Form */}
                     <View style={styles.form}>
                         <Input
-                            label="Phone Number"
-                            placeholder="Enter 10-digit mobile number"
+                            label={tr('login_phone_label')}
+                            placeholder={tr('login_phone_ph')}
                             value={phone}
                             onChangeText={setPhone}
                             keyboardType="phone-pad"
@@ -115,7 +119,7 @@ export default function Login({ navigation, route }) {
                         />
 
                         <Button
-                            title={loading ? "Sending OTP..." : "Continue with OTP"}
+                            title={loading ? tr('login_sending_otp') : tr('login_continue_otp')}
                             onPress={handleSendOtp}
                             loading={loading}
                             style={styles.otpButton}
@@ -124,7 +128,7 @@ export default function Login({ navigation, route }) {
                         {/* Divider */}
                         <View style={styles.dividerContainer}>
                             <View style={[styles.divider, { backgroundColor: theme.border }]} />
-                            <Text style={[styles.dividerText, { color: theme.textLight }]}>OR</Text>
+                            <Text style={[styles.dividerText, { color: theme.textLight }]}>{tr('login_or')}</Text>
                             <View style={[styles.divider, { backgroundColor: theme.border }]} />
                         </View>
 
@@ -140,7 +144,7 @@ export default function Login({ navigation, route }) {
                                 <>
                                     <Ionicons name="logo-google" size={22} color="#DB4437" />
                                     <Text style={[styles.googleText, { color: theme.text }]}>
-                                        Continue with Google
+                                        {tr('login_google')}
                                     </Text>
                                 </>
                             )}
@@ -150,12 +154,16 @@ export default function Login({ navigation, route }) {
                     {/* Footer */}
                     <View style={styles.footer}>
                         <Text style={[styles.footerText, { color: theme.textLight }]}>
-                            By continuing, you agree to our{' '}
-                            <Text style={[styles.link, { color: colors.primary }]}>Terms of Service</Text>
-                            {' '}and{' '}
-                            <Text style={[styles.link, { color: colors.primary }]}>Privacy Policy</Text>
+                            {tr('login_footer_agree')}{' '}
                         </Text>
+                        <View style={styles.footerLinks}>
+                            <TouchableOpacity onPress={() => setUserTermsVisible(true)} activeOpacity={0.7}>
+                                <Text style={[styles.link, { color: colors.primary }]}>{tr('login_terms')}</Text>
+                            </TouchableOpacity>
+                            <Text style={[styles.footerText, { color: theme.textLight }]}> {tr('login_footer_same')}</Text>
+                        </View>
                     </View>
+                    <UserTermsModal visible={userTermsVisible} onClose={() => setUserTermsVisible(false)} />
                 </KeyboardAvoidingView>
             </TouchableWithoutFeedback>
         </SafeAreaView>
@@ -242,6 +250,13 @@ const styles = StyleSheet.create({
         fontSize: 12,
         textAlign: 'center',
         lineHeight: 18,
+    },
+    footerLinks: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginTop: 4,
     },
     link: {
         fontWeight: '600',

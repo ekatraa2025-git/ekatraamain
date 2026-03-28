@@ -72,7 +72,10 @@ export function AuthProvider({ children }) {
     const signInWithGoogle = async () => {
         try {
             const { data, error } = await authService.signInWithGoogle();
-            if (error) throw error;
+            if (error) {
+                if (error.silent || error.message === 'CANCELLED') return { success: false, error: null };
+                throw error;
+            }
             return { success: true, data };
         } catch (error) {
             console.error('[AUTH] Google sign-in error:', error);

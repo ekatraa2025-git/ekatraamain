@@ -4,18 +4,20 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { useTheme } from '../../context/ThemeContext';
+import { useLocale } from '../../context/LocaleContext';
 import BottomTabBar from '../../components/BottomTabBar';
 
-const FAQ = [
-    { q: 'How do I place an order?', a: 'Select an occasion, choose categories, pick services with pricing tiers, fill your event details, and add to cart. Then proceed to checkout.' },
-    { q: 'Can I cancel an order?', a: 'Yes, you can request cancellation from the My Orders section. Our team will review and process it.' },
-    { q: 'How are vendors selected?', a: 'All vendors on Ekatraa are verified and curated based on quality, reliability, and customer feedback.' },
-    { q: 'What payment methods are accepted?', a: 'Pay 20% advance online (UPI, cards, net banking) or choose Cash on Order Finalization—pay after vendors confirm pricing and details.' },
-    { q: 'How do I track my order?', a: 'Go to My Orders to view real-time status updates on all your orders.' },
+const FAQ_KEYS = [
+    ['faq_q1', 'faq_a1'],
+    ['faq_q2', 'faq_a2'],
+    ['faq_q3', 'faq_a3'],
+    ['faq_q4', 'faq_a4'],
+    ['faq_q5', 'faq_a5'],
 ];
 
 export default function HelpSupport({ navigation }) {
     const { theme, isDarkMode } = useTheme();
+    const { t: tr } = useLocale();
 
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
@@ -23,57 +25,57 @@ export default function HelpSupport({ navigation }) {
                 <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
                     <Ionicons name="arrow-back" size={24} color={theme.text} />
                 </TouchableOpacity>
-                <Text style={[styles.headerTitle, { color: theme.text }]}>Help & Support</Text>
+                <Text style={[styles.headerTitle, { color: theme.text }]}>{tr('help_title')}</Text>
                 <View style={{ width: 32 }} />
             </View>
 
             <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
                 <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>
-                    <Text style={[styles.cardTitle, { color: theme.text }]}>Contact Us</Text>
+                    <Text style={[styles.cardTitle, { color: theme.text }]}>{tr('help_contact_title')}</Text>
 
                     <TouchableOpacity
                         style={[styles.contactBtn, { backgroundColor: colors.primary + '10' }]}
-                        onPress={() => Linking.openURL('tel:+919876543210')}
+                        onPress={() => Linking.openURL('tel:+918422948781')}
                     >
                         <Ionicons name="call-outline" size={20} color={colors.primary} />
                         <View style={{ flex: 1 }}>
-                            <Text style={[styles.contactLabel, { color: theme.text }]}>Call Us</Text>
-                            <Text style={[styles.contactValue, { color: theme.textLight }]}>+91 98765 43210</Text>
+                            <Text style={[styles.contactLabel, { color: theme.text }]}>{tr('help_call_us')}</Text>
+                            <Text style={[styles.contactValue, { color: theme.textLight }]}>+91 84229 48781</Text>
                         </View>
                         <Ionicons name="chevron-forward" size={18} color={theme.textLight} />
                     </TouchableOpacity>
 
                     <TouchableOpacity
                         style={[styles.contactBtn, { backgroundColor: colors.primary + '10' }]}
-                        onPress={() => Linking.openURL('mailto:support@ekatraa.com')}
+                        onPress={() => Linking.openURL('mailto:help@ekatraa.in')}
                     >
                         <Ionicons name="mail-outline" size={20} color={colors.primary} />
                         <View style={{ flex: 1 }}>
-                            <Text style={[styles.contactLabel, { color: theme.text }]}>Email Us</Text>
-                            <Text style={[styles.contactValue, { color: theme.textLight }]}>support@ekatraa.com</Text>
+                            <Text style={[styles.contactLabel, { color: theme.text }]}>{tr('help_email_us')}</Text>
+                            <Text style={[styles.contactValue, { color: theme.textLight }]}>help@ekatraa.in</Text>
                         </View>
                         <Ionicons name="chevron-forward" size={18} color={theme.textLight} />
                     </TouchableOpacity>
 
                     <TouchableOpacity
                         style={[styles.contactBtn, { backgroundColor: '#25D366' + '15' }]}
-                        onPress={() => Linking.openURL('https://wa.me/919876543210')}
+                        onPress={() => Linking.openURL('https://wa.me/918422948781')}
                     >
                         <Ionicons name="logo-whatsapp" size={20} color="#25D366" />
                         <View style={{ flex: 1 }}>
-                            <Text style={[styles.contactLabel, { color: theme.text }]}>WhatsApp</Text>
-                            <Text style={[styles.contactValue, { color: theme.textLight }]}>Chat with us</Text>
+                            <Text style={[styles.contactLabel, { color: theme.text }]}>{tr('help_whatsapp_label')}</Text>
+                            <Text style={[styles.contactValue, { color: theme.textLight }]}>{tr('help_chat_with_us')}</Text>
                         </View>
                         <Ionicons name="chevron-forward" size={18} color={theme.textLight} />
                     </TouchableOpacity>
                 </View>
 
                 <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>
-                    <Text style={[styles.cardTitle, { color: theme.text }]}>Frequently Asked Questions</Text>
-                    {FAQ.map((item, idx) => (
-                        <View key={idx} style={[styles.faqItem, idx < FAQ.length - 1 && { borderBottomWidth: 1, borderBottomColor: theme.border }]}>
-                            <Text style={[styles.faqQ, { color: theme.text }]}>{item.q}</Text>
-                            <Text style={[styles.faqA, { color: theme.textLight }]}>{item.a}</Text>
+                    <Text style={[styles.cardTitle, { color: theme.text }]}>{tr('help_faq_title')}</Text>
+                    {FAQ_KEYS.map(([qk, ak], idx) => (
+                        <View key={qk} style={[styles.faqItem, idx < FAQ_KEYS.length - 1 && { borderBottomWidth: 1, borderBottomColor: theme.border }]}>
+                            <Text style={[styles.faqQ, { color: theme.text }]}>{tr(qk)}</Text>
+                            <Text style={[styles.faqA, { color: theme.textLight }]}>{tr(ak)}</Text>
                         </View>
                     ))}
                 </View>
