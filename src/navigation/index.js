@@ -16,6 +16,8 @@ import VendorDetail from '../screens/home/VendorDetail';
 import CategoryServices from '../screens/home/CategoryServices';
 import SpecialServices from '../screens/home/SpecialServices';
 import Menu from '../screens/menu/Menu';
+import SavedRecommendations from '../screens/menu/SavedRecommendations';
+import SavedRecommendationDetail from '../screens/menu/SavedRecommendationDetail';
 import MyBookings from '../screens/bookings/MyBookings';
 import MyProfile from '../screens/profile/MyProfile';
 import MyEnquiries from '../screens/enquiries/MyEnquiries';
@@ -174,6 +176,16 @@ export default function AppNavigator() {
                         presentation: 'modal',
                         animation: 'slide_from_bottom',
                     }}
+                />
+                <Stack.Screen
+                    name="SavedRecommendations"
+                    component={SavedRecommendations}
+                    options={{ animation: 'slide_from_right' }}
+                />
+                <Stack.Screen
+                    name="SavedRecommendationDetail"
+                    component={SavedRecommendationDetail}
+                    options={{ animation: 'slide_from_right' }}
                 />
             </Stack.Navigator>
         </NavigationContainer>

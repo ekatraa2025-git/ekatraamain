@@ -163,7 +163,7 @@ export default function SpecialServices({ route, navigation }) {
                     showsVerticalScrollIndicator={false}
                 >
                     <LinearGradient
-                        colors={isDarkMode ? ['#312e81', '#1e1b4b'] : ['#EEF2FF', '#FFF7ED']}
+                        colors={isDarkMode ? ['#312e81', '#1e1b4b'] : ['#4338CA', '#C2410C']}
                         start={{ x: 0, y: 0 }}
                         end={{ x: 1, y: 1 }}
                         style={styles.hero}

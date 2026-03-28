@@ -5,11 +5,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
+import { useBackendApi } from '../../services/api';
 import BottomTabBar from '../../components/BottomTabBar';
 
 export default function Menu({ navigation }) {
     const { isDarkMode, toggleTheme, theme } = useTheme();
     const { user, isAuthenticated, signOut } = useAuth();
+    const useApi = useBackendApi();
 
     // Get user display info
     const getUserName = () => {
@@ -110,6 +112,35 @@ export default function Menu({ navigation }) {
                 )}
 
                 <View style={[styles.divider, { backgroundColor: theme.border }]} />
+
+                <Text style={[styles.sectionLabel, { color: theme.textLight }]}>Menu items</Text>
+
+                {useApi ? (
+                    <TouchableOpacity
+                        style={[styles.menuItem, borderStyle]}
+                        onPress={() => {
+                            if (!isAuthenticated) {
+                                Alert.alert('Sign in', 'Sign in to view saved budget plans and AI recommendations.', [
+                                    { text: 'Cancel', style: 'cancel' },
+                                    { text: 'Login', onPress: () => navigation.navigate('Login') },
+                                ]);
+                                return;
+                            }
+                            navigation.navigate('SavedRecommendations');
+                        }}
+                    >
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <Ionicons name="albums-outline" size={22} color={theme.text} style={{ marginRight: 10 }} />
+                            <View style={{ flex: 1 }}>
+                                <Text style={[styles.menuText, textStyle]}>Saved budget plans</Text>
+                                <Text style={[styles.menuSub, { color: theme.textLight }]}>
+                                    Budgets, categories & AI insight
+                                </Text>
+                            </View>
+                        </View>
+                        <Ionicons name="chevron-forward" size={20} color={theme.textLight} />
+                    </TouchableOpacity>
+                ) : null}
 
                 {/* Settings */}
                 <View style={[styles.menuItem, borderStyle]}>
@@ -256,6 +287,17 @@ const styles = StyleSheet.create({
     divider: {
         height: 1,
         marginVertical: 20,
+    },
+    sectionLabel: {
+        fontSize: 12,
+        fontWeight: '700',
+        textTransform: 'uppercase',
+        letterSpacing: 0.8,
+        marginBottom: 10,
+    },
+    menuSub: {
+        fontSize: 12,
+        marginTop: 2,
     },
     menuItem: {
         flexDirection: 'row',

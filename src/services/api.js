@@ -69,6 +69,26 @@ async function get(path, params = {}) {
     }
 }
 
+/** GET with Supabase session access token (saved recommendations, etc.). */
+async function getWithAuth(path, params = {}, accessToken) {
+    if (!API_BASE) return { data: null, error: { message: 'API URL not configured. Set EXPO_PUBLIC_API_URL in .env' } };
+    const qs = new URLSearchParams(params).toString();
+    const url = qs ? `${API_BASE}${path}?${qs}` : `${API_BASE}${path}`;
+    const headers = {};
+    if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
+    try {
+        const res = await fetchWithTimeout(url, { headers });
+        const data = await res.json().catch(() => null);
+        if (!res.ok) {
+            const msg = stringifyApiError(data?.error) || res.statusText;
+            return { data: null, error: { message: msg } };
+        }
+        return { data, error: null };
+    } catch (e) {
+        return { data: null, error: { message: buildError(e) } };
+    }
+}
+
 async function post(path, body = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
     if (!API_BASE) return { data: null, error: { message: 'API URL not configured. Set EXPO_PUBLIC_API_URL in .env' } };
     try {
@@ -193,6 +213,14 @@ export const api = {
     },
     async postBudgetRecommendationSnapshot(body) {
         return post('/api/public/budget-recommendation-snapshots', body);
+    },
+    /** @param {string} accessToken - Supabase session access_token */
+    async getBudgetRecommendationSnapshots(accessToken, params = {}) {
+        return getWithAuth('/api/public/budget-recommendation-snapshots', params, accessToken);
+    },
+    /** @param {string} accessToken */
+    async getBudgetRecommendationSnapshot(id, accessToken) {
+        return getWithAuth(`/api/public/budget-recommendation-snapshots/${id}`, {}, accessToken);
     },
 
     // Cart
