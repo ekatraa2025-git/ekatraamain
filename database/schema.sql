@@ -1,4 +1,4 @@
--- eKatRaa User App Database Schema
+-- Ekatraa User App Database Schema
 -- Run this in Supabase SQL Editor to create the required tables
 
 -- =====================================================
@@ -315,6 +315,6 @@ CREATE TRIGGER update_banners_updated_at
 -- Insert sample banners
 INSERT INTO banners (title, subtitle, image_url, banner_type, display_order) VALUES 
     ('Wedding Season Special', 'Book now for exclusive discounts', 'https://images.unsplash.com/photo-1519741497674-611481863552?w=800', 'promotional', 1),
-    ('Success Story: Ravi & Priya', 'A beautiful wedding organized by eKatRaa', 'https://images.unsplash.com/photo-1583939003579-730e3918a45a?w=800', 'success_story', 2),
+    ('Success Story: Ravi & Priya', 'A beautiful wedding organized by Ekatraa', 'https://images.unsplash.com/photo-1583939003579-730e3918a45a?w=800', 'success_story', 2),
     ('Corporate Events', 'Professional event management for businesses', 'https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=800', 'promotional', 3)
 ON CONFLICT DO NOTHING;

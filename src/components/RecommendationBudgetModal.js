@@ -107,6 +107,7 @@ export default function RecommendationBudgetModal({
     const [modalBudgetInr, setModalBudgetInr] = useState(MIN_BUDGET_INR);
     const [categoryEdits, setCategoryEdits] = useState(null);
     const [narrative, setNarrative] = useState(null);
+    const [narrativeAiMeta, setNarrativeAiMeta] = useState(null);
     const [narrativeLoading, setNarrativeLoading] = useState(false);
     const [narrativeError, setNarrativeError] = useState(null);
     const [selected, setSelected] = useState(() => new Map());
@@ -154,6 +155,7 @@ export default function RecommendationBudgetModal({
             setCategoryEdits(null);
             setSelected(new Map());
             setNarrative(null);
+            setNarrativeAiMeta(null);
             setNarrativeError(null);
         }
     }, [visible, data?.total_budget]);
@@ -181,11 +183,14 @@ export default function RecommendationBudgetModal({
             setNarrativeLoading(false);
             if (error) {
                 setNarrative(null);
+                setNarrativeAiMeta(null);
                 setNarrativeError(error.message || 'Narrative request failed.');
             } else if (nd?.narrative) {
                 setNarrative(nd.narrative);
+                setNarrativeAiMeta(nd.ai_meta && typeof nd.ai_meta === 'object' ? nd.ai_meta : null);
             } else {
                 setNarrative(null);
+                setNarrativeAiMeta(null);
                 setNarrativeError('Invalid narrative response.');
             }
         })();
@@ -223,7 +228,7 @@ export default function RecommendationBudgetModal({
 
     const buildShareText = () => {
         if (!data) return '';
-        let t = `eKatRaa — ${occasionName || 'Event'} budget plan\n`;
+        let t = `Ekatraa — ${occasionName || 'Event'} budget plan\n`;
         t += `Total budget: ${formatBudgetInrLabel(Number(data.total_budget))} (₹${Number(data.total_budget).toLocaleString('en-IN')})\n\n`;
         (data.categories || []).forEach((c) => {
             t += `${c.name}: ${c.percentage?.toFixed?.(1) ?? c.percentage}% → ₹${Math.round(c.allocated_budget)}\n`;
@@ -240,7 +245,7 @@ export default function RecommendationBudgetModal({
 
     const handleShare = async () => {
         try {
-            await Share.share({ message: buildShareText(), title: 'My eKatRaa budget plan' });
+            await Share.share({ message: buildShareText(), title: 'My Ekatraa budget plan' });
         } catch (e) {
             Alert.alert('Share', e?.message || 'Could not share.');
         }
@@ -266,7 +271,12 @@ export default function RecommendationBudgetModal({
                 category_percentages: catPct,
                 recommendation_payload: data,
                 ai_narrative: narrative,
-                ai_meta: narrative ? { source: 'gemini' } : null,
+                ai_meta:
+                    narrative && narrativeAiMeta
+                        ? { ...narrativeAiMeta, source: narrativeAiMeta.source || 'claude' }
+                        : narrative
+                          ? { source: 'claude' }
+                          : null,
             });
             if (error) throw new Error(error.message);
             Alert.alert('Saved', 'Your budget plan was saved. Our team can review it.');

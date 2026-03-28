@@ -131,7 +131,7 @@ export default function Onboarding({ navigation }) {
             <View style={styles.header}>
                 <View style={styles.logoContainer}>
                     <Logo width={36} height={36} />
-                    <Text style={[styles.brandName, { color: colors.primary }]}>eKatRaa</Text>
+                    <Text style={[styles.brandName, { color: colors.primary }]}>Ekatraa</Text>
                 </View>
                 <TouchableOpacity onPress={handleSkip} style={styles.skipBtn}>
                     <Text style={[styles.skipText, { color: theme.textLight }]}>Skip</Text>

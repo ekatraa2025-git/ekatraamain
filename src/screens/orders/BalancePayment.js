@@ -77,7 +77,7 @@ export default function BalancePayment({ route, navigation }) {
                 amount: paymentData.amount,
                 currency: 'INR',
                 order_id: paymentData.razorpay_order_id,
-                name: 'eKatRaa',
+                name: 'Ekatraa',
                 description: `Balance payment - ₹${(paymentData.balance_amount || balanceAmount || 0).toLocaleString()}`,
                 prefill: {
                     name: order?.contact_name || '',

@@ -7,6 +7,7 @@ import { AuthProvider } from './src/context/AuthContext';
 import { CartProvider } from './src/context/CartContext';
 import { AppDataProvider } from './src/context/AppDataContext';
 import { EventFormProvider } from './src/context/EventFormContext';
+import TermsAcceptanceGate from './src/components/TermsAcceptanceGate';
 
 export default function App() {
   return (
@@ -16,7 +17,9 @@ export default function App() {
           <AppDataProvider>
             <EventFormProvider>
             <ThemeProvider>
-              <AppNavigator />
+              <TermsAcceptanceGate>
+                <AppNavigator />
+              </TermsAcceptanceGate>
               <StatusBar style="auto" />
             </ThemeProvider>
             </EventFormProvider>

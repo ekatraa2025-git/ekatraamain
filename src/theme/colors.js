@@ -1,4 +1,4 @@
-// eKatRaa brand colors — refreshed palette
+// Ekatraa brand colors — refreshed palette
 // Primary Orange: #FF7A00
 // Secondary Blue: #1E3A8A
 

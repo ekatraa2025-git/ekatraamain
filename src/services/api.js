@@ -1,9 +1,32 @@
 /**
- * Backend API client for eKatRaa app.
+ * Backend API client for Ekatraa app.
  * When EXPO_PUBLIC_API_URL is set, uses new flow: occasions → categories → services → cart → checkout → orders.
  */
 const API_BASE = process.env.EXPO_PUBLIC_API_URL || process.env.NEXT_PUBLIC_API_URL || '';
 const REQUEST_TIMEOUT_MS = 15000;
+
+/** Ensures error messages are strings (APIs sometimes return nested objects). */
+function stringifyApiError(raw) {
+    if (raw == null) return '';
+    if (typeof raw === 'string') return raw;
+    if (typeof raw === 'object') {
+        if (typeof raw.message === 'string') return raw.message;
+        if (typeof raw.error === 'string') return raw.error;
+        if (raw.error && typeof raw.error === 'object' && typeof raw.error.message === 'string') {
+            return raw.error.message;
+        }
+        const keys = Object.keys(raw);
+        if (keys.length === 1 && typeof raw.model === 'string') {
+            return 'Could not complete this request. Check the app backend and AI settings.';
+        }
+        try {
+            return JSON.stringify(raw);
+        } catch {
+            return 'Request failed';
+        }
+    }
+    return String(raw);
+}
 
 function buildError(e) {
     const msg = (e && e.message) || 'Network error';
@@ -33,27 +56,34 @@ async function get(path, params = {}) {
     try {
         const res = await fetchWithTimeout(url);
         const data = await res.json().catch(() => null);
-        if (!res.ok) return { data: null, error: { message: data?.error || res.statusText } };
+        if (!res.ok) {
+            const msg = stringifyApiError(data?.error) || res.statusText;
+            return { data: null, error: { message: msg } };
+        }
         return { data, error: null };
     } catch (e) {
         return { data: null, error: { message: buildError(e) } };
     }
 }
 
-async function post(path, body = {}) {
+async function post(path, body = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
     if (!API_BASE) return { data: null, error: { message: 'API URL not configured. Set EXPO_PUBLIC_API_URL in .env' } };
     try {
         const res = await fetchWithTimeout(`${API_BASE}${path}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
-        });
+        }, timeoutMs);
         const contentType = res.headers.get('content-type') || '';
         const data = contentType.includes('application/json')
             ? await res.json().catch(() => null)
             : null;
         if (!res.ok) {
-            const msg = data?.error || (res.status === 404 ? 'Endpoint not found. Ensure backend is deployed with payment routes.' : res.statusText);
+            const msg =
+                stringifyApiError(data?.error) ||
+                (res.status === 404
+                    ? 'Endpoint not found. Ensure backend is deployed with payment routes.'
+                    : res.statusText);
             return { data: null, error: { message: msg } };
         }
         return { data, error: null };
@@ -71,7 +101,10 @@ async function patch(path, body = {}) {
             body: JSON.stringify(body),
         });
         const data = await res.json().catch(() => null);
-        if (!res.ok) return { data: null, error: { message: data?.error || res.statusText } };
+        if (!res.ok) {
+            const msg = stringifyApiError(data?.error) || res.statusText;
+            return { data: null, error: { message: msg } };
+        }
         return { data, error: null };
     } catch (e) {
         return { data: null, error: { message: buildError(e) } };
@@ -83,7 +116,10 @@ async function del(path) {
     try {
         const res = await fetchWithTimeout(`${API_BASE}${path}`, { method: 'DELETE' });
         const data = await res.json().catch(() => ({}));
-        if (!res.ok) return { data: null, error: { message: data.error || res.statusText } };
+        if (!res.ok) {
+            const msg = stringifyApiError(data?.error) || res.statusText;
+            return { data: null, error: { message: msg } };
+        }
         return { data: data || {}, error: null };
     } catch (e) {
         return { data: null, error: { message: buildError(e) } };
@@ -138,7 +174,10 @@ export const api = {
         return get('/api/public/recommendations', q);
     },
     async postRecommendationNarrative(body) {
-        return post('/api/public/recommendations/narrative', body);
+        return post('/api/public/recommendations/narrative', body, 45000);
+    },
+    async postAiChat(body) {
+        return post('/api/public/ai/chat', body, 45000);
     },
     async postBudgetRecommendationSnapshot(body) {
         return post('/api/public/budget-recommendation-snapshots', body);

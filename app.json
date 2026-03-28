@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "eKatRaa",
+    "name": "Ekatraa",
     "slug": "ekatraa",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -16,9 +16,9 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.ekatraa.userapp",
       "infoPlist": {
-        "NSCameraUsageDescription": "Allow eKatRaa to access your camera for profile photos.",
-        "NSPhotoLibraryUsageDescription": "Allow eKatRaa to access your photos for profile pictures.",
-        "NSLocationWhenInUseUsageDescription": "Allow eKatRaa to access your location to show nearby venues and vendors."
+        "NSCameraUsageDescription": "Allow Ekatraa to access your camera for profile photos.",
+        "NSPhotoLibraryUsageDescription": "Allow Ekatraa to access your photos for profile pictures.",
+        "NSLocationWhenInUseUsageDescription": "Allow Ekatraa to access your location to show nearby venues and vendors."
       }
     },
     "android": {

@@ -304,7 +304,7 @@ export default function GuestManage({ navigation }) {
         }
         lines.push('We look forward to your gracious presence!');
         lines.push('');
-        lines.push('— Powered by eKatRaa');
+        lines.push('— Powered by Ekatraa');
         return lines.join('\n');
     };
 
@@ -491,7 +491,7 @@ export default function GuestManage({ navigation }) {
                         <Text style={styles.previewFooter}>We look forward to your gracious presence!</Text>
                         <View style={styles.previewBrand}>
                             <View style={styles.previewBrandDot} />
-                            <Text style={styles.previewBrandText}>Powered by eKatRaa</Text>
+                            <Text style={styles.previewBrandText}>Powered by Ekatraa</Text>
                         </View>
                     </LinearGradient>
                 </View>

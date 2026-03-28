@@ -20,10 +20,23 @@ import { api } from '../../services/api';
 import { useCart } from '../../context/CartContext';
 import BottomTabBar from '../../components/BottomTabBar';
 
-const PAYMENT_OPTIONS = [
-    { key: 'advance', label: 'Pay 20% Advance Now', desc: 'Secure your booking with advance payment', icon: 'card' },
-    { key: 'on_finalization', label: 'Cash on Order Finalization', desc: 'Pay after vendors confirm pricing & details', icon: 'cash' },
+const ADVANCE_HEADLINE = 'Pay 20% advance & confirm booking now. (Recommended)';
+const ADVANCE_BULLETS = [
+    'Instant booking confirmation (recommended vendor by Ekatraa)',
+    'Vendor reserved exclusively for your event',
+    'Priority support & smooth execution',
+    'Confirmed availability guaranteed',
 ];
+const ADVANCE_FOOTER = '100% secure payment | verified vendors | govt-compliant process';
+
+const LATER_HEADLINE = 'Explore & pay 20% later.';
+const LATER_BULLETS = [
+    'Explore multiple vendor options',
+    'Get assistance from the Ekatraa team',
+    'Confirm anytime by paying 20% advance',
+    'Availability subject to demand',
+];
+const LATER_FOOTER = 'High-demand vendors get booked quickly. Confirm now to avoid unavailability.';
 
 export default function Checkout({ route, navigation }) {
     const { openCheckout, closeCheckout, RazorpayUI } = useRazorpay();
@@ -117,7 +130,7 @@ export default function Checkout({ route, navigation }) {
                 amount: paymentData.amount,
                 currency: 'INR',
                 order_id: paymentData.razorpay_order_id,
-                name: 'eKatRaa',
+                name: 'Ekatraa',
                 description: `Advance payment (20%) - ₹${advanceAmount.toLocaleString()}`,
                 prefill: {
                     name: eventInfo.contact_name || '',
@@ -233,40 +246,75 @@ export default function Checkout({ route, navigation }) {
                         </View>
 
                         <View style={[styles.paymentInfo, { backgroundColor: theme.card, borderColor: theme.border }]}>
-                            <Text style={[styles.paymentInfoTitle, { color: theme.text }]}>Payment Method</Text>
-                            {PAYMENT_OPTIONS.map((opt) => {
-                                const isSelected = paymentMode === opt.key;
-                                return (
-                                    <TouchableOpacity
-                                        key={opt.key}
-                                        style={[
-                                            styles.paymentOption,
-                                            { borderColor: isSelected ? colors.primary : theme.border, backgroundColor: isSelected ? colors.primary + '08' : 'transparent' },
-                                        ]}
-                                        onPress={() => setPaymentMode(opt.key)}
-                                        activeOpacity={0.8}
-                                    >
-                                        <View style={[styles.paymentOptionRadio, { borderColor: isSelected ? colors.primary : theme.border }]}>
-                                            {isSelected && <View style={[styles.paymentOptionRadioInner, { backgroundColor: colors.primary }]} />}
-                                        </View>
-                                        <View style={{ flex: 1 }}>
-                                            <Text style={[styles.paymentOptionLabel, { color: theme.text }]}>{opt.label}</Text>
-                                            <Text style={[styles.paymentOptionDesc, { color: theme.textLight }]}>{opt.desc}</Text>
-                                        </View>
-                                        <Ionicons name={opt.icon} size={20} color={isSelected ? colors.primary : theme.textLight} />
-                                    </TouchableOpacity>
-                                );
-                            })}
-                            {paymentMode === 'advance' && (
-                                <Text style={[styles.paymentInfoText, { color: theme.textLight, marginTop: 8 }]}>
-                                    Pay 20% advance (₹{advanceAmount.toLocaleString()}) now. Balance ₹{balanceAmount.toLocaleString()} payable later.
-                                </Text>
-                            )}
-                            {paymentMode === 'on_finalization' && (
-                                <Text style={[styles.paymentInfoText, { color: theme.textLight, marginTop: 8 }]}>
-                                    Pay full amount (₹{totalAmount.toLocaleString()}) after vendors confirm pricing and details.
-                                </Text>
-                            )}
+                            <Text style={[styles.paymentInfoTitle, { color: theme.text }]}>Payment method</Text>
+                            <TouchableOpacity
+                                style={[
+                                    styles.paymentOption,
+                                    {
+                                        borderColor: paymentMode === 'advance' ? colors.primary : theme.border,
+                                        backgroundColor: paymentMode === 'advance' ? colors.primary + '08' : 'transparent',
+                                    },
+                                ]}
+                                onPress={() => setPaymentMode('advance')}
+                                activeOpacity={0.8}
+                            >
+                                <View style={[styles.paymentOptionRadio, { borderColor: paymentMode === 'advance' ? colors.primary : theme.border }]}>
+                                    {paymentMode === 'advance' && (
+                                        <View style={[styles.paymentOptionRadioInner, { backgroundColor: colors.primary }]} />
+                                    )}
+                                </View>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={[styles.paymentOptionHeadline, { color: theme.text }]}>{ADVANCE_HEADLINE}</Text>
+                                    {ADVANCE_BULLETS.map((line) => (
+                                        <Text key={line} style={[styles.paymentBullet, { color: theme.textLight }]}>
+                                            ✔ {line}
+                                        </Text>
+                                    ))}
+                                    <Text style={[styles.paymentOptionFooter, { color: theme.textLight }]}>
+                                        🔒 {ADVANCE_FOOTER}
+                                    </Text>
+                                    <Text style={[styles.paymentInfoText, { color: theme.textLight, marginTop: 10 }]}>
+                                        Pay 20% advance (₹{advanceAmount.toLocaleString()}) now. Balance ₹{balanceAmount.toLocaleString()} payable later.
+                                    </Text>
+                                </View>
+                                <Ionicons name="card" size={20} color={paymentMode === 'advance' ? colors.primary : theme.textLight} />
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                                style={[
+                                    styles.paymentOption,
+                                    {
+                                        borderColor: paymentMode === 'on_finalization' ? colors.primary : theme.border,
+                                        backgroundColor: paymentMode === 'on_finalization' ? colors.primary + '08' : 'transparent',
+                                    },
+                                ]}
+                                onPress={() => setPaymentMode('on_finalization')}
+                                activeOpacity={0.8}
+                            >
+                                <View
+                                    style={[
+                                        styles.paymentOptionRadio,
+                                        { borderColor: paymentMode === 'on_finalization' ? colors.primary : theme.border },
+                                    ]}
+                                >
+                                    {paymentMode === 'on_finalization' && (
+                                        <View style={[styles.paymentOptionRadioInner, { backgroundColor: colors.primary }]} />
+                                    )}
+                                </View>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={[styles.paymentOptionHeadline, { color: theme.text }]}>{LATER_HEADLINE}</Text>
+                                    {LATER_BULLETS.map((line) => (
+                                        <Text key={line} style={[styles.paymentBullet, { color: theme.textLight }]}>
+                                            • {line}
+                                        </Text>
+                                    ))}
+                                    <Text style={[styles.paymentOptionFooter, { color: theme.textLight }]}>🔥 {LATER_FOOTER}</Text>
+                                    <Text style={[styles.paymentInfoText, { color: theme.textLight, marginTop: 10 }]}>
+                                        Pay full amount (₹{totalAmount.toLocaleString()}) after vendors confirm pricing and details.
+                                    </Text>
+                                </View>
+                                <Ionicons name="cash" size={20} color={paymentMode === 'on_finalization' ? colors.primary : theme.textLight} />
+                            </TouchableOpacity>
                         </View>
 
                         <TouchableOpacity
@@ -367,6 +415,9 @@ const styles = StyleSheet.create({
         borderRadius: 5,
     },
     paymentOptionLabel: { fontSize: 15, fontWeight: '600' },
+    paymentOptionHeadline: { fontSize: 15, fontWeight: '700', marginBottom: 8, lineHeight: 21 },
+    paymentBullet: { fontSize: 13, lineHeight: 20, marginTop: 4 },
+    paymentOptionFooter: { fontSize: 12, lineHeight: 18, marginTop: 10, fontWeight: '600' },
     paymentOptionDesc: { fontSize: 12, marginTop: 2 },
     paymentInfoText: { fontSize: 14, lineHeight: 20 },
     placeOrderBtn: {

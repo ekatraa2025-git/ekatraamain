@@ -94,7 +94,7 @@ export default function Login({ navigation, route }) {
                         <View style={styles.logoContainer}>
                             <Logo width={80} height={80} />
                         </View>
-                        <Text style={[styles.title, { color: theme.text }]}>Welcome to eKatRaa</Text>
+                        <Text style={[styles.title, { color: theme.text }]}>Welcome to Ekatraa</Text>
                         <Text style={[styles.subtitle, { color: theme.textLight }]}>
                             Sign in to book services and manage your events
                         </Text>

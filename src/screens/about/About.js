@@ -16,7 +16,7 @@ export default function About({ navigation }) {
                 <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
                     <Ionicons name="arrow-back" size={24} color={theme.text} />
                 </TouchableOpacity>
-                <Text style={[styles.headerTitle, { color: theme.text }]}>About eKatRaa</Text>
+                <Text style={[styles.headerTitle, { color: theme.text }]}>About Ekatraa</Text>
                 <View style={{ width: 32 }} />
             </View>
 
@@ -28,7 +28,7 @@ export default function About({ navigation }) {
                     <View style={[styles.logoWrap, { backgroundColor: colors.primary }]}>
                         <Text style={styles.logoText}>eK</Text>
                     </View>
-                    <Text style={[styles.appName, { color: theme.text }]}>eKatRaa</Text>
+                    <Text style={[styles.appName, { color: theme.text }]}>Ekatraa</Text>
                     <Text style={[styles.tagline, { color: theme.textLight }]}>
                         Your one-stop platform for planning weddings, pujas, celebrations & all life events.
                     </Text>
@@ -38,7 +38,7 @@ export default function About({ navigation }) {
                 <View style={[styles.infoCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
                     <Text style={[styles.sectionTitle, { color: theme.text }]}>What We Do</Text>
                     <Text style={[styles.body, { color: theme.textLight }]}>
-                        eKatRaa connects you with verified vendors for every occasion — from venue booking and catering to décor, photography, priests, and more. We make event planning effortless, so you can focus on making memories.
+                        Ekatraa connects you with verified vendors for every occasion — from venue booking and catering to décor, photography, priests, and more. We make event planning effortless, so you can focus on making memories.
                     </Text>
                 </View>
 
@@ -68,7 +68,7 @@ export default function About({ navigation }) {
                 </View>
 
                 <Text style={[styles.copyright, { color: theme.textLight }]}>
-                    © 2025 eKatRaa. All rights reserved.
+                    © 2025 Ekatraa. All rights reserved.
                 </Text>
                 <View style={{ height: 80 }} />
             </ScrollView>

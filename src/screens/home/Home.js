@@ -1029,7 +1029,7 @@ export default function Home({ navigation }) {
                         </LinearGradient>
                     </TouchableOpacity>
 
-                    {/* Thank You from eKatRaa */}
+                    {/* Thank You from Ekatraa */}
                     <View style={[styles.thankYouSection, { backgroundColor: theme.card, borderColor: theme.border }]}>
                         <LinearGradient
                             colors={[colors.primary + '12', colors.secondary + '08']}
@@ -1040,7 +1040,7 @@ export default function Home({ navigation }) {
                             <View style={{ marginBottom: 10 }}>
                                 <Logo width={40} height={40} />
                             </View>
-                            <Text style={[styles.thankYouTitle, { color: theme.text }]}>Thank you from eKatRaa</Text>
+                            <Text style={[styles.thankYouTitle, { color: theme.text }]}>Thank you from Ekatraa</Text>
                             <Text style={[styles.thankYouText, { color: theme.textLight }]}>
                                 We're honoured to be part of your special occasion. Your trust means the world to us—here's to creating memories that last a lifetime.
                             </Text>

@@ -98,7 +98,7 @@ export default function BookingModal({ visible, onClose, eventType, navigation }
 
             Alert.alert(
                 'Request Received! 🎉',
-                'An eKatRaa Manager will connect with you shortly with relevant quotes and venue options.',
+                'An Ekatraa manager will connect with you shortly with relevant quotes and venue options.',
                 [{ 
                     text: 'OK', 
                     onPress: () => {

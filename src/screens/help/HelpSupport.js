@@ -9,7 +9,7 @@ import BottomTabBar from '../../components/BottomTabBar';
 const FAQ = [
     { q: 'How do I place an order?', a: 'Select an occasion, choose categories, pick services with pricing tiers, fill your event details, and add to cart. Then proceed to checkout.' },
     { q: 'Can I cancel an order?', a: 'Yes, you can request cancellation from the My Orders section. Our team will review and process it.' },
-    { q: 'How are vendors selected?', a: 'All vendors on eKatRaa are verified and curated based on quality, reliability, and customer feedback.' },
+    { q: 'How are vendors selected?', a: 'All vendors on Ekatraa are verified and curated based on quality, reliability, and customer feedback.' },
     { q: 'What payment methods are accepted?', a: 'Pay 20% advance online (UPI, cards, net banking) or choose Cash on Order Finalization—pay after vendors confirm pricing and details.' },
     { q: 'How do I track my order?', a: 'Go to My Orders to view real-time status updates on all your orders.' },
 ];

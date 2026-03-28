@@ -2,18 +2,12 @@ import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, StyleSheet, Modal, TouchableOpacity, TextInput, FlatList, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
+import { api } from '../services/api';
 
 const INITIAL_MESSAGES = [
     { id: '1', text: "Namaste! 🙏 I am Ekatraa AI.", sender: 'bot' },
     { id: '2', text: "I can help you plan weddings, funerals, birthdays, or any get-together. What are you looking for today?", sender: 'bot' }
 ];
-
-const SIMULATED_RESPONSES = {
-    'wedding': "For a wedding, I recommend booking a spacious venue like 'Mayfair Lagoon' or 'Swosti Premium'. We also have excellent decorators and caterers available. Would you like to see some venue options?",
-    'funeral': "I'm sorry for your loss. For funeral services, we can help you arrange a peaceful venue at 'Swargadwar' or local community halls. We also provide priests and floral services. How can we support you?",
-    'birthday': "Birthdays are fun! 🎂 Check out 'Esplanade One' or 'Chillout Zone' for a great party vibe. Do you need a magician or a DJ?",
-    'default': "That sounds important. Could you tell me more about the number of guests or the preferred location? I'm here to make your planning stress-free!"
-};
 
 export default function ChatModal({ visible, onClose }) {
     const { theme, isDarkMode } = useTheme();
@@ -22,27 +16,54 @@ export default function ChatModal({ visible, onClose }) {
     const [isTyping, setIsTyping] = useState(false);
     const flatListRef = useRef(null);
 
-    const sendMessage = () => {
-        if (!inputText.trim()) return;
+    const sendMessage = async () => {
+        const trimmed = inputText.trim();
+        if (!trimmed) return;
 
-        const userMsg = { id: Date.now().toString(), text: inputText, sender: 'user' };
-        setMessages(prev => [...prev, userMsg]);
+        const history = messages.map((m) => ({
+            role: m.sender === 'user' ? 'user' : 'assistant',
+            text: m.text,
+        }));
+
+        const userMsg = { id: Date.now().toString(), text: trimmed, sender: 'user' };
+        setMessages((prev) => [...prev, userMsg]);
         setInputText('');
         setIsTyping(true);
 
-        // Simulate AI thinking
-        setTimeout(() => {
-            let botText = SIMULATED_RESPONSES['default'];
-            const lowerInput = userMsg.text.toLowerCase();
-
-            if (lowerInput.includes('wedding') || lowerInput.includes('marriage')) botText = SIMULATED_RESPONSES['wedding'];
-            else if (lowerInput.includes('funeral') || lowerInput.includes('death') || lowerInput.includes('last rite')) botText = SIMULATED_RESPONSES['funeral'];
-            else if (lowerInput.includes('birthday') || lowerInput.includes('party')) botText = SIMULATED_RESPONSES['birthday'];
-
-            const botMsg = { id: (Date.now() + 1).toString(), text: botText, sender: 'bot' };
-            setMessages(prev => [...prev, botMsg]);
+        try {
+            const { data, error } = await api.postAiChat({
+                message: trimmed,
+                history,
+            });
+            if (error) {
+                const botMsg = {
+                    id: (Date.now() + 1).toString(),
+                    text: error.message || 'Could not reach Ekatraa AI. Check your connection and API settings.',
+                    sender: 'bot',
+                };
+                setMessages((prev) => [...prev, botMsg]);
+                return;
+            }
+            let reply = typeof data?.reply === 'string' ? data.reply.trim() : '';
+            if (/^model\s*:\s*claude/i.test(reply) && reply.length < 160) {
+                reply = '';
+            }
+            const botMsg = {
+                id: (Date.now() + 1).toString(),
+                text: reply || 'No reply from AI.',
+                sender: 'bot',
+            };
+            setMessages((prev) => [...prev, botMsg]);
+        } catch (e) {
+            const botMsg = {
+                id: (Date.now() + 1).toString(),
+                text: e?.message || 'Something went wrong.',
+                sender: 'bot',
+            };
+            setMessages((prev) => [...prev, botMsg]);
+        } finally {
             setIsTyping(false);
-        }, 1500);
+        }
     };
 
     useEffect(() => {
