@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
     View,
     Text,
@@ -17,6 +18,7 @@ import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import BottomTabBar from '../../components/BottomTabBar';
 import { formatFriendlyDate } from '../../utils/formatFriendlyDate';
+import { getOccasionAndApplicant } from '../../utils/orderDisplay';
 
 const FILTERS = [
     { key: 'all', label: 'All' },
@@ -56,9 +58,13 @@ export default function MyOrders({ navigation }) {
         setLoading(false);
     }, [isAuthenticated, user?.id]);
 
-    useEffect(() => {
-        load();
-    }, [load]);
+    const listLoading = loading && orders.length === 0;
+
+    useFocusEffect(
+        useCallback(() => {
+            load();
+        }, [load])
+    );
 
     const onRefresh = useCallback(async () => {
         setRefreshing(true);
@@ -86,7 +92,7 @@ export default function MyOrders({ navigation }) {
         );
     }
 
-    if (loading) {
+    if (listLoading) {
         return (
             <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
                 <View style={styles.loadingContainer}>
@@ -115,12 +121,13 @@ export default function MyOrders({ navigation }) {
                     </Text>
                 </View>
             ) : (
-                <>
+                <View style={styles.listSection}>
                     <ScrollView
                         horizontal
                         showsHorizontalScrollIndicator={false}
                         contentContainerStyle={styles.filterRow}
                         style={styles.filterScroll}
+                        keyboardShouldPersistTaps="handled"
                     >
                         {FILTERS.map((f) => {
                             const on = filterKey === f.key;
@@ -153,13 +160,16 @@ export default function MyOrders({ navigation }) {
                         {filterKey !== 'all' ? ' in range' : ''}
                     </Text>
                     <FlatList
+                        style={styles.orderList}
                         data={filteredOrders}
                         keyExtractor={(item) => item.id}
                         contentContainerStyle={styles.listContent}
                         refreshControl={
                             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
                         }
-                        renderItem={({ item, index }) => (
+                        renderItem={({ item, index }) => {
+                            const { occasionLabel, applicantLabel } = getOccasionAndApplicant(item);
+                            return (
                             <TouchableOpacity
                                 style={[styles.orderCard, { backgroundColor: theme.card, borderColor: theme.border }]}
                                 onPress={() => navigation.navigate('OrderDetail', { orderId: item.id })}
@@ -176,23 +186,33 @@ export default function MyOrders({ navigation }) {
                                         <Text style={[styles.orderStatus, { color: colors.primary }]}>{item.status}</Text>
                                     </View>
                                 </View>
-                                {item.event_name ? (
+                                <Text style={[styles.metaLineLabel, { color: theme.textLight }]}>Occasion</Text>
+                                {occasionLabel ? (
                                     <Text style={[styles.occasionName, { color: theme.text }]} numberOfLines={2}>
-                                        {item.event_name}
+                                        {occasionLabel}
                                     </Text>
                                 ) : (
-                                    <Text style={[styles.occasionFallback, { color: theme.textLight }]}>Occasion not set</Text>
+                                    <Text style={[styles.occasionFallback, { color: theme.textLight }]}>Not set</Text>
                                 )}
-                                <Text style={[styles.orderTotal, { color: theme.text }]}>
+                                <Text style={[styles.metaLineLabel, { color: theme.textLight, marginTop: 6 }]}>Who applied</Text>
+                                {applicantLabel ? (
+                                    <Text style={[styles.applicantLine, { color: theme.text }]} numberOfLines={1}>
+                                        {applicantLabel}
+                                    </Text>
+                                ) : (
+                                    <Text style={[styles.occasionFallback, { color: theme.textLight }]}>Not set</Text>
+                                )}
+                                <Text style={[styles.orderTotal, { color: theme.text, marginTop: 8 }]}>
                                     ₹{Number(item.total_amount || 0).toLocaleString('en-IN')}
                                 </Text>
                                 <Text style={[styles.orderDate, { color: theme.textLight }]}>
                                     Placed {item.created_at ? formatFriendlyDate(item.created_at) : '—'}
                                 </Text>
                             </TouchableOpacity>
-                        )}
+                            );
+                        }}
                     />
-                </>
+                </View>
             )}
             <BottomTabBar navigation={navigation} activeRoute="MyOrders" />
         </SafeAreaView>
@@ -201,6 +221,8 @@ export default function MyOrders({ navigation }) {
 
 const styles = StyleSheet.create({
     container: { flex: 1 },
+    listSection: { flex: 1, minHeight: 0 },
+    orderList: { flex: 1 },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -235,8 +257,10 @@ const styles = StyleSheet.create({
     orderId: { fontSize: 11, fontFamily: 'monospace', flex: 1 },
     orderStatusBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
     orderStatus: { fontSize: 11, textTransform: 'capitalize', fontWeight: '700' },
-    occasionName: { fontSize: 15, fontWeight: '700', marginBottom: 4 },
-    occasionFallback: { fontSize: 13, marginBottom: 4, fontStyle: 'italic' },
+    metaLineLabel: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 2 },
+    occasionName: { fontSize: 15, fontWeight: '700', marginBottom: 2 },
+    applicantLine: { fontSize: 14, fontWeight: '600', marginBottom: 4 },
+    occasionFallback: { fontSize: 13, marginBottom: 2, fontStyle: 'italic' },
     orderTotal: { fontSize: 17, fontWeight: '800', marginBottom: 2 },
     orderDate: { fontSize: 12 },
     emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },

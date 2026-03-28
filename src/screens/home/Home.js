@@ -62,6 +62,31 @@ function formatBudgetInrLabel(inr) {
     return `₹${s.replace(/\.?0+$/, '')} Lakhs`;
 }
 
+const BANNER_EDGE_PAD = 20;
+const BANNER_TILE_GAP = 10;
+/** At this count or higher, banners use the horizontal slider instead of the bento grid. */
+const BANNER_SLIDER_MIN_COUNT = 5;
+
+function bannerDiscountLabel(item) {
+    if (!item || typeof item !== 'object') return null;
+    if (item.discount_percent != null && item.discount_percent !== '') {
+        const n = Number(item.discount_percent);
+        if (Number.isFinite(n)) return `${Math.round(n)}% OFF`;
+    }
+    if (typeof item.discount_text === 'string' && item.discount_text.trim()) return item.discount_text.trim();
+    if (typeof item.promo_text === 'string' && item.promo_text.trim()) return item.promo_text.trim();
+    return null;
+}
+
+function bannerBentoTileSize(count, index, screenW) {
+    const fullW = screenW - BANNER_EDGE_PAD * 2;
+    const colW = (fullW - BANNER_TILE_GAP) / 2;
+    if (count === 1) return { w: fullW, h: 188 };
+    if (count === 2) return { w: colW, h: 160 };
+    if (count === 3) return index === 2 ? { w: fullW, h: 152 } : { w: colW, h: 152 };
+    return { w: colW, h: 144 };
+}
+
 export default function Home({ navigation }) {
     const { theme, isDarkMode } = useTheme();
     const { isAuthenticated, user } = useAuth();
@@ -145,7 +170,7 @@ export default function Home({ navigation }) {
         let cancelled = false;
         (async () => {
             const { data } = await api.getTestimonials();
-            if (!cancelled && Array.isArray(data) && data.length) setTestimonials(data);
+            if (!cancelled && Array.isArray(data)) setTestimonials(data);
         })();
         return () => {
             cancelled = true;
@@ -300,8 +325,8 @@ export default function Home({ navigation }) {
             form.location_kind === 'venue'
                 ? form.venue_detail?.trim() || null
                 : form.location_kind === 'own_place'
-                  ? 'Own place'
-                  : form.venue_preference || null;
+                    ? 'Own place'
+                    : form.venue_preference || null;
         const payload = {
             role: form.role || null,
             contact_name: form.contact_name.trim(),
@@ -321,8 +346,13 @@ export default function Home({ navigation }) {
         try {
             if (useApi) {
                 let cid = cartId;
+                const occasionDisplayName =
+                    selectedType && Array.isArray(eventTypes)
+                        ? eventTypes.find((t) => t.id === selectedType)?.name ?? null
+                        : null;
                 const cartPayload = {
-                    event_name: form.role || null,
+                    event_name: occasionDisplayName,
+                    event_role: form.role?.trim() || null,
                     contact_name: payload.contact_name,
                     contact_mobile: payload.contact_mobile,
                     contact_email: payload.contact_email,
@@ -509,32 +539,97 @@ export default function Home({ navigation }) {
                         <Ionicons name="arrow-forward-circle" size={24} color={colors.primary} />
                     </TouchableOpacity>
 
-                    {/* Banner Ads — above Plan Your Occasion */}
+                    {/* Banner Ads — bento grid (1–4 items) or slider (5+ items) */}
                     {banners.length > 0 && (
                         <View style={styles.bannerSection}>
-                            <FlatList
-                                data={banners}
-                                renderItem={({ item }) => (
-                                    <TouchableOpacity style={styles.bannerCard} activeOpacity={0.9}>
-                                        <Image
-                                            source={{ uri: item.image_url || 'https://images.unsplash.com/photo-1519741497674-611481863552?w=800' }}
-                                            style={styles.bannerImage}
-                                            resizeMode="cover"
-                                        />
-                                        <LinearGradient colors={['transparent', 'rgba(0,0,0,0.7)']} style={styles.bannerOverlay}>
-                                            <Text style={styles.bannerTitle}>{item.title}</Text>
-                                            {item.subtitle && <Text style={styles.bannerSubtitle}>{item.subtitle}</Text>}
-                                        </LinearGradient>
-                                    </TouchableOpacity>
-                                )}
-                                keyExtractor={item => item.id}
-                                horizontal
-                                showsHorizontalScrollIndicator={false}
-                                pagingEnabled
-                                snapToInterval={width - 40}
-                                decelerationRate="fast"
-                                contentContainerStyle={styles.bannerList}
-                            />
+                            {banners.length >= BANNER_SLIDER_MIN_COUNT ? (
+                                <FlatList
+                                    data={banners}
+                                    renderItem={({ item }) => {
+                                        const discount = bannerDiscountLabel(item);
+                                        return (
+                                            <TouchableOpacity style={styles.bannerCard} activeOpacity={0.9}>
+                                                <Image
+                                                    source={{
+                                                        uri:
+                                                            item.image_url ||
+                                                            'https://images.unsplash.com/photo-1519741497674-611481863552?w=800',
+                                                    }}
+                                                    style={styles.bannerImage}
+                                                    resizeMode="cover"
+                                                />
+                                                <LinearGradient
+                                                    colors={['rgba(0,0,0,0.05)', 'rgba(0,0,0,0.78)']}
+                                                    style={styles.bannerOverlayFill}
+                                                >
+                                                    {discount ? (
+                                                        <View style={[styles.bannerDiscountPill, { backgroundColor: colors.primary }]}>
+                                                            <Text style={styles.bannerDiscountPillText}>{discount}</Text>
+                                                        </View>
+                                                    ) : null}
+                                                    <View style={styles.bannerTextBlock}>
+                                                        <Text style={styles.bannerTitle}>{item.title}</Text>
+                                                        {item.subtitle ? (
+                                                            <Text style={styles.bannerSubtitle}>{item.subtitle}</Text>
+                                                        ) : null}
+                                                    </View>
+                                                </LinearGradient>
+                                            </TouchableOpacity>
+                                        );
+                                    }}
+                                    keyExtractor={(item) => item.id}
+                                    horizontal
+                                    showsHorizontalScrollIndicator={false}
+                                    pagingEnabled
+                                    snapToInterval={width - 40}
+                                    decelerationRate="fast"
+                                    contentContainerStyle={styles.bannerList}
+                                />
+                            ) : (
+                                <View style={styles.bannerBentoWrap}>
+                                    {banners.map((item, index) => {
+                                        const { w, h } = bannerBentoTileSize(banners.length, index, width);
+                                        const discount = bannerDiscountLabel(item);
+                                        return (
+                                            <TouchableOpacity
+                                                key={item.id}
+                                                style={[styles.bannerBentoTile, { width: w, height: h }]}
+                                                activeOpacity={0.92}
+                                            >
+                                                <Image
+                                                    source={{
+                                                        uri:
+                                                            item.image_url ||
+                                                            'https://images.unsplash.com/photo-1519741497674-611481863552?w=800',
+                                                    }}
+                                                    style={styles.bannerImage}
+                                                    resizeMode="cover"
+                                                />
+                                                <LinearGradient
+                                                    colors={['rgba(0,0,0,0.06)', 'rgba(0,0,0,0.82)']}
+                                                    style={styles.bannerOverlayFill}
+                                                >
+                                                    {discount ? (
+                                                        <View style={[styles.bannerDiscountPill, { backgroundColor: colors.primary }]}>
+                                                            <Text style={styles.bannerDiscountPillText}>{discount}</Text>
+                                                        </View>
+                                                    ) : null}
+                                                    <View style={styles.bannerTextBlock}>
+                                                        <Text style={styles.bannerBentoTitle} numberOfLines={2}>
+                                                            {item.title}
+                                                        </Text>
+                                                        {item.subtitle ? (
+                                                            <Text style={styles.bannerBentoSubtitle} numberOfLines={2}>
+                                                                {item.subtitle}
+                                                            </Text>
+                                                        ) : null}
+                                                    </View>
+                                                </LinearGradient>
+                                            </TouchableOpacity>
+                                        );
+                                    })}
+                                </View>
+                            )}
                         </View>
                     )}
 
@@ -1313,24 +1408,7 @@ export default function Home({ navigation }) {
                                 ))}
                             </ScrollView>
                         </View>
-                    ) : (
-                        <View style={[styles.thankYouSection, { backgroundColor: theme.card, borderColor: theme.border }]}>
-                            <LinearGradient
-                                colors={[colors.primary + '12', colors.secondary + '08']}
-                                style={styles.thankYouGradient}
-                                start={{ x: 0, y: 0 }}
-                                end={{ x: 1, y: 1 }}
-                            >
-                                <View style={{ marginBottom: 10 }}>
-                                    <Logo width={40} height={40} />
-                                </View>
-                                <Text style={[styles.thankYouTitle, { color: theme.text }]}>Thank you from Ekatraa</Text>
-                                <Text style={[styles.thankYouText, { color: theme.textLight }]}>
-                                    We're honoured to be part of your special occasion. Your trust means the world to us—here's to creating memories that last a lifetime.
-                                </Text>
-                            </LinearGradient>
-                        </View>
-                    )}
+                    ) : null}
 
                     <View style={{ height: 80 }} />
                 </ScrollView>
@@ -1704,24 +1782,65 @@ const styles = StyleSheet.create({
         overflow: 'hidden',
         marginRight: 12,
     },
-    bannerImage: { width: '100%', height: '100%' },
-    bannerOverlay: {
-        position: 'absolute',
-        bottom: 0,
-        left: 0,
-        right: 0,
-        padding: 18,
-        paddingTop: 50,
+    bannerBentoWrap: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        paddingHorizontal: BANNER_EDGE_PAD,
+        gap: BANNER_TILE_GAP,
+        justifyContent: 'flex-start',
     },
+    bannerBentoTile: {
+        borderRadius: 18,
+        overflow: 'hidden',
+        backgroundColor: '#111',
+        elevation: 4,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.12,
+        shadowRadius: 8,
+    },
+    bannerImage: { width: '100%', height: '100%' },
+    bannerOverlayFill: {
+        ...StyleSheet.absoluteFillObject,
+        justifyContent: 'flex-end',
+        padding: 14,
+    },
+    bannerDiscountPill: {
+        position: 'absolute',
+        top: 12,
+        right: 12,
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+        borderRadius: 999,
+        maxWidth: '70%',
+    },
+    bannerDiscountPillText: {
+        color: '#FFFFFF',
+        fontSize: 11,
+        fontWeight: '800',
+        letterSpacing: 0.3,
+    },
+    bannerTextBlock: { justifyContent: 'flex-end' },
     bannerTitle: {
         color: '#FFFFFF',
         fontSize: 20,
         fontWeight: '800',
         marginBottom: 4,
-        textShadowColor: 'rgba(0,0,0,0.3)',
+        textShadowColor: 'rgba(0,0,0,0.35)',
         textShadowOffset: { width: 0, height: 1 },
         textShadowRadius: 3,
     },
+    bannerBentoTitle: {
+        color: '#FFFFFF',
+        fontSize: 15,
+        fontWeight: '800',
+        marginBottom: 3,
+        lineHeight: 20,
+        textShadowColor: 'rgba(0,0,0,0.35)',
+        textShadowOffset: { width: 0, height: 1 },
+        textShadowRadius: 2,
+    },
+    bannerBentoSubtitle: { color: 'rgba(255,255,255,0.92)', fontSize: 12, lineHeight: 16 },
     bannerSubtitle: { color: 'rgba(255,255,255,0.9)', fontSize: 13 },
 
     aiChatBar: {
@@ -2089,27 +2208,5 @@ const styles = StyleSheet.create({
         lineHeight: 22,
         fontStyle: 'italic',
         opacity: 0.95,
-    },
-    thankYouSection: {
-        marginHorizontal: 16,
-        marginBottom: 16,
-        borderRadius: 20,
-        borderWidth: 1,
-        overflow: 'hidden',
-    },
-    thankYouGradient: {
-        padding: 24,
-        borderRadius: 20,
-        alignItems: 'center',
-    },
-    thankYouTitle: {
-        fontSize: 17,
-        fontWeight: '700',
-        marginBottom: 8,
-    },
-    thankYouText: {
-        fontSize: 14,
-        lineHeight: 22,
-        textAlign: 'center',
     },
 });

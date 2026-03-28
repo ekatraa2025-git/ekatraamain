@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
     View,
@@ -34,23 +34,12 @@ export default function SavedRecommendations({ navigation }) {
     const [occasionNames, setOccasionNames] = useState({});
     const [loadError, setLoadError] = useState(null);
 
-    const loadOccasions = useCallback(async () => {
-        if (!useApi) return;
-        const { data } = await api.getOccasions();
-        if (Array.isArray(data)) {
-            const map = {};
-            data.forEach((o) => {
-                if (o?.id) map[o.id] = o.name || o.id;
-            });
-            setOccasionNames(map);
-        }
-    }, [useApi]);
-
     const load = useCallback(async () => {
         setLoadError(null);
         if (!useApi || !isAuthenticated) {
             setItems([]);
             setLoading(false);
+            setRefreshing(false);
             return;
         }
         const { session } = await authService.getSession();
@@ -59,24 +48,31 @@ export default function SavedRecommendations({ navigation }) {
             setItems([]);
             setLoadError('No session token. Try signing out and back in.');
             setLoading(false);
+            setRefreshing(false);
             return;
         }
-        const { data, error } = await api.getBudgetRecommendationSnapshots(token);
-        if (error) {
+        const [occRes, snapRes] = await Promise.all([
+            api.getOccasions(),
+            api.getBudgetRecommendationSnapshots(token),
+        ]);
+        if (Array.isArray(occRes.data)) {
+            const map = {};
+            occRes.data.forEach((o) => {
+                if (o?.id) map[o.id] = o.name || o.id;
+            });
+            setOccasionNames(map);
+        }
+        if (snapRes.error) {
             setItems([]);
-            setLoadError(error.message || 'Could not load saved plans.');
-        } else if (Array.isArray(data)) {
-            setItems(data);
+            setLoadError(snapRes.error.message || 'Could not load saved plans.');
+        } else if (Array.isArray(snapRes.data)) {
+            setItems(snapRes.data);
         } else {
             setItems([]);
         }
         setLoading(false);
         setRefreshing(false);
     }, [useApi, isAuthenticated]);
-
-    useEffect(() => {
-        loadOccasions();
-    }, [loadOccasions]);
 
     useFocusEffect(
         useCallback(() => {

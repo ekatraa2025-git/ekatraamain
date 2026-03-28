@@ -52,41 +52,65 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = REQUEST_TIMEOUT_M
     }
 }
 
+/** Coalesce identical in-flight GETs so parallel mounts do not duplicate network work. */
+const inflightGet = new Map();
+
 async function get(path, params = {}) {
     if (!API_BASE) return { data: null, error: { message: 'API URL not configured. Set EXPO_PUBLIC_API_URL in .env' } };
     const qs = new URLSearchParams(params).toString();
     const url = qs ? `${API_BASE}${path}?${qs}` : `${API_BASE}${path}`;
-    try {
-        const res = await fetchWithTimeout(url);
-        const data = await res.json().catch(() => null);
-        if (!res.ok) {
-            const msg = stringifyApiError(data?.error) || res.statusText;
-            return { data: null, error: { message: msg } };
+    if (inflightGet.has(url)) return inflightGet.get(url);
+
+    const promise = (async () => {
+        try {
+            const res = await fetchWithTimeout(url);
+            const data = await res.json().catch(() => null);
+            if (!res.ok) {
+                const msg = stringifyApiError(data?.error) || res.statusText;
+                return { data: null, error: { message: msg } };
+            }
+            return { data, error: null };
+        } catch (e) {
+            return { data: null, error: { message: buildError(e) } };
+        } finally {
+            inflightGet.delete(url);
         }
-        return { data, error: null };
-    } catch (e) {
-        return { data: null, error: { message: buildError(e) } };
-    }
+    })();
+
+    inflightGet.set(url, promise);
+    return promise;
 }
+
+const inflightGetAuth = new Map();
 
 /** GET with Supabase session access token (saved recommendations, etc.). */
 async function getWithAuth(path, params = {}, accessToken) {
     if (!API_BASE) return { data: null, error: { message: 'API URL not configured. Set EXPO_PUBLIC_API_URL in .env' } };
     const qs = new URLSearchParams(params).toString();
     const url = qs ? `${API_BASE}${path}?${qs}` : `${API_BASE}${path}`;
-    const headers = {};
-    if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
-    try {
-        const res = await fetchWithTimeout(url, { headers });
-        const data = await res.json().catch(() => null);
-        if (!res.ok) {
-            const msg = stringifyApiError(data?.error) || res.statusText;
-            return { data: null, error: { message: msg } };
+    const cacheKey = `${url}\0${accessToken || ''}`;
+    if (inflightGetAuth.has(cacheKey)) return inflightGetAuth.get(cacheKey);
+
+    const promise = (async () => {
+        const headers = {};
+        if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
+        try {
+            const res = await fetchWithTimeout(url, { headers });
+            const data = await res.json().catch(() => null);
+            if (!res.ok) {
+                const msg = stringifyApiError(data?.error) || res.statusText;
+                return { data: null, error: { message: msg } };
+            }
+            return { data, error: null };
+        } catch (e) {
+            return { data: null, error: { message: buildError(e) } };
+        } finally {
+            inflightGetAuth.delete(cacheKey);
         }
-        return { data, error: null };
-    } catch (e) {
-        return { data: null, error: { message: buildError(e) } };
-    }
+    })();
+
+    inflightGetAuth.set(cacheKey, promise);
+    return promise;
 }
 
 async function post(path, body = {}, timeoutMs = REQUEST_TIMEOUT_MS) {

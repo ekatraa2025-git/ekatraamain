@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
     View,
     Text,
@@ -15,12 +15,14 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { colors } from '../../theme/colors';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import BottomTabBar from '../../components/BottomTabBar';
 import { formatFriendlyDate, formatFriendlyDateTime } from '../../utils/formatFriendlyDate';
+import { getOccasionAndApplicant } from '../../utils/orderDisplay';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -39,10 +41,6 @@ export default function OrderDetail({ route, navigation }) {
         if (!error) setOrder(data);
         setLoading(false);
     }, [orderId, user?.id]);
-
-    useEffect(() => {
-        load();
-    }, [load]);
 
     useFocusEffect(
         useCallback(() => {
@@ -117,6 +115,7 @@ export default function OrderDetail({ route, navigation }) {
     const balanceDue = Math.max(0, agreedTotal - advancePaid);
     const isCompleted = (order?.status || '').toLowerCase() === 'completed';
     const showPayBalance = !!acceptedQuote && balanceDue > 0 && isCompleted;
+    const { occasionLabel, applicantLabel } = getOccasionAndApplicant(order);
 
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top']}>
@@ -152,13 +151,20 @@ export default function OrderDetail({ route, navigation }) {
                             Advance paid: ₹{advancePaid.toLocaleString()}
                         </Text>
                     )}
-                    {order?.event_name ? (
-                        <Text style={[styles.occasionLine, { color: theme.text }]}>
-                            Occasion: {order.event_name}
-                        </Text>
-                    ) : null}
+                    <Text style={[styles.detailLabel, { color: theme.textLight }]}>Occasion</Text>
+                    {occasionLabel ? (
+                        <Text style={[styles.occasionLine, { color: theme.text }]}>{occasionLabel}</Text>
+                    ) : (
+                        <Text style={[styles.meta, { color: theme.textLight, fontStyle: 'italic' }]}>Not set</Text>
+                    )}
+                    <Text style={[styles.detailLabel, { color: theme.textLight, marginTop: 10 }]}>Who applied</Text>
+                    {applicantLabel ? (
+                        <Text style={[styles.applicantLine, { color: theme.text }]}>{applicantLabel}</Text>
+                    ) : (
+                        <Text style={[styles.meta, { color: theme.textLight, fontStyle: 'italic' }]}>Not set</Text>
+                    )}
                     {order?.contact_name && (
-                        <Text style={[styles.meta, { color: theme.textLight }]}>{order.contact_name}</Text>
+                        <Text style={[styles.meta, { color: theme.textLight, marginTop: 8 }]}>{order.contact_name}</Text>
                     )}
                     {order?.event_date ? (
                         <Text style={[styles.meta, { color: theme.textLight }]}>
@@ -227,8 +233,33 @@ export default function OrderDetail({ route, navigation }) {
                 )}
 
                 {/* Vendor quotes with attachments and accept/reject */}
-                <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>
-                    <Text style={[styles.sectionTitle, { color: theme.text }]}>Vendor quotes</Text>
+                <View
+                    style={[
+                        styles.quotesSectionShell,
+                        {
+                            borderColor: colors.primary + '44',
+                            backgroundColor: theme.card,
+                            shadowColor: colors.primary,
+                        },
+                    ]}
+                >
+                    <LinearGradient
+                        colors={[colors.primary + '35', colors.primary + '12']}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.quotesSectionBanner}
+                    >
+                        <View style={[styles.quotesBannerIcon, { backgroundColor: theme.background + 'CC' }]}>
+                            <Ionicons name="pricetags" size={22} color={colors.primary} />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                            <Text style={[styles.quotesBannerTitle, { color: theme.text }]}>Vendor quotes</Text>
+                            <Text style={[styles.quotesBannerSub, { color: theme.textLight }]}>
+                                Compare offers and accept the one that fits your celebration
+                            </Text>
+                        </View>
+                    </LinearGradient>
+                    <View style={[styles.quotesSectionInner, { borderTopColor: theme.border }]}>
                     {quotes.length > 0 ? (
                         quotes.map((q, i) => {
                             const statusLower = (q.status || '').toLowerCase();
@@ -240,7 +271,14 @@ export default function OrderDetail({ route, navigation }) {
                             return (
                                 <View
                                     key={q.id || i}
-                                    style={[styles.quoteCard, { borderColor: theme.border, backgroundColor: theme.background }]}
+                                    style={[
+                                        styles.quoteCard,
+                                        {
+                                            borderColor: colors.primary + '28',
+                                            backgroundColor: theme.background,
+                                            borderWidth: 1.5,
+                                        },
+                                    ]}
                                 >
                                     <View style={styles.quoteHeader}>
                                         <Text style={[styles.quoteVendor, { color: theme.text }]}>
@@ -340,6 +378,7 @@ export default function OrderDetail({ route, navigation }) {
                             No quotes yet. Vendors can submit quotes for your order—pull to refresh for updates.
                         </Text>
                     )}
+                    </View>
                 </View>
                 <View style={styles.bottomSpacer} />
             </ScrollView>
@@ -369,7 +408,36 @@ const styles = StyleSheet.create({
         marginBottom: 12,
         borderWidth: 1,
     },
-    occasionLine: { fontSize: 16, fontWeight: '700', marginBottom: 6 },
+    detailLabel: { fontSize: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 },
+    occasionLine: { fontSize: 17, fontWeight: '800', marginBottom: 2 },
+    applicantLine: { fontSize: 16, fontWeight: '700', marginBottom: 2 },
+    quotesSectionShell: {
+        borderRadius: 16,
+        marginBottom: 12,
+        borderWidth: 2,
+        overflow: 'hidden',
+        elevation: 6,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.18,
+        shadowRadius: 10,
+    },
+    quotesSectionBanner: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 14,
+        paddingVertical: 14,
+        gap: 12,
+    },
+    quotesBannerIcon: {
+        width: 44,
+        height: 44,
+        borderRadius: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    quotesBannerTitle: { fontSize: 18, fontWeight: '800' },
+    quotesBannerSub: { fontSize: 12, marginTop: 2, lineHeight: 16 },
+    quotesSectionInner: { padding: 14, borderTopWidth: 1 },
     statusRow: {
         flexDirection: 'row',
         alignItems: 'center',

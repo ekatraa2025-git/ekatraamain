@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useCallback } from 'react';
 import { api, useBackendApi } from '../services/api';
 import { dbService } from '../services/supabase';
 
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const CACHE_TTL_MS = 7 * 60 * 1000; // 7 minutes — fewer repeat fetches when moving between screens
 
 const AppDataContext = createContext(undefined);
 
