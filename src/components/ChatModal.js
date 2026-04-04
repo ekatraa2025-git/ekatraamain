@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, Modal, TouchableOpacity, TextInput, FlatList, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, Modal, TouchableOpacity, TextInput, FlatList, KeyboardAvoidingView, Platform, ActivityIndicator, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
@@ -33,9 +33,15 @@ export default function ChatModal({ visible, onClose, city, occasionId, occasion
         prevVisibleRef.current = visible;
     }, [visible, city, occasionName]);
 
+    const MAX_MESSAGE_LENGTH = 2000;
+
     const sendMessage = async () => {
         const trimmed = inputText.trim();
-        if (!trimmed) return;
+        if (!trimmed || isTyping) return;
+        if (trimmed.length > MAX_MESSAGE_LENGTH) {
+            Alert.alert('Message too long', `Please keep messages under ${MAX_MESSAGE_LENGTH} characters.`);
+            return;
+        }
 
         const history = messages.map((m) => ({
             role: m.sender === 'user' ? 'user' : 'assistant',
@@ -159,6 +165,8 @@ export default function ChatModal({ visible, onClose, city, occasionId, occasion
                             placeholder="Type a message..."
                             placeholderTextColor={theme.textLight}
                             onSubmitEditing={sendMessage}
+                            maxLength={2000}
+                            editable={!isTyping}
                         />
                         <TouchableOpacity onPress={sendMessage} style={[styles.sendBtn, { backgroundColor: theme.primary }]}>
                             <Ionicons name="send" size={20} color="#FFF" />

@@ -16,6 +16,7 @@ import { api, useBackendApi } from '../../services/api';
 import { supabase, resolveStorageUrl } from '../../services/supabase';
 import { useCart } from '../../context/CartContext';
 import BottomTabBar from '../../components/BottomTabBar';
+import { TIER_SUB_KEYS } from '../../utils/lineItemDisplay';
 
 
 const { width } = Dimensions.get('window');
@@ -93,7 +94,7 @@ export default function CategoryServices({ route, navigation }) {
         try {
             let query = supabase
                 .from('offerable_services')
-                .select('id, category_id, name, description, image_url, display_order, price_min, price_max, price_unit, price_basic, price_classic_value, price_signature, price_prestige, price_royal, price_imperial, qty_label_basic, qty_label_classic_value, qty_label_signature, qty_label_prestige, qty_label_royal, qty_label_imperial, tag_new, tag_most_booked, city')
+                .select('id, category_id, name, description, image_url, display_order, price_min, price_max, price_unit, price_basic, price_classic_value, price_signature, price_prestige, price_royal, price_imperial, qty_label_basic, qty_label_classic_value, qty_label_signature, qty_label_prestige, qty_label_royal, qty_label_imperial, sub_variety_basic, sub_variety_classic_value, sub_variety_signature, sub_variety_prestige, sub_variety_royal, sub_variety_imperial, tag_new, tag_most_booked, city')
                 .eq('is_active', true)
                 .eq('category_id', catId)
                 .order('display_order', { ascending: true });
@@ -227,6 +228,9 @@ export default function CategoryServices({ route, navigation }) {
         await api.updateCart(cid, cartPayload);
 
         for (const [, entry] of selectedServices) {
+            const ti = TIER_KEYS.indexOf(entry.selectedTier);
+            const qtyLabel = ti >= 0 ? entry.service[TIER_QTY_KEYS[ti]] : null;
+            const subVariety = ti >= 0 ? entry.service[TIER_SUB_KEYS[ti]] : null;
             await api.addCartItem({
                 cart_id: cid,
                 service_id: entry.service.id,
@@ -237,6 +241,8 @@ export default function CategoryServices({ route, navigation }) {
                     occasion: occasionName,
                     category: resolvedCategoryNames.join(', '),
                     role: effectiveForm.role,
+                    ...(qtyLabel ? { qty_label: qtyLabel } : {}),
+                    ...(subVariety ? { sub_variety: subVariety } : {}),
                 },
             });
         }

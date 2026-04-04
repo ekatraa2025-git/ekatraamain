@@ -223,13 +223,16 @@ export const dbService = {
             `);
 
         if (city) {
-            query = query.ilike('city', `%${city}%`);
+            const safeCity = String(city).trim().substring(0, 100);
+            if (safeCity) query = query.ilike('city', `%${safeCity}%`);
         }
         if (state) {
-            query = query.ilike('state', `%${state}%`);
+            const safeState = String(state).trim().substring(0, 100);
+            if (safeState) query = query.ilike('state', `%${safeState}%`);
         }
         if (serviceCategory) {
-            query = query.ilike('category', `%${serviceCategory}%`);
+            const safeCat = String(serviceCategory).trim().substring(0, 100);
+            if (safeCat) query = query.ilike('category', `%${safeCat}%`);
         }
 
         query = query.limit(limit);
@@ -246,7 +249,8 @@ export const dbService = {
             .eq('is_active', true);
 
         if (city) {
-            query = query.ilike('city', `%${city}%`);
+            const safeCity = String(city).trim().substring(0, 100);
+            if (safeCity) query = query.ilike('city', `%${safeCity}%`);
         }
 
         if (eventType && eventType !== 'all') {

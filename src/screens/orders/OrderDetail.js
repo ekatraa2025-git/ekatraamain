@@ -23,29 +23,49 @@ import { api } from '../../services/api';
 import BottomTabBar from '../../components/BottomTabBar';
 import { formatFriendlyDate, formatFriendlyDateTime } from '../../utils/formatFriendlyDate';
 import { getOccasionAndApplicant } from '../../utils/orderDisplay';
+import { getLineItemParts, tierIndexFromOptions, TIER_ACCENT_COLORS } from '../../utils/lineItemDisplay';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export default function OrderDetail({ route, navigation }) {
     const { theme } = useTheme();
-    const { isAuthenticated, user } = useAuth();
+    const { isAuthenticated, user, session, loading: authLoading } = useAuth();
     const { orderId } = route.params || {};
     const [order, setOrder] = useState(null);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [actioning, setActioning] = useState(null);
+    const [loadError, setLoadError] = useState(null);
 
     const load = useCallback(async () => {
         if (!orderId) return;
-        const { data, error } = await api.getOrder(orderId, user?.id);
-        if (!error) setOrder(data);
+        if (!session?.access_token) {
+            setOrder(null);
+            setLoadError('sign_in');
+            setLoading(false);
+            return;
+        }
+        setLoading(true);
+        setLoadError(null);
+        const { data, error } = await api.getOrder(orderId, session.access_token);
         setLoading(false);
-    }, [orderId, user?.id]);
+        if (error) {
+            setOrder(null);
+            setLoadError(error?.message || 'Could not load order.');
+            return;
+        }
+        setOrder(data);
+    }, [orderId, session?.access_token]);
 
     useFocusEffect(
         useCallback(() => {
-            if (orderId) load();
-        }, [orderId, load])
+            if (!orderId) return;
+            if (authLoading) {
+                setLoading(true);
+                return;
+            }
+            load();
+        }, [orderId, load, authLoading])
     );
 
     const onRefresh = async () => {
@@ -61,7 +81,7 @@ export default function OrderDetail({ route, navigation }) {
             return;
         }
         setActioning(quotationId);
-        const { data, error } = await api.acceptQuotation(orderId, quotationId, action);
+        const { data, error } = await api.acceptQuotation(orderId, quotationId, action, session?.access_token);
         setActioning(null);
         if (error) {
             Alert.alert('Error', error?.message || 'Could not update quotation.');
@@ -69,9 +89,12 @@ export default function OrderDetail({ route, navigation }) {
         }
         await load();
         if (action === 'accept') {
+            const adv = data?.order?.requires_advance_payment && data?.order?.suggested_advance_inr;
             Alert.alert(
-                'Quote Accepted',
-                'Your order is confirmed. You can pay the balance once the vendor marks the order as complete.',
+                'Quote accepted',
+                adv
+                    ? `Please complete your 20% advance of ₹${Math.round(Number(data.order.suggested_advance_inr)).toLocaleString('en-IN')} to proceed. You can use Pay balance or checkout flows when available.`
+                    : 'Your order is confirmed with the vendor.',
                 [{ text: 'OK' }]
             );
         }
@@ -95,12 +118,78 @@ export default function OrderDetail({ route, navigation }) {
         );
     }
 
-    if (loading) {
+    if (loading || authLoading) {
         return (
             <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
+                <View style={[styles.header, { borderBottomColor: theme.border }]}>
+                    <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+                        <Ionicons name="arrow-back" size={24} color={theme.text} />
+                    </TouchableOpacity>
+                    <Text style={[styles.headerTitle, { color: theme.text }]}>Order Details</Text>
+                </View>
                 <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color={colors.primary} />
                 </View>
+                <BottomTabBar navigation={navigation} activeRoute="MyOrders" />
+            </SafeAreaView>
+        );
+    }
+
+    if (loadError) {
+        return (
+            <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top']}>
+                <View style={[styles.header, { borderBottomColor: theme.border }]}>
+                    <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+                        <Ionicons name="arrow-back" size={24} color={theme.text} />
+                    </TouchableOpacity>
+                    <Text style={[styles.headerTitle, { color: theme.text }]}>Order Details</Text>
+                </View>
+                <View style={[styles.errorWrap, { padding: 20 }]}>
+                    <Ionicons
+                        name={loadError === 'sign_in' ? 'lock-closed-outline' : 'cloud-offline-outline'}
+                        size={48}
+                        color={theme.textLight}
+                        style={{ marginBottom: 12 }}
+                    />
+                    <Text style={[styles.errorTitle, { color: theme.text }]}>
+                        {loadError === 'sign_in' ? 'Sign in required' : 'Could not load order'}
+                    </Text>
+                    <Text style={[styles.errorSub, { color: theme.textLight }]}>
+                        {loadError === 'sign_in'
+                            ? 'Sign in to see vendor quotes, items, and status for this order.'
+                            : loadError}
+                    </Text>
+                    {loadError === 'sign_in' ? (
+                        <TouchableOpacity
+                            style={[styles.retryBtn, { backgroundColor: colors.primary, marginTop: 20 }]}
+                            onPress={() => navigation.navigate('Login')}
+                        >
+                            <Text style={styles.retryBtnText}>Sign in</Text>
+                        </TouchableOpacity>
+                    ) : (
+                        <TouchableOpacity
+                            style={[styles.retryBtn, { backgroundColor: colors.primary, marginTop: 20 }]}
+                            onPress={() => load()}
+                        >
+                            <Text style={styles.retryBtnText}>Try again</Text>
+                        </TouchableOpacity>
+                    )}
+                </View>
+                <BottomTabBar navigation={navigation} activeRoute="MyOrders" />
+            </SafeAreaView>
+        );
+    }
+
+    if (!order) {
+        return (
+            <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top']}>
+                <View style={[styles.header, { borderBottomColor: theme.border }]}>
+                    <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+                        <Ionicons name="arrow-back" size={24} color={theme.text} />
+                    </TouchableOpacity>
+                    <Text style={[styles.headerTitle, { color: theme.text }]}>Order Details</Text>
+                </View>
+                <Text style={[styles.emptyText, { color: theme.text, padding: 20 }]}>No order data.</Text>
                 <BottomTabBar navigation={navigation} activeRoute="MyOrders" />
             </SafeAreaView>
         );
@@ -176,6 +265,22 @@ export default function OrderDetail({ route, navigation }) {
                             Ordered: {formatFriendlyDateTime(order.created_at)}
                         </Text>
                     ) : null}
+                    {order?.work_started_at ? (
+                        <Text style={[styles.meta, { color: theme.textLight, marginTop: 6 }]}>
+                            Work started: {formatFriendlyDateTime(order.work_started_at)}
+                        </Text>
+                    ) : null}
+                    {order?.work_completed_at ? (
+                        <Text style={[styles.meta, { color: theme.textLight }]}>
+                            Work completed: {formatFriendlyDateTime(order.work_completed_at)}
+                        </Text>
+                    ) : null}
+                    {order?.start_otp && (
+                        <View style={[styles.completionOtpBox, { backgroundColor: colors.primary + '18', borderColor: colors.primary }]}>
+                            <Text style={[styles.completionOtpLabel, { color: theme.textLight }]}>Start work OTP (share with vendor)</Text>
+                            <Text style={[styles.completionOtpValue, { color: colors.primary }]}>{order.start_otp}</Text>
+                        </View>
+                    )}
                     {order?.completion_otp && (
                         <View style={[styles.completionOtpBox, { backgroundColor: colors.primary + '20', borderColor: colors.primary }]}>
                             <Text style={[styles.completionOtpLabel, { color: theme.textLight }]}>Completion OTP (share with vendor)</Text>
@@ -202,16 +307,48 @@ export default function OrderDetail({ route, navigation }) {
                 {items.length > 0 && (
                     <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>
                         <Text style={[styles.sectionTitle, { color: theme.text }]}>Items</Text>
-                        {items.map((item, i) => (
-                            <View key={item.id || i} style={[styles.itemRow, { borderBottomColor: theme.border }]}>
-                                <Text style={[styles.itemName, { color: theme.text }]} numberOfLines={2}>
-                                    {item.name || 'Item'} × {item.quantity}
-                                </Text>
-                                <Text style={[styles.itemPrice, { color: theme.text }]}>
-                                    ₹{(Number(item.unit_price) * Number(item.quantity)).toLocaleString()}
-                                </Text>
-                            </View>
-                        ))}
+                        {items.map((item, i) => {
+                            const parts = getLineItemParts(item);
+                            const accentIdx = tierIndexFromOptions(item.options);
+                            const accent =
+                                accentIdx >= 0
+                                    ? TIER_ACCENT_COLORS[accentIdx % TIER_ACCENT_COLORS.length]
+                                    : colors.primary;
+                            const tierLine = [parts.tierName, parts.qtyLabel].filter(Boolean).join(' · ');
+                            const qty = Number(item.quantity) || 1;
+                            return (
+                                <View
+                                    key={item.id || i}
+                                    style={[
+                                        styles.orderItemCard,
+                                        {
+                                            borderBottomColor: theme.border,
+                                            borderLeftColor: accent,
+                                        },
+                                    ]}
+                                >
+                                    <View style={{ flex: 1, paddingRight: 8 }}>
+                                        {parts.categoryName ? (
+                                            <Text style={[styles.itemCat, { color: theme.textLight }]}>
+                                                {parts.categoryName}
+                                            </Text>
+                                        ) : null}
+                                        <Text style={[styles.itemTitle, { color: theme.text }]} numberOfLines={2}>
+                                            {parts.serviceName} × {qty}
+                                        </Text>
+                                        {tierLine ? (
+                                            <Text style={[styles.itemTierLine, { color: accent }]}>{tierLine}</Text>
+                                        ) : null}
+                                        {parts.subVariety ? (
+                                            <Text style={[styles.itemSub, { color: theme.textLight }]}>{parts.subVariety}</Text>
+                                        ) : null}
+                                    </View>
+                                    <Text style={[styles.itemPrice, { color: theme.text }]}>
+                                        ₹{(Number(item.unit_price) * qty).toLocaleString()}
+                                    </Text>
+                                </View>
+                            );
+                        })}
                     </View>
                 )}
 
@@ -219,7 +356,10 @@ export default function OrderDetail({ route, navigation }) {
                     <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>
                         <Text style={[styles.sectionTitle, { color: theme.text }]}>Status history</Text>
                         {history.map((h, i) => (
-                            <View key={i} style={[styles.historyItem, { borderBottomColor: theme.border }]}>
+                            <View
+                                key={h.id || `${h.status}-${h.created_at || ''}-${i}`}
+                                style={[styles.historyItem, { borderBottomColor: theme.border }]}
+                            >
                                 <Text style={[styles.historyStatus, { color: theme.text }]}>{h.status}</Text>
                                 {h.note ? (
                                     <Text style={[styles.historyNote, { color: theme.textLight }]}>{h.note}</Text>
@@ -291,6 +431,22 @@ export default function OrderDetail({ route, navigation }) {
                                     <Text style={[styles.quoteStatus, { color: theme.textLight }]}>
                                         {q.status || 'Submitted'}
                                     </Text>
+                                    {q.quotation_submitted_at || q.created_at ? (
+                                        <Text style={[styles.quoteMeta, { color: theme.textLight }]}>
+                                            Submitted:{' '}
+                                            {formatFriendlyDateTime(q.quotation_submitted_at || q.created_at)}
+                                        </Text>
+                                    ) : null}
+                                    {q.service_type ? (
+                                        <Text style={[styles.quoteMeta, { color: theme.textLight }]}>
+                                            Service: {q.service_type}
+                                        </Text>
+                                    ) : null}
+                                    {q.venue_address ? (
+                                        <Text style={[styles.quoteMeta, { color: theme.textLight }]} numberOfLines={3}>
+                                            Venue: {q.venue_address}
+                                        </Text>
+                                    ) : null}
                                     {q.note ? (
                                         <Text style={[styles.quoteNote, { color: theme.textLight }]}>{q.note}</Text>
                                     ) : null}
@@ -374,9 +530,13 @@ export default function OrderDetail({ route, navigation }) {
                             );
                         })
                     ) : (
-                        <Text style={[styles.quoteEmpty, { color: theme.textLight }]}>
-                            No quotes yet. Vendors can submit quotes for your order—pull to refresh for updates.
-                        </Text>
+                        <View style={styles.quoteEmptyWrap}>
+                            <Ionicons name="document-text-outline" size={40} color={theme.textLight} style={{ marginBottom: 8 }} />
+                            <Text style={[styles.quoteEmptyTitle, { color: theme.text }]}>No vendor quotes yet</Text>
+                            <Text style={[styles.quoteEmpty, { color: theme.textLight }]}>
+                                When an allocated vendor submits a quotation, it will appear here. Pull down to refresh.
+                            </Text>
+                        </View>
                     )}
                     </View>
                 </View>
@@ -471,8 +631,21 @@ const styles = StyleSheet.create({
         paddingVertical: 10,
         borderBottomWidth: 1,
     },
+    orderItemCard: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
+        paddingVertical: 12,
+        paddingHorizontal: 4,
+        borderBottomWidth: 1,
+        borderLeftWidth: 4,
+    },
+    itemCat: { fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4 },
+    itemTitle: { fontSize: 15, fontWeight: '700' },
+    itemTierLine: { fontSize: 13, fontWeight: '600', marginTop: 4 },
+    itemSub: { fontSize: 12, marginTop: 4, fontStyle: 'italic' },
     itemName: { fontSize: 14, flex: 1 },
-    itemPrice: { fontSize: 14, fontWeight: '600' },
+    itemPrice: { fontSize: 14, fontWeight: '700', minWidth: 72, textAlign: 'right' },
     historyItem: {
         paddingVertical: 10,
         borderBottomWidth: 1,
@@ -496,6 +669,7 @@ const styles = StyleSheet.create({
     quoteAmount: { fontSize: 16, fontWeight: '700' },
     quoteStatus: { fontSize: 13, textTransform: 'capitalize', marginBottom: 2 },
     quoteNote: { fontSize: 12, marginTop: 4 },
+    quoteMeta: { fontSize: 12, marginTop: 4, lineHeight: 18 },
     attachmentsSection: { marginTop: 12 },
     attachmentsLabel: { fontSize: 12, marginBottom: 8, textTransform: 'capitalize' },
     attachmentsRow: { flexDirection: 'row', flexWrap: 'wrap' },
@@ -537,7 +711,14 @@ const styles = StyleSheet.create({
         gap: 6,
     },
     acceptBtnText: { color: '#FFF', fontWeight: '600', fontSize: 14 },
-    quoteEmpty: { fontSize: 14, fontStyle: 'italic' },
+    quoteEmptyWrap: { alignItems: 'center', paddingVertical: 12 },
+    quoteEmptyTitle: { fontSize: 16, fontWeight: '700', marginBottom: 6 },
+    quoteEmpty: { fontSize: 14, textAlign: 'center', lineHeight: 20 },
+    errorWrap: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 24 },
+    errorTitle: { fontSize: 18, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
+    errorSub: { fontSize: 14, textAlign: 'center', lineHeight: 20 },
+    retryBtn: { paddingVertical: 12, paddingHorizontal: 24, borderRadius: 12 },
+    retryBtnText: { color: '#FFF', fontSize: 16, fontWeight: '600' },
     emptyText: { padding: 16 },
     completionOtpBox: {
         marginTop: 12,

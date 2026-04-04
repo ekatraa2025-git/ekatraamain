@@ -20,6 +20,7 @@ function buildMapHtml(apiKey) {
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"/>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' https://maps.googleapis.com https://maps.gstatic.com; script-src 'unsafe-inline' https://maps.googleapis.com https://maps.gstatic.com; style-src 'unsafe-inline' https://fonts.googleapis.com; img-src data: https: blob:; connect-src https://maps.googleapis.com;"/>
   <style>
     * { box-sizing: border-box; }
     body { margin: 0; font-family: -apple-system,BlinkMacSystemFont,sans-serif; background: #0f172a; }

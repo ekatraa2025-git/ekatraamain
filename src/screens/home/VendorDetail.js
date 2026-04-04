@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Linking, Alert, Modal, TextInput, Platform, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Linking, Alert, Modal, TextInput, Platform, ActivityIndicator, FlatList } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -37,6 +37,9 @@ export default function VendorDetail({ route, navigation }) {
     }, [vendorParam?.id]);
 
     const vendor = vendorData;
+    const galleryList = Array.isArray(vendor?.gallery_urls)
+        ? vendor.gallery_urls.filter(Boolean)
+        : [];
 
     // Enquiry Modal State
     const [enquiryVisible, setEnquiryVisible] = useState(openEnquiry || false);
@@ -250,6 +253,26 @@ export default function VendorDetail({ route, navigation }) {
                         <Text style={[styles.descriptionText, { color: theme.textLight }]}>
                             {vendor.description}
                         </Text>
+                    </View>
+                )}
+
+                {/* Gallery */}
+                {galleryList.length > 0 && (
+                    <View style={[styles.section, { backgroundColor: theme.card }]}>
+                        <Text style={[styles.sectionTitle, { color: theme.text }]}>Gallery</Text>
+                        <FlatList
+                            horizontal
+                            data={galleryList}
+                            keyExtractor={(item, idx) => `${item}-${idx}`}
+                            showsHorizontalScrollIndicator={false}
+                            contentContainerStyle={styles.galleryListContent}
+                            renderItem={({ item }) => (
+                                <Image
+                                    source={{ uri: getVendorImageUrl(item, vendor.business_name) }}
+                                    style={styles.galleryThumb}
+                                />
+                            )}
+                        />
                     </View>
                 )}
 
@@ -544,6 +567,17 @@ const styles = StyleSheet.create({
     descriptionText: {
         fontSize: 14,
         lineHeight: 22,
+    },
+    galleryListContent: {
+        paddingVertical: 4,
+        gap: 10,
+    },
+    galleryThumb: {
+        width: 160,
+        height: 120,
+        borderRadius: 12,
+        marginRight: 10,
+        backgroundColor: '#E5E7EB',
     },
     contactRow: {
         flexDirection: 'row',

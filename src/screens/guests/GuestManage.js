@@ -135,9 +135,21 @@ export default function GuestManage({ navigation }) {
         }, [loadData])
     );
 
+    const GUEST_LIMITS = { name: 100, phone: 20, relation: 50, group: 50, notes: 500 };
+
     const addGuest = async () => {
-        if (!guestForm.name.trim()) {
+        const trimmedName = guestForm.name.trim();
+        if (!trimmedName) {
             Alert.alert('Required', 'Please enter guest name.');
+            return;
+        }
+        if (trimmedName.length > GUEST_LIMITS.name) {
+            Alert.alert('Too long', `Name must be under ${GUEST_LIMITS.name} characters.`);
+            return;
+        }
+        const phoneDigits = guestForm.phone.replace(/\D/g, '');
+        if (guestForm.phone && (phoneDigits.length < 10 || phoneDigits.length > 15)) {
+            Alert.alert('Invalid phone', 'Please enter a valid phone number.');
             return;
         }
         if (!userId) {
@@ -149,11 +161,11 @@ export default function GuestManage({ navigation }) {
         try {
             const { data, error } = await api.addGuest({
                 user_id: userId,
-                name: guestForm.name.trim(),
-                phone: guestForm.phone || null,
-                relation: guestForm.relation || null,
-                group_name: guestForm.group || null,
-                notes: guestForm.notes || null,
+                name: trimmedName.substring(0, GUEST_LIMITS.name),
+                phone: guestForm.phone ? guestForm.phone.substring(0, GUEST_LIMITS.phone) : null,
+                relation: guestForm.relation ? guestForm.relation.substring(0, GUEST_LIMITS.relation) : null,
+                group_name: guestForm.group ? guestForm.group.substring(0, GUEST_LIMITS.group) : null,
+                notes: guestForm.notes ? guestForm.notes.substring(0, GUEST_LIMITS.notes) : null,
                 invited: true,
                 rsvp: 'pending',
             });
@@ -953,11 +965,11 @@ export default function GuestManage({ navigation }) {
                     <View style={[styles.modalContent, { backgroundColor: theme.card }]} onStartShouldSetResponder={() => true}>
                         <View style={styles.modalHandle} />
                         <Text style={[styles.modalTitle, { color: theme.text }]}>Add Guest</Text>
-                        <TextInput style={[styles.input, { backgroundColor: theme.inputBackground, color: theme.text, borderColor: theme.border }]} placeholder="Name *" placeholderTextColor={theme.textLight} value={guestForm.name} onChangeText={t => setGuestForm(p => ({ ...p, name: t }))} />
-                        <TextInput style={[styles.input, { backgroundColor: theme.inputBackground, color: theme.text, borderColor: theme.border }]} placeholder="Phone" placeholderTextColor={theme.textLight} value={guestForm.phone} onChangeText={t => setGuestForm(p => ({ ...p, phone: t }))} keyboardType="phone-pad" />
-                        <TextInput style={[styles.input, { backgroundColor: theme.inputBackground, color: theme.text, borderColor: theme.border }]} placeholder="Relation (e.g. Uncle, Friend)" placeholderTextColor={theme.textLight} value={guestForm.relation} onChangeText={t => setGuestForm(p => ({ ...p, relation: t }))} />
-                        <TextInput style={[styles.input, { backgroundColor: theme.inputBackground, color: theme.text, borderColor: theme.border }]} placeholder="Group (e.g. Family, Office)" placeholderTextColor={theme.textLight} value={guestForm.group} onChangeText={t => setGuestForm(p => ({ ...p, group: t }))} />
-                        <TextInput style={[styles.input, { backgroundColor: theme.inputBackground, color: theme.text, borderColor: theme.border }]} placeholder="Notes" placeholderTextColor={theme.textLight} value={guestForm.notes} onChangeText={t => setGuestForm(p => ({ ...p, notes: t }))} />
+                        <TextInput style={[styles.input, { backgroundColor: theme.inputBackground, color: theme.text, borderColor: theme.border }]} placeholder="Name *" placeholderTextColor={theme.textLight} value={guestForm.name} onChangeText={t => setGuestForm(p => ({ ...p, name: t }))} maxLength={GUEST_LIMITS.name} />
+                        <TextInput style={[styles.input, { backgroundColor: theme.inputBackground, color: theme.text, borderColor: theme.border }]} placeholder="Phone" placeholderTextColor={theme.textLight} value={guestForm.phone} onChangeText={t => setGuestForm(p => ({ ...p, phone: t }))} keyboardType="phone-pad" maxLength={GUEST_LIMITS.phone} />
+                        <TextInput style={[styles.input, { backgroundColor: theme.inputBackground, color: theme.text, borderColor: theme.border }]} placeholder="Relation (e.g. Uncle, Friend)" placeholderTextColor={theme.textLight} value={guestForm.relation} onChangeText={t => setGuestForm(p => ({ ...p, relation: t }))} maxLength={GUEST_LIMITS.relation} />
+                        <TextInput style={[styles.input, { backgroundColor: theme.inputBackground, color: theme.text, borderColor: theme.border }]} placeholder="Group (e.g. Family, Office)" placeholderTextColor={theme.textLight} value={guestForm.group} onChangeText={t => setGuestForm(p => ({ ...p, group: t }))} maxLength={GUEST_LIMITS.group} />
+                        <TextInput style={[styles.input, { backgroundColor: theme.inputBackground, color: theme.text, borderColor: theme.border }]} placeholder="Notes" placeholderTextColor={theme.textLight} value={guestForm.notes} onChangeText={t => setGuestForm(p => ({ ...p, notes: t }))} maxLength={GUEST_LIMITS.notes} />
                         <TouchableOpacity style={[styles.saveBtn, { backgroundColor: colors.primary }]} onPress={addGuest}>
                             <Text style={styles.saveBtnText}>Add Guest</Text>
                         </TouchableOpacity>

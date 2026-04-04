@@ -16,8 +16,9 @@ export default function Otp({ navigation, route }) {
     
     const [otp, setOtp] = useState(Array(OTP_LENGTH).fill(''));
     const [loading, setLoading] = useState(false);
-    const [resendTimer, setResendTimer] = useState(30);
+    const [resendTimer, setResendTimer] = useState(60);
     const [canResend, setCanResend] = useState(false);
+    const [resendLoading, setResendLoading] = useState(false);
     
     const inputRefs = useRef([]);
 
@@ -90,11 +91,12 @@ export default function Otp({ navigation, route }) {
     };
 
     const handleResend = async () => {
-        if (!canResend) return;
+        if (!canResend || resendLoading) return;
 
         setCanResend(false);
-        setResendTimer(30);
+        setResendTimer(60);
         setOtp(Array(OTP_LENGTH).fill(''));
+        setResendLoading(true);
 
         try {
             const result = await sendOtp(phone);
@@ -105,6 +107,8 @@ export default function Otp({ navigation, route }) {
             }
         } catch (error) {
             Alert.alert('Error', 'Failed to resend OTP. Please try again.');
+        } finally {
+            setResendLoading(false);
         }
     };
 
@@ -160,9 +164,9 @@ export default function Otp({ navigation, route }) {
             {/* Resend Timer */}
             <View style={styles.resendContainer}>
                 {canResend ? (
-                    <TouchableOpacity onPress={handleResend}>
-                        <Text style={[styles.resendText, { color: colors.primary }]}>
-                            Resend OTP
+                    <TouchableOpacity onPress={handleResend} disabled={resendLoading}>
+                        <Text style={[styles.resendText, { color: colors.primary, opacity: resendLoading ? 0.5 : 1 }]}>
+                            {resendLoading ? 'Sending...' : 'Resend OTP'}
                         </Text>
                     </TouchableOpacity>
                 ) : (

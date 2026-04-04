@@ -1,0 +1,120 @@
+/**
+ * Shared helpers for cart / order line items (tier, qty label, sub variety).
+ */
+
+export const TIER_KEYS = [
+    'price_basic',
+    'price_classic_value',
+    'price_signature',
+    'price_prestige',
+    'price_royal',
+    'price_imperial',
+];
+
+export const TIER_LABELS_ARR = ['Basic', 'Classic Value', 'Signature', 'Prestige', 'Royal', 'Imperial'];
+
+export const TIER_QTY_KEYS = [
+    'qty_label_basic',
+    'qty_label_classic_value',
+    'qty_label_signature',
+    'qty_label_prestige',
+    'qty_label_royal',
+    'qty_label_imperial',
+];
+
+export const TIER_SUB_KEYS = [
+    'sub_variety_basic',
+    'sub_variety_classic_value',
+    'sub_variety_signature',
+    'sub_variety_prestige',
+    'sub_variety_royal',
+    'sub_variety_imperial',
+];
+
+export const TIER_ACCENT_COLORS = ['#10B981', '#3B82F6', '#FF7A00', '#8B5CF6', '#F59E0B', '#EC4899'];
+
+/**
+ * Non-null tier rows for an offerable_services row (for pickers / special catalog).
+ */
+export function getOfferableTierRows(svc) {
+    const out = [];
+    TIER_KEYS.forEach((key, i) => {
+        const v = svc[key];
+        if (v != null && v !== '') {
+            out.push({
+                key,
+                label: TIER_LABELS_ARR[i],
+                value: Number(v),
+                qtyLabel: svc[TIER_QTY_KEYS[i]] || null,
+                subVariety: svc[TIER_SUB_KEYS[i]] || null,
+                color: TIER_ACCENT_COLORS[i],
+            });
+        }
+    });
+    return out;
+}
+
+const LEGACY = {
+    price_basic: 'Basic',
+    price_classic_value: 'Classic Value',
+    price_signature: 'Signature',
+    price_prestige: 'Prestige',
+    price_royal: 'Royal',
+    price_imperial: 'Imperial',
+    basic: 'Basic',
+    classic: 'Classic Value',
+    signature: 'Signature',
+    prestige: 'Prestige',
+    royal: 'Royal',
+    imperial: 'Imperial',
+};
+
+export function tierIndexFromOptions(options) {
+    const tier = options?.tier;
+    if (!tier) return -1;
+    let idx = TIER_KEYS.indexOf(tier);
+    if (idx >= 0) return idx;
+    const s = String(tier);
+    idx = TIER_KEYS.indexOf(s.startsWith('price_') ? s : `price_${s}`);
+    return idx;
+}
+
+export function getTierLabel(options) {
+    const tier = options?.tier;
+    if (!tier) return null;
+    if (LEGACY[tier]) return LEGACY[tier];
+    const idx = tierIndexFromOptions(options);
+    if (idx >= 0) return TIER_LABELS_ARR[idx];
+    const normalized = String(tier).replace(/^price_/, '');
+    return LEGACY[normalized] || normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
+/**
+ * @param {object} item cart or order line (may have service relation)
+ */
+export function getLineItemParts(item) {
+    const opt = item.options || {};
+    const svc = item.service || item.offerable_services || {};
+    const categoryName =
+        svc.categories?.name ||
+        svc.category?.name ||
+        (typeof opt.category === 'string' ? opt.category : null);
+    const serviceName = svc.name || item.name || 'Service';
+    const idx = tierIndexFromOptions(opt);
+    const tierName = getTierLabel(opt);
+    const qtyLabel =
+        opt.qty_label ||
+        (idx >= 0 ? svc[TIER_QTY_KEYS[idx]] : null) ||
+        null;
+    const subVariety =
+        opt.sub_variety ||
+        (idx >= 0 ? svc[TIER_SUB_KEYS[idx]] : null) ||
+        null;
+    return {
+        categoryName,
+        serviceName,
+        tierName,
+        qtyLabel,
+        subVariety,
+    };
+}

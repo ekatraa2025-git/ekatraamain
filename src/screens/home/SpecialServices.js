@@ -9,6 +9,7 @@ import {
     Alert,
     Dimensions,
     Platform,
+    FlatList,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -20,8 +21,11 @@ import { api, useBackendApi } from '../../services/api';
 import { resolveStorageUrl } from '../../services/supabase';
 import { useCart } from '../../context/CartContext';
 import BottomTabBar from '../../components/BottomTabBar';
+import { getOfferableTierRows } from '../../utils/lineItemDisplay';
 
 const { width } = Dimensions.get('window');
+const GRID_GAP = 10;
+const CARD_W = (width - 16 * 2 - GRID_GAP) / 2;
 
 function numPrice(v) {
     if (v == null) return null;
@@ -69,13 +73,39 @@ export default function SpecialServices({ route, navigation }) {
         load();
     }, [load]);
 
-    const toggle = (svc) => {
+    const selectTier = (svc, tierRow) => {
+        setSelected((prev) => {
+            const next = new Map(prev);
+            const price = tierRow.value;
+            if (price <= 0) return prev;
+            next.set(svc.id, {
+                tierKey: tierRow.key,
+                price,
+                name: svc.name,
+                label: tierRow.label,
+                qtyLabel: tierRow.qtyLabel,
+                subVariety: tierRow.subVariety,
+            });
+            return next;
+        });
+    };
+
+    const toggleService = (svc) => {
+        const rows = getOfferableTierRows(svc);
+        if (!rows.length) return;
         setSelected((prev) => {
             const next = new Map(prev);
             if (next.has(svc.id)) next.delete(svc.id);
             else {
-                const p = numPrice(svc.price_basic) ?? numPrice(svc.price_min) ?? 0;
-                next.set(svc.id, { price: p, name: svc.name });
+                const r = rows[0];
+                next.set(svc.id, {
+                    tierKey: r.key,
+                    price: r.value,
+                    name: svc.name,
+                    label: r.label,
+                    qtyLabel: r.qtyLabel,
+                    subVariety: r.subVariety,
+                });
             }
             return next;
         });
@@ -116,10 +146,12 @@ export default function SpecialServices({ route, navigation }) {
                     quantity: 1,
                     unit_price: unit,
                     options: {
-                        tier: 'price_basic',
+                        tier: row.tierKey || 'price_basic',
                         occasion: occasionName || 'Special add-ons',
                         category: 'Special add-ons (all occasions)',
                         special_catalog: true,
+                        ...(row.qtyLabel ? { qty_label: row.qtyLabel } : {}),
+                        ...(row.subVariety ? { sub_variety: row.subVariety } : {}),
                     },
                 });
                 if (e2) throw new Error(e2.message);
@@ -169,10 +201,9 @@ export default function SpecialServices({ route, navigation }) {
                         style={styles.hero}
                     >
                         <Ionicons name="gift" size={28} color="#FFF" />
-                        <Text style={styles.heroTitle}>Ekatraa special catalogue</Text>
+                        <Text style={styles.heroTitle}>Special add-ons for any occasion</Text>
                         <Text style={styles.heroSub}>
-                            {occasionName ? `Pair with your ${occasionName} — ` : ''}
-                            select add-ons; pricing is set by our team and may vary by city.
+                            Create your digital e-invites (AI-enabled). Your budget, your shortlisted vendors, your ideas — pick a tier per add-on.
                         </Text>
                     </LinearGradient>
 
@@ -181,64 +212,82 @@ export default function SpecialServices({ route, navigation }) {
                             No special services yet. Ask your coordinator or check back soon.
                         </Text>
                     ) : (
-                        services.map((svc) => {
-                            const isOn = selected.has(svc.id);
-                            const price = numPrice(svc.price_basic) ?? numPrice(svc.price_min) ?? 0;
-                            return (
-                                <TouchableOpacity
-                                    key={svc.id}
-                                    style={[
-                                        styles.card,
-                                        {
-                                            backgroundColor: theme.card,
-                                            borderColor: isOn ? colors.primary : theme.border,
-                                        },
-                                        isOn && { shadowColor: colors.primary, shadowOpacity: 0.2, shadowRadius: 12 },
-                                    ]}
-                                    onPress={() => toggle(svc)}
-                                    activeOpacity={0.85}
-                                >
+                        <FlatList
+                            data={services}
+                            numColumns={2}
+                            scrollEnabled={false}
+                            keyExtractor={(s) => s.id}
+                            columnWrapperStyle={{ gap: GRID_GAP, marginBottom: GRID_GAP }}
+                            renderItem={({ item: svc }) => {
+                                const tiers = getOfferableTierRows(svc);
+                                const isOn = selected.has(svc.id);
+                                const sel = selected.get(svc.id);
+                                return (
                                     <View
                                         style={[
-                                            styles.check,
+                                            styles.gridCard,
                                             {
+                                                width: CARD_W,
+                                                backgroundColor: theme.card,
                                                 borderColor: isOn ? colors.primary : theme.border,
-                                                backgroundColor: isOn ? colors.primary : 'transparent',
                                             },
+                                            isOn && { shadowColor: colors.primary, shadowOpacity: 0.15, shadowRadius: 8 },
                                         ]}
                                     >
-                                        {isOn ? <Ionicons name="checkmark" size={18} color="#FFF" /> : null}
-                                    </View>
-                                    {isOn && (
-                                        <LinearGradient
-                                            colors={[colors.primary + '18', 'transparent']}
-                                            style={StyleSheet.absoluteFill}
-                                            start={{ x: 0, y: 0 }}
-                                            end={{ x: 1, y: 1 }}
-                                        />
-                                    )}
-                                    <View style={{ flex: 1, zIndex: 1 }}>
-                                        <Text style={[styles.svcName, { color: theme.text }]}>{svc.name}</Text>
-                                        {svc.description ? (
-                                            <Text style={[styles.svcDesc, { color: theme.textLight }]} numberOfLines={3}>
-                                                {svc.description}
-                                            </Text>
+                                        <TouchableOpacity onPress={() => toggleService(svc)} activeOpacity={0.9}>
+                                            <View style={styles.gridCardTop}>
+                                                <View
+                                                    style={[
+                                                        styles.check,
+                                                        {
+                                                            borderColor: isOn ? colors.primary : theme.border,
+                                                            backgroundColor: isOn ? colors.primary : 'transparent',
+                                                        },
+                                                    ]}
+                                                >
+                                                    {isOn ? <Ionicons name="checkmark" size={16} color="#FFF" /> : null}
+                                                </View>
+                                                <Text style={[styles.svcName, { color: theme.text, fontSize: 15 }]} numberOfLines={2}>
+                                                    {svc.name}
+                                                </Text>
+                                            </View>
+                                        </TouchableOpacity>
+                                        {tiers.length === 0 ? (
+                                            <Text style={[styles.tierHint, { color: theme.textLight }]}>No tiers priced</Text>
+                                        ) : (
+                                            <View style={styles.tierChips}>
+                                                {tiers.map((t) => {
+                                                    const active = sel?.tierKey === t.key;
+                                                    return (
+                                                        <TouchableOpacity
+                                                            key={t.key}
+                                                            onPress={() => selectTier(svc, t)}
+                                                            style={[
+                                                                styles.tierChip,
+                                                                {
+                                                                    borderColor: active ? t.color : theme.border,
+                                                                    backgroundColor: active ? t.color + '22' : 'transparent',
+                                                                },
+                                                            ]}
+                                                        >
+                                                            <Text style={[styles.tierChipLabel, { color: theme.text }]} numberOfLines={1}>
+                                                                {t.label}
+                                                            </Text>
+                                                            <Text style={[styles.tierChipPrice, { color: t.color }]}>
+                                                                ₹{t.value.toLocaleString('en-IN')}
+                                                            </Text>
+                                                        </TouchableOpacity>
+                                                    );
+                                                })}
+                                            </View>
+                                        )}
+                                        {svc.price_unit ? (
+                                            <Text style={[styles.unitSmall, { color: theme.textLight }]}>Unit: {svc.price_unit}</Text>
                                         ) : null}
-                                        <View style={styles.priceRow}>
-                                            <Text style={[styles.price, { color: colors.primary }]}>
-                                                ₹{price.toLocaleString('en-IN')}
-                                            </Text>
-                                            {svc.price_unit ? (
-                                                <Text style={[styles.unit, { color: theme.textLight }]}> / {svc.price_unit}</Text>
-                                            ) : null}
-                                            {svc.city ? (
-                                                <Text style={[styles.city, { color: theme.textLight }]}> · {svc.city}</Text>
-                                            ) : null}
-                                        </View>
                                     </View>
-                                </TouchableOpacity>
-                            );
-                        })
+                                );
+                            }}
+                        />
                     )}
                 </ScrollView>
             )}
@@ -313,6 +362,25 @@ const styles = StyleSheet.create({
     heroTitle: { color: '#FFF', fontSize: 18, fontWeight: '800', marginTop: 10 },
     heroSub: { color: 'rgba(255,255,255,0.9)', fontSize: 13, lineHeight: 19, marginTop: 6 },
     empty: { textAlign: 'center', marginTop: 40, paddingHorizontal: 24 },
+    gridCard: {
+        borderRadius: 14,
+        borderWidth: 1.5,
+        padding: 10,
+        overflow: 'hidden',
+    },
+    gridCardTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+    tierChips: { marginTop: 8, gap: 6 },
+    tierChip: {
+        borderRadius: 10,
+        borderWidth: 1,
+        paddingHorizontal: 8,
+        paddingVertical: 6,
+        marginBottom: 4,
+    },
+    tierChipLabel: { fontSize: 10, fontWeight: '700' },
+    tierChipPrice: { fontSize: 13, fontWeight: '800', marginTop: 2 },
+    tierHint: { fontSize: 11, marginTop: 6 },
+    unitSmall: { fontSize: 10, marginTop: 4 },
     card: {
         flexDirection: 'row',
         borderRadius: 16,

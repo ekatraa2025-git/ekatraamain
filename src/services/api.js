@@ -238,6 +238,29 @@ async function patch(path, body = {}) {
     }
 }
 
+/** PATCH with Supabase access token (order quotation accept/reject, etc.). */
+async function patchWithAuth(path, body = {}, accessToken) {
+    if (!API_BASE) return { data: null, error: { message: 'API URL not configured. Set EXPO_PUBLIC_API_URL in .env' } };
+    try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
+        const res = await fetchWithTimeout(`${API_BASE}${path}`, {
+            method: 'PATCH',
+            headers,
+            body: JSON.stringify(body),
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok) {
+            const msg = stringifyApiError(data?.error) || res.statusText;
+            return { data: null, error: { message: msg } };
+        }
+        if (shouldInvalidateCacheForMutation(path)) invalidateAllGetCache();
+        return { data, error: null };
+    } catch (e) {
+        return { data: null, error: { message: buildError(e) } };
+    }
+}
+
 async function del(path) {
     if (!API_BASE) return { data: null, error: { message: 'API URL not configured. Set EXPO_PUBLIC_API_URL in .env' } };
     try {
@@ -281,6 +304,13 @@ export const api = {
     },
     async getSpecialServices() {
         return get('/api/public/special-services');
+    },
+    async getVendorsPreview(params = {}) {
+        const q = {};
+        if (params.occasion_id) q.occasion_id = params.occasion_id;
+        if (params.city) q.city = params.city;
+        if (params.limit) q.limit = params.limit;
+        return get('/api/public/vendors/preview', q);
     },
     async getTestimonials() {
         return get('/api/public/testimonials');
@@ -366,12 +396,25 @@ export const api = {
     async getOrders(userId) {
         return get('/api/public/orders', { user_id: userId });
     },
-    async getOrder(orderId, userId) {
-        const params = userId ? { user_id: userId } : {};
-        return get(`/api/public/orders/${orderId}`, params);
+    /**
+     * Order detail (items, quotes, history, OTPs). Backend requires Authorization: Bearer access_token.
+     * @param {string} orderId
+     * @param {string} [accessToken] - Supabase session access_token
+     */
+    async getOrder(orderId, accessToken) {
+        if (!accessToken) {
+            return { data: null, error: { message: 'Sign in to view order details.' } };
+        }
+        return getWithAuth(`/api/public/orders/${orderId}`, {}, accessToken);
     },
-    async acceptQuotation(orderId, quotationId, action) {
-        return patch(`/api/public/orders/${orderId}/quotation/${quotationId}`, { action });
+    /**
+     * @param {string} accessToken - Supabase session access_token
+     */
+    async acceptQuotation(orderId, quotationId, action, accessToken) {
+        if (!accessToken) {
+            return { data: null, error: { message: 'Sign in to continue.' } };
+        }
+        return patchWithAuth(`/api/public/orders/${orderId}/quotation/${quotationId}`, { action }, accessToken);
     },
     async createBalancePaymentOrder(body) {
         return post('/api/public/payment/create-balance-order', body);

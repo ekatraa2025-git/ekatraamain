@@ -74,11 +74,31 @@ export default function MyProfile({ navigation }) {
     };
 
     const handleSave = async () => {
-        if (!profile.full_name.trim()) {
+        const trimmedName = profile.full_name.trim();
+        if (!trimmedName) {
             Alert.alert('Error', 'Please enter your name');
             return;
         }
-        
+        if (trimmedName.length > 100) {
+            Alert.alert('Error', 'Name must be under 100 characters');
+            return;
+        }
+        if (profile.phone) {
+            const digits = profile.phone.replace(/\D/g, '');
+            if (digits.length < 10 || digits.length > 15) {
+                Alert.alert('Error', 'Please enter a valid phone number');
+                return;
+            }
+        }
+        if (profile.city && profile.city.length > 100) {
+            Alert.alert('Error', 'City name must be under 100 characters');
+            return;
+        }
+        if (profile.address && profile.address.length > 300) {
+            Alert.alert('Error', 'Address must be under 300 characters');
+            return;
+        }
+
         setSaving(true);
         try {
             // Update user metadata
@@ -202,6 +222,7 @@ export default function MyProfile({ navigation }) {
                             onChangeText={(text) => setProfile({ ...profile, full_name: text })}
                             placeholder="Enter your name"
                             placeholderTextColor={theme.textLight}
+                            maxLength={100}
                         />
                     </View>
 
@@ -218,6 +239,7 @@ export default function MyProfile({ navigation }) {
                             placeholder="+91 XXXXX XXXXX"
                             placeholderTextColor={theme.textLight}
                             keyboardType="phone-pad"
+                            maxLength={15}
                         />
                     </View>
 

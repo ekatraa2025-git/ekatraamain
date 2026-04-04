@@ -32,6 +32,7 @@ import {
     POLICY_MODAL_LABELS,
 } from '../../content/checkoutPolicyTexts';
 import { computeProtectionAmountInr, computeAdvanceInrFromBase } from '../../utils/bookingProtection';
+import { getLineItemParts, tierIndexFromOptions, TIER_ACCENT_COLORS } from '../../utils/lineItemDisplay';
 
 const ADVANCE_HEADLINE = 'Pay 20% advance & confirm booking now. (Recommended)';
 const ADVANCE_BULLETS = [
@@ -114,11 +115,6 @@ export default function Checkout({ route, navigation }) {
     const eventInfo = cartDetails || cart || {};
     const items = eventInfo.items || cart?.items || [];
     const totalAmount = items.reduce((s, i) => s + (Number(i.quantity) || 0) * (Number(i.unit_price) || 0), 0);
-
-    const getServiceDisplayName = (item) =>
-        item?.service?.name || item?.offerable_services?.name || item?.name || 'Service';
-
-    const getCategoryName = (item) => item?.service?.category?.name || null;
 
     const protectionAmount = computeProtectionAmountInr(totalAmount, protectionSettings, protectionPlanEnabled);
     const grandTotal = totalAmount + protectionAmount;
@@ -316,25 +312,45 @@ export default function Checkout({ route, navigation }) {
                                 )}
                                 <Text style={[styles.servicesSectionTitle, { color: theme.text }]}>Services</Text>
                                 {items.map((item, idx) => {
-                                    const cat = getCategoryName(item);
+                                    const parts = getLineItemParts(item);
                                     const occ = eventInfo.event_name;
-                                    const metaParts = [cat, occ].filter(Boolean);
+                                    const metaParts = [parts.categoryName, occ].filter(Boolean);
+                                    const accentIdx = tierIndexFromOptions(item.options);
+                                    const accent =
+                                        accentIdx >= 0
+                                            ? TIER_ACCENT_COLORS[accentIdx % TIER_ACCENT_COLORS.length]
+                                            : colors.primary;
+                                    const tierLine = [parts.tierName, parts.qtyLabel].filter(Boolean).join(' · ');
                                     return (
-                                        <View key={item.id || idx} style={[styles.itemRow, { borderBottomColor: theme.border }]}>
+                                        <View
+                                            key={item.id || idx}
+                                            style={[
+                                                styles.itemRow,
+                                                {
+                                                    borderBottomColor: theme.border,
+                                                    borderLeftWidth: 4,
+                                                    borderLeftColor: accent,
+                                                    paddingLeft: 10,
+                                                },
+                                            ]}
+                                        >
                                             <View style={{ flex: 1 }}>
-                                                <Text style={[styles.itemName, { color: theme.text }]}>
-                                                    {getServiceDisplayName(item)}
-                                                </Text>
                                                 {metaParts.length > 0 ? (
                                                     <Text style={[styles.itemCategoryOccasion, { color: theme.textLight }]}>
                                                         {metaParts.join(' · ')}
                                                     </Text>
                                                 ) : null}
-                                                {item.options?.tier && (
-                                                    <Text style={[styles.itemTier, { color: theme.textLight }]}>
-                                                        {item.options.tier.replace('price_', '').replace(/_/g, ' ')}
+                                                <Text style={[styles.itemName, { color: theme.text }]}>
+                                                    {parts.serviceName}
+                                                </Text>
+                                                {tierLine ? (
+                                                    <Text style={[styles.itemTier, { color: accent }]}>{tierLine}</Text>
+                                                ) : null}
+                                                {parts.subVariety ? (
+                                                    <Text style={[styles.itemSubVar, { color: theme.textLight }]}>
+                                                        {parts.subVariety}
                                                     </Text>
-                                                )}
+                                                ) : null}
                                             </View>
                                             <Text style={[styles.itemPrice, { color: theme.text }]}>
                                                 ₹{(Number(item.unit_price || 0) * Number(item.quantity || 1)).toLocaleString()}
@@ -605,7 +621,8 @@ const styles = StyleSheet.create({
         borderBottomWidth: 1,
     },
     itemName: { fontSize: 14, fontWeight: '600' },
-    itemTier: { fontSize: 12, marginTop: 2, textTransform: 'capitalize' },
+    itemTier: { fontSize: 13, marginTop: 4, fontWeight: '600' },
+    itemSubVar: { fontSize: 12, marginTop: 2, fontStyle: 'italic' },
     itemCategoryOccasion: { fontSize: 12, marginTop: 2, lineHeight: 17 },
     itemPrice: { fontSize: 14, fontWeight: '700' },
     totalRow: {

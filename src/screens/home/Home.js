@@ -65,8 +65,6 @@ function formatBudgetInrLabel(inr) {
 
 const BANNER_EDGE_PAD = 20;
 const BANNER_TILE_GAP = 10;
-/** At this count or higher, banners use the horizontal slider instead of the bento grid. */
-const BANNER_SLIDER_MIN_COUNT = 5;
 
 function bannerDiscountLabel(item) {
     if (!item || typeof item !== 'object') return null;
@@ -77,15 +75,6 @@ function bannerDiscountLabel(item) {
     if (typeof item.discount_text === 'string' && item.discount_text.trim()) return item.discount_text.trim();
     if (typeof item.promo_text === 'string' && item.promo_text.trim()) return item.promo_text.trim();
     return null;
-}
-
-function bannerBentoTileSize(count, index, screenW) {
-    const fullW = screenW - BANNER_EDGE_PAD * 2;
-    const colW = (fullW - BANNER_TILE_GAP) / 2;
-    if (count === 1) return { w: fullW, h: 188 };
-    if (count === 2) return { w: colW, h: 160 };
-    if (count === 3) return index === 2 ? { w: fullW, h: 152 } : { w: colW, h: 152 };
-    return { w: colW, h: 144 };
 }
 
 export default function Home({ navigation }) {
@@ -587,97 +576,70 @@ export default function Home({ navigation }) {
                         <Ionicons name="arrow-forward-circle" size={24} color={colors.primary} />
                     </TouchableOpacity>
 
-                    {/* Banner Ads — bento grid (1–4 items) or slider (5+ items) */}
+                    {/* Banner Ads — pairs of 2 sliding horizontally */}
                     {banners.length > 0 && (
                         <View style={styles.bannerSection}>
-                            {banners.length >= BANNER_SLIDER_MIN_COUNT ? (
-                                <FlatList
-                                    data={banners}
-                                    renderItem={({ item }) => {
-                                        const discount = bannerDiscountLabel(item);
-                                        return (
-                                            <TouchableOpacity style={styles.bannerCard} activeOpacity={0.9}>
-                                                <Image
-                                                    source={{
-                                                        uri:
-                                                            item.image_url ||
-                                                            'https://images.unsplash.com/photo-1519741497674-611481863552?w=800',
-                                                    }}
-                                                    style={styles.bannerImage}
-                                                    resizeMode="cover"
-                                                />
-                                                <LinearGradient
-                                                    colors={['rgba(0,0,0,0.05)', 'rgba(0,0,0,0.78)']}
-                                                    style={styles.bannerOverlayFill}
-                                                >
-                                                    {discount ? (
-                                                        <View style={[styles.bannerDiscountPill, { backgroundColor: colors.primary }]}>
-                                                            <Text style={styles.bannerDiscountPillText}>{discount}</Text>
-                                                        </View>
-                                                    ) : null}
-                                                    <View style={styles.bannerTextBlock}>
-                                                        <Text style={styles.bannerTitle}>{item.title}</Text>
-                                                        {item.subtitle ? (
-                                                            <Text style={styles.bannerSubtitle}>{item.subtitle}</Text>
-                                                        ) : null}
-                                                    </View>
-                                                </LinearGradient>
-                                            </TouchableOpacity>
-                                        );
-                                    }}
-                                    keyExtractor={(item) => item.id}
-                                    horizontal
-                                    showsHorizontalScrollIndicator={false}
-                                    pagingEnabled
-                                    snapToInterval={width - 40}
-                                    decelerationRate="fast"
-                                    contentContainerStyle={styles.bannerList}
-                                />
-                            ) : (
-                                <View style={styles.bannerBentoWrap}>
-                                    {banners.map((item, index) => {
-                                        const { w, h } = bannerBentoTileSize(banners.length, index, width);
-                                        const discount = bannerDiscountLabel(item);
-                                        return (
-                                            <TouchableOpacity
-                                                key={item.id}
-                                                style={[styles.bannerBentoTile, { width: w, height: h }]}
-                                                activeOpacity={0.92}
-                                            >
-                                                <Image
-                                                    source={{
-                                                        uri:
-                                                            item.image_url ||
-                                                            'https://images.unsplash.com/photo-1519741497674-611481863552?w=800',
-                                                    }}
-                                                    style={styles.bannerImage}
-                                                    resizeMode="cover"
-                                                />
-                                                <LinearGradient
-                                                    colors={['rgba(0,0,0,0.06)', 'rgba(0,0,0,0.82)']}
-                                                    style={styles.bannerOverlayFill}
-                                                >
-                                                    {discount ? (
-                                                        <View style={[styles.bannerDiscountPill, { backgroundColor: colors.primary }]}>
-                                                            <Text style={styles.bannerDiscountPillText}>{discount}</Text>
-                                                        </View>
-                                                    ) : null}
-                                                    <View style={styles.bannerTextBlock}>
-                                                        <Text style={styles.bannerBentoTitle} numberOfLines={2}>
-                                                            {item.title}
-                                                        </Text>
-                                                        {item.subtitle ? (
-                                                            <Text style={styles.bannerBentoSubtitle} numberOfLines={2}>
-                                                                {item.subtitle}
-                                                            </Text>
-                                                        ) : null}
-                                                    </View>
-                                                </LinearGradient>
-                                            </TouchableOpacity>
-                                        );
-                                    })}
-                                </View>
-                            )}
+                            <FlatList
+                                data={banners.reduce((pairs, item, i) => {
+                                    if (i % 2 === 0) pairs.push([item]);
+                                    else pairs[pairs.length - 1].push(item);
+                                    return pairs;
+                                }, [])}
+                                renderItem={({ item: pair }) => {
+                                    const pageW = width - BANNER_EDGE_PAD * 2;
+                                    const colW = (pageW - BANNER_TILE_GAP) / 2;
+                                    return (
+                                        <View style={[styles.bannerPairPage, { width: pageW }]}>
+                                            {pair.map((banner) => {
+                                                const discount = bannerDiscountLabel(banner);
+                                                return (
+                                                    <TouchableOpacity
+                                                        key={banner.id}
+                                                        style={[styles.bannerBentoTile, { width: colW, height: 160 }]}
+                                                        activeOpacity={0.92}
+                                                    >
+                                                        <Image
+                                                            source={{
+                                                                uri:
+                                                                    banner.image_url ||
+                                                                    'https://images.unsplash.com/photo-1519741497674-611481863552?w=800',
+                                                            }}
+                                                            style={styles.bannerImage}
+                                                            resizeMode="cover"
+                                                        />
+                                                        <LinearGradient
+                                                            colors={['rgba(0,0,0,0.06)', 'rgba(0,0,0,0.82)']}
+                                                            style={styles.bannerOverlayFill}
+                                                        >
+                                                            {discount ? (
+                                                                <View style={[styles.bannerDiscountPill, { backgroundColor: colors.primary }]}>
+                                                                    <Text style={styles.bannerDiscountPillText}>{discount}</Text>
+                                                                </View>
+                                                            ) : null}
+                                                            <View style={styles.bannerTextBlock}>
+                                                                <Text style={styles.bannerBentoTitle} numberOfLines={2}>
+                                                                    {banner.title}
+                                                                </Text>
+                                                                {banner.subtitle ? (
+                                                                    <Text style={styles.bannerBentoSubtitle} numberOfLines={2}>
+                                                                        {banner.subtitle}
+                                                                    </Text>
+                                                                ) : null}
+                                                            </View>
+                                                        </LinearGradient>
+                                                    </TouchableOpacity>
+                                                );
+                                            })}
+                                        </View>
+                                    );
+                                }}
+                                keyExtractor={(_, i) => String(i)}
+                                horizontal
+                                showsHorizontalScrollIndicator={false}
+                                pagingEnabled
+                                decelerationRate="fast"
+                                contentContainerStyle={styles.bannerList}
+                            />
                         </View>
                     )}
 
@@ -1828,7 +1790,12 @@ const styles = StyleSheet.create({
     },
     pickerItemText: { flex: 1, fontSize: 16, fontWeight: '500' },
     bannerSection: { marginBottom: 24 },
-    bannerList: { paddingHorizontal: 20 },
+    bannerList: { paddingHorizontal: BANNER_EDGE_PAD },
+    bannerPairPage: {
+        flexDirection: 'row',
+        gap: BANNER_TILE_GAP,
+        marginRight: BANNER_TILE_GAP,
+    },
     bannerCard: {
         width: width - 40,
         height: 170,

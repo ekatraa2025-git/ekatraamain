@@ -11,29 +11,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { useTheme } from '../../context/ThemeContext';
 import BottomTabBar from '../../components/BottomTabBar';
-
-const TIER_LABELS = {
-    price_basic: 'Basic',
-    price_classic_value: 'Classic Value',
-    price_signature: 'Signature',
-    price_prestige: 'Prestige',
-    price_royal: 'Royal',
-    price_imperial: 'Imperial',
-    basic: 'Basic',
-    classic: 'Classic Value',
-    signature: 'Signature',
-    prestige: 'Prestige',
-    royal: 'Royal',
-    imperial: 'Imperial',
-};
-
-function getTierLabel(options) {
-    const tier = options?.tier;
-    if (!tier) return null;
-    if (TIER_LABELS[tier]) return TIER_LABELS[tier];
-    const normalized = String(tier).replace(/^price_/, '');
-    return TIER_LABELS[normalized] || (normalized.charAt(0).toUpperCase() + normalized.slice(1));
-}
+import { getLineItemParts, tierIndexFromOptions, TIER_ACCENT_COLORS } from '../../utils/lineItemDisplay';
 
 export default function OrderSummary({ route, navigation }) {
     const { theme } = useTheme();
@@ -81,16 +59,37 @@ export default function OrderSummary({ route, navigation }) {
 
                 <Text style={[styles.sectionTitle, { color: theme.text }]}>Services selected</Text>
                 {(cartItems || []).map((item, index) => {
-                    const name = item.service?.name || item.name || 'Service';
-                    const tierLabel = getTierLabel(item.options);
+                    const parts = getLineItemParts(item);
+                    const accentIdx = tierIndexFromOptions(item.options);
+                    const accent =
+                        accentIdx >= 0
+                            ? TIER_ACCENT_COLORS[accentIdx % TIER_ACCENT_COLORS.length]
+                            : colors.primary;
+                    const tierLine = [parts.tierName, parts.qtyLabel].filter(Boolean).join(' · ');
                     const price = Number(item.unit_price || 0);
                     const qty = Number(item.quantity) || 1;
                     const lineTotal = price * qty;
                     return (
-                        <View key={item.id || index} style={[styles.itemCard, { backgroundColor: theme.card }]}>
-                            <Text style={[styles.itemName, { color: theme.text }]}>{name}</Text>
-                            {tierLabel ? (
-                                <Text style={[styles.itemTier, { color: colors.primary }]}>{tierLabel}</Text>
+                        <View
+                            key={item.id || index}
+                            style={[
+                                styles.itemCard,
+                                {
+                                    backgroundColor: theme.card,
+                                    borderLeftWidth: 4,
+                                    borderLeftColor: accent,
+                                },
+                            ]}
+                        >
+                            {parts.categoryName ? (
+                                <Text style={[styles.itemCat, { color: theme.textLight }]}>{parts.categoryName}</Text>
+                            ) : null}
+                            <Text style={[styles.itemName, { color: theme.text }]}>{parts.serviceName}</Text>
+                            {tierLine ? (
+                                <Text style={[styles.itemTier, { color: accent }]}>{tierLine}</Text>
+                            ) : null}
+                            {parts.subVariety ? (
+                                <Text style={[styles.itemSub, { color: theme.textLight }]}>{parts.subVariety}</Text>
                             ) : null}
                             <View style={styles.itemRow}>
                                 <Text style={[styles.itemMeta, { color: theme.textLight }]}>
@@ -204,8 +203,10 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: '#00000010',
     },
-    itemName: { fontSize: 16, fontWeight: '600', marginBottom: 4 },
-    itemTier: { fontSize: 13, fontWeight: '500', marginBottom: 6 },
+    itemCat: { fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4 },
+    itemName: { fontSize: 16, fontWeight: '700', marginBottom: 4 },
+    itemTier: { fontSize: 13, fontWeight: '600', marginBottom: 4 },
+    itemSub: { fontSize: 12, fontStyle: 'italic', marginBottom: 6 },
     itemRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
     itemMeta: { fontSize: 14 },
     itemTotal: { fontSize: 15, fontWeight: '700' },

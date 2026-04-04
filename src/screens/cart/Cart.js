@@ -20,32 +20,11 @@ import { api } from '../../services/api';
 import { useCart } from '../../context/CartContext';
 import BottomTabBar from '../../components/BottomTabBar';
 import { computeProtectionAmountInr } from '../../utils/bookingProtection';
-
-const TIER_LABELS = {
-    price_basic: 'Basic',
-    price_classic_value: 'Classic Value',
-    price_signature: 'Signature',
-    price_prestige: 'Prestige',
-    price_royal: 'Royal',
-    price_imperial: 'Imperial',
-    basic: 'Basic',
-    classic: 'Classic Value',
-    signature: 'Signature',
-    prestige: 'Prestige',
-    royal: 'Royal',
-    imperial: 'Imperial',
-};
-function getTierLabel(options) {
-    const tier = options?.tier;
-    if (!tier) return null;
-    if (TIER_LABELS[tier]) return TIER_LABELS[tier];
-    const normalized = String(tier).replace(/^price_/, '');
-    return TIER_LABELS[normalized] || (normalized.charAt(0).toUpperCase() + normalized.slice(1));
-}
-
-function getCategoryName(item) {
-    return item?.service?.category?.name || null;
-}
+import {
+    getLineItemParts,
+    tierIndexFromOptions,
+    TIER_ACCENT_COLORS,
+} from '../../utils/lineItemDisplay';
 
 export default function Cart({ route, navigation }) {
     const { theme } = useTheme();
@@ -98,11 +77,14 @@ export default function Cart({ route, navigation }) {
         });
     }, [cart?.items]);
 
+    const MAX_QTY = 99;
+
     const getDisplayQty = (item) => {
         const raw = qtyDraftById[item.id];
         if (raw === undefined) return Number(item.quantity) || 1;
         const n = parseInt(String(raw).replace(/\D/g, ''), 10);
-        return Number.isFinite(n) && n >= 1 ? n : Number(item.quantity) || 1;
+        if (!Number.isFinite(n) || n < 1) return Number(item.quantity) || 1;
+        return Math.min(n, MAX_QTY);
     };
 
     const onRefresh = useCallback(async () => {
@@ -113,6 +95,7 @@ export default function Cart({ route, navigation }) {
 
     const handleUpdateQty = async (itemId, quantity) => {
         if (quantity < 1) return;
+        if (quantity > MAX_QTY) quantity = MAX_QTY;
         setQtyDraftById((prev) => ({ ...prev, [itemId]: String(quantity) }));
         const { error } = await api.updateCartItem(itemId, { quantity });
         if (error) Alert.alert('Error', error.message);
@@ -141,6 +124,7 @@ export default function Cart({ route, navigation }) {
     };
 
     const handleClearCart = () => {
+        const items = cart?.items || [];
         if (!items.length) return;
         Alert.alert('Clear cart?', 'Remove every item from your cart.', [
             { text: 'Cancel', style: 'cancel' },
@@ -256,24 +240,42 @@ export default function Cart({ route, navigation }) {
                             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
                         }
                         renderItem={({ item }) => {
-                            const service = item.service || item;
-                            const name = service?.name || item.name || 'Service';
+                            const parts = getLineItemParts(item);
                             const price = Number(item.unit_price || 0);
                             const qty = getDisplayQty(item);
-                            const tierLabel = getTierLabel(item.options);
-                            const cat = getCategoryName(item);
                             const occ = cart?.event_name;
-                            const metaParts = [cat, occ].filter(Boolean);
+                            const metaParts = [parts.categoryName, occ].filter(Boolean);
+                            const accentIdx = tierIndexFromOptions(item.options);
+                            const accent =
+                                accentIdx >= 0
+                                    ? TIER_ACCENT_COLORS[accentIdx % TIER_ACCENT_COLORS.length]
+                                    : colors.primary;
+                            const tierLine = [parts.tierName, parts.qtyLabel].filter(Boolean).join(' · ');
                             return (
-                                <View style={[styles.itemCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
-                                    <Text style={[styles.itemName, { color: theme.text }]}>{name}</Text>
+                                <View
+                                    style={[
+                                        styles.itemCard,
+                                        {
+                                            backgroundColor: theme.card,
+                                            borderColor: theme.border,
+                                            borderLeftWidth: 4,
+                                            borderLeftColor: accent,
+                                        },
+                                    ]}
+                                >
                                     {metaParts.length > 0 ? (
                                         <Text style={[styles.itemCategoryOccasion, { color: theme.textLight }]}>
                                             {metaParts.join(' · ')}
                                         </Text>
                                     ) : null}
-                                    {tierLabel ? (
-                                        <Text style={[styles.itemTier, { color: colors.primary }]}>{tierLabel}</Text>
+                                    <Text style={[styles.itemName, { color: theme.text }]}>{parts.serviceName}</Text>
+                                    {tierLine ? (
+                                        <Text style={[styles.itemTier, { color: accent }]}>{tierLine}</Text>
+                                    ) : null}
+                                    {parts.subVariety ? (
+                                        <Text style={[styles.itemSubVariety, { color: theme.textLight }]}>
+                                            {parts.subVariety}
+                                        </Text>
                                     ) : null}
                                     <Text style={[styles.itemPrice, { color: theme.textLight }]}>
                                         ₹{price.toLocaleString()} × {qty} = ₹{(price * qty).toLocaleString()}
@@ -296,6 +298,7 @@ export default function Cart({ route, navigation }) {
                                                     const raw = qtyDraftById[item.id] ?? String(qty);
                                                     let n = parseInt(String(raw).replace(/\D/g, ''), 10);
                                                     if (!Number.isFinite(n) || n < 1) n = 1;
+                                                    if (n > MAX_QTY) n = MAX_QTY;
                                                     setQtyDraftById((prev) => ({ ...prev, [item.id]: String(n) }));
                                                     if (n !== (Number(item.quantity) || 1)) handleUpdateQty(item.id, n);
                                                 }}
@@ -396,8 +399,9 @@ const styles = StyleSheet.create({
         shadowRadius: 6,
         elevation: 2,
     },
-    itemName: { fontSize: 16, fontWeight: '600', marginBottom: 4 },
-    itemTier: { fontSize: 13, fontWeight: '500', marginBottom: 4 },
+    itemName: { fontSize: 17, fontWeight: '700', marginBottom: 6 },
+    itemTier: { fontSize: 14, fontWeight: '600', marginBottom: 4 },
+    itemSubVariety: { fontSize: 12, marginBottom: 6, fontStyle: 'italic' },
     itemPrice: { fontSize: 14, marginBottom: 12 },
     itemActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
     qtyRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
