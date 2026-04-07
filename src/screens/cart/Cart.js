@@ -7,7 +7,6 @@ import {
     TouchableOpacity,
     ActivityIndicator,
     RefreshControl,
-    Alert,
     TextInput,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -18,6 +17,7 @@ import { useLocale } from '../../context/LocaleContext';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import { useCart } from '../../context/CartContext';
+import { useToast } from '../../context/ToastContext';
 import BottomTabBar from '../../components/BottomTabBar';
 import { computeProtectionAmountInr } from '../../utils/bookingProtection';
 import {
@@ -32,6 +32,7 @@ export default function Cart({ route, navigation }) {
     const insets = useSafeAreaInsets();
     const { isAuthenticated, user } = useAuth();
     const { cartId: globalCartId, refreshCartCount, clearCart } = useCart();
+    const { showToast, showConfirm } = useToast();
     const cartId = route.params?.cartId || globalCartId;
 
     const [cart, setCart] = useState(null);
@@ -47,13 +48,13 @@ export default function Cart({ route, navigation }) {
         }
         const { data, error } = await api.getCart(cartId);
         if (error) {
-            Alert.alert('Error', error.message);
+            showToast({ variant: 'error', title: 'Error', message: error.message });
             setCart(null);
         } else {
             setCart(data);
         }
         setLoading(false);
-    }, [cartId]);
+    }, [cartId, showToast]);
 
     useEffect(() => {
         loadCart();
@@ -98,7 +99,7 @@ export default function Cart({ route, navigation }) {
         if (quantity > MAX_QTY) quantity = MAX_QTY;
         setQtyDraftById((prev) => ({ ...prev, [itemId]: String(quantity) }));
         const { error } = await api.updateCartItem(itemId, { quantity });
-        if (error) Alert.alert('Error', error.message);
+        if (error) showToast({ variant: 'error', title: 'Error', message: error.message });
         else {
             await loadCart();
             refreshCartCount();
@@ -107,13 +108,13 @@ export default function Cart({ route, navigation }) {
 
     const handleRemove = async (itemId) => {
         const { error } = await api.removeCartItem(itemId);
-        if (error) Alert.alert('Error', error.message);
+        if (error) showToast({ variant: 'error', title: 'Error', message: error.message });
         else { await loadCart(); refreshCartCount(); }
     };
 
     const handleCheckout = () => {
         if (!cart?.items?.length) {
-            Alert.alert('Cart is empty', 'Add services first.');
+            showToast({ variant: 'info', title: 'Cart is empty', message: 'Add services first.' });
             return;
         }
         navigation.navigate('Checkout', {
@@ -126,29 +127,29 @@ export default function Cart({ route, navigation }) {
     const handleClearCart = () => {
         const items = cart?.items || [];
         if (!items.length) return;
-        Alert.alert('Clear cart?', 'Remove every item from your cart.', [
-            { text: 'Cancel', style: 'cancel' },
-            {
-                text: 'Clear all',
-                style: 'destructive',
-                onPress: async () => {
-                    try {
-                        await Promise.all(
-                            items.map(async (row) => {
-                                const { error } = await api.removeCartItem(row.id);
-                                if (error) throw new Error(error.message);
-                            })
-                        );
-                        await clearCart();
-                        setCart(null);
-                        setQtyDraftById({});
-                        await refreshCartCount();
-                    } catch (e) {
-                        Alert.alert('Cart', e?.message || 'Could not clear cart.');
-                    }
-                },
+        showConfirm({
+            title: 'Clear cart?',
+            message: 'Remove every item from your cart.',
+            cancelLabel: 'Cancel',
+            confirmLabel: 'Clear all',
+            destructive: true,
+            onConfirm: async () => {
+                try {
+                    await Promise.all(
+                        items.map(async (row) => {
+                            const { error } = await api.removeCartItem(row.id);
+                            if (error) throw new Error(error.message);
+                        })
+                    );
+                    await clearCart();
+                    setCart(null);
+                    setQtyDraftById({});
+                    await refreshCartCount();
+                } catch (e) {
+                    showToast({ variant: 'error', title: 'Cart', message: e?.message || 'Could not clear cart.' });
+                }
             },
-        ]);
+        });
     };
 
     // Footer sits inside mainCol, which already stops above BottomTabBar — do not add tab bar height again.

@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
     View, Text, StyleSheet, ScrollView, FlatList, Image,
-    TouchableOpacity, Dimensions, Modal, Linking,
+    TouchableOpacity, Pressable, Dimensions, Modal, Linking,
     ActivityIndicator, RefreshControl, Animated, TextInput,
-    KeyboardAvoidingView, Platform, Alert,
+    KeyboardAvoidingView, Platform,
 } from 'react-native';
+import { ScrollView as GHScrollView } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import * as Location from 'expo-location';
@@ -15,11 +16,12 @@ import { colors } from '../../theme/colors';
 import { EVENT_TYPES as MOCK_EVENT_TYPES, CITIES } from '../../data/mockData';
 import { useTheme } from '../../context/ThemeContext';
 import { useLocale } from '../../context/LocaleContext';
+import { useToast } from '../../context/ToastContext';
 import { useAuth } from '../../context/AuthContext';
 import { useEventForm } from '../../context/EventFormContext';
 import ChatModal from '../../components/ChatModal';
 import { AnimatedBackground } from '../../components/AnimatedBackground';
-import { dbService, resolveStorageUrl } from '../../services/supabase';
+import { dbService, resolveStorageUrl, getVendorImageUrl } from '../../services/supabase';
 import { api, useBackendApi } from '../../services/api';
 import { useCart } from '../../context/CartContext';
 import { useAppData } from '../../context/AppDataContext';
@@ -28,6 +30,7 @@ import Logo from '../../components/Logo';
 import RecommendationBudgetModal from '../../components/RecommendationBudgetModal';
 import LocationMapPickerModal from '../../components/LocationMapPickerModal';
 import Slider from '@react-native-community/slider';
+import { getOfferableTierRows } from '../../utils/lineItemDisplay';
 
 const { width } = Dimensions.get('window');
 const OCCASION_CARD_GAP = 12;
@@ -65,6 +68,13 @@ function formatBudgetInrLabel(inr) {
 
 const BANNER_EDGE_PAD = 20;
 const BANNER_TILE_GAP = 10;
+const HOME_SPECIAL_GRID_GAP = 12;
+/** Horizontal strip: ~2 cards visible + peek of next — fully on one row, no vertical clip */
+const HOME_SPECIAL_H_CARD_W = Math.round((width - 44 - HOME_SPECIAL_GRID_GAP * 2) / 2.25);
+/** Edge-to-edge within section padding (anonVendorsScroll paddingHorizontal 20 each side). */
+const ANON_PARTNER_CARD_W = width - 40;
+/** Uniform tiles inside each vendor card’s horizontal image strip */
+const ANON_STRIP_BOX = 92;
 
 function bannerDiscountLabel(item) {
     if (!item || typeof item !== 'object') return null;
@@ -79,7 +89,8 @@ function bannerDiscountLabel(item) {
 
 export default function Home({ navigation }) {
     const { theme, isDarkMode } = useTheme();
-    const { t: tr, language, setLanguage } = useLocale();
+    const { t: tr } = useLocale();
+    const { showToast } = useToast();
     const { isAuthenticated, user } = useAuth();
     const { setEventForm } = useEventForm();
 
@@ -102,6 +113,7 @@ export default function Home({ navigation }) {
     const [othersExpanded, setOthersExpanded] = useState(false);
     const [formSubmitted, setFormSubmitted] = useState(false);
     const [skipForm, setSkipForm] = useState(false);
+    const [userInfoModalVisible, setUserInfoModalVisible] = useState(false);
     const [showDatePicker, setShowDatePicker] = useState(false);
     const [recommendationsModalVisible, setRecommendationsModalVisible] = useState(false);
     const [recommendationsData, setRecommendationsData] = useState(null);
@@ -109,10 +121,22 @@ export default function Home({ navigation }) {
     const [recommendationFormSnapshot, setRecommendationFormSnapshot] = useState(null);
     const [formSubmitting, setFormSubmitting] = useState(false);
     const [mapPickerVisible, setMapPickerVisible] = useState(false);
-    const [langModalVisible, setLangModalVisible] = useState(false);
     const [eventLocLoading, setEventLocLoading] = useState(false);
     const [testimonials, setTestimonials] = useState([]);
+    const [vendorsPreview, setVendorsPreview] = useState([]);
+    const [vendorsPreviewLoading, setVendorsPreviewLoading] = useState(false);
+    const [planTab, setPlanTab] = useState('occasions');
+    const [homeSpecialServices, setHomeSpecialServices] = useState([]);
+    const [homeSpecialLoading, setHomeSpecialLoading] = useState(false);
+    const [homeLatestVendors, setHomeLatestVendors] = useState([]);
+    const [homeLatestVendorsLoading, setHomeLatestVendorsLoading] = useState(false);
+    const [resolvedPartnerGalleries, setResolvedPartnerGalleries] = useState({});
     const useApi = useBackendApi();
+
+    const partnerGalleryResolveKey = useMemo(
+        () => homeLatestVendors.map((v) => `${v.id}:${(v.gallery_urls || []).join('|')}`).join(';;'),
+        [homeLatestVendors]
+    );
 
     const [form, setForm] = useState({
         role: '',
@@ -129,6 +153,7 @@ export default function Home({ navigation }) {
     });
 
     const categoryAnim = useRef(new Animated.Value(0)).current;
+    const prevSelectedOccasionRef = useRef(null);
 
     useEffect(() => {
         let cancelled = false;
@@ -175,6 +200,115 @@ export default function Home({ navigation }) {
     }, [form.planned_budget]);
 
     const showCategoriesStep = selectedType && (formSubmitted || skipForm);
+
+    useEffect(() => {
+        if (selectedType !== prevSelectedOccasionRef.current) {
+            prevSelectedOccasionRef.current = selectedType;
+            if (!selectedType) {
+                setUserInfoModalVisible(false);
+                return;
+            }
+            if (!formSubmitted && !skipForm) {
+                setUserInfoModalVisible(true);
+            }
+        }
+    }, [selectedType, formSubmitted, skipForm]);
+
+    useEffect(() => {
+        if (!useApi || !showCategoriesStep || !selectedType) {
+            setVendorsPreview([]);
+            setVendorsPreviewLoading(false);
+            return;
+        }
+        let cancelled = false;
+        setVendorsPreviewLoading(true);
+        (async () => {
+            const { data, error } = await api.getVendorsPreview({
+                occasion_id: selectedType,
+                city: currentCity,
+                limit: 10,
+            });
+            if (cancelled) return;
+            if (!error && Array.isArray(data)) setVendorsPreview(data);
+            else setVendorsPreview([]);
+            setVendorsPreviewLoading(false);
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [useApi, showCategoriesStep, selectedType, currentCity]);
+
+    useEffect(() => {
+        if (!useApi || !currentCity) {
+            setHomeLatestVendors([]);
+            setHomeLatestVendorsLoading(false);
+            return;
+        }
+        let cancelled = false;
+        setHomeLatestVendorsLoading(true);
+        (async () => {
+            const { data, error } = await api.getVendorsPreview({
+                city: currentCity,
+                limit: 12,
+            });
+            if (cancelled) return;
+            if (!error && Array.isArray(data)) setHomeLatestVendors(data);
+            else setHomeLatestVendors([]);
+            setHomeLatestVendorsLoading(false);
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [useApi, currentCity]);
+
+    useEffect(() => {
+        if (!useApi || !homeLatestVendors.length) {
+            setResolvedPartnerGalleries({});
+            return;
+        }
+        let cancelled = false;
+        (async () => {
+            const out = {};
+            await Promise.all(
+                homeLatestVendors.map(async (v) => {
+                    const urls = (v.gallery_urls || []).filter(Boolean);
+                    const resolved = await Promise.all(
+                        urls.map(async (u) => (await resolveStorageUrl(u)) || getVendorImageUrl(u, 'gallery'))
+                    );
+                    out[v.id] = resolved.filter(Boolean);
+                })
+            );
+            if (!cancelled) setResolvedPartnerGalleries(out);
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [useApi, partnerGalleryResolveKey]);
+
+    useEffect(() => {
+        if (!useApi || planTab !== 'special') return;
+        let cancelled = false;
+        setHomeSpecialLoading(true);
+        (async () => {
+            const { data, error } = await api.getSpecialServices();
+            if (cancelled) return;
+            if (!error && Array.isArray(data)) {
+                const resolved = await Promise.all(
+                    (data || []).map(async (s) => ({
+                        ...s,
+                        image_url: s.image_url ? await resolveStorageUrl(s.image_url) : null,
+                    }))
+                );
+                setHomeSpecialServices(resolved);
+            } else {
+                setHomeSpecialServices([]);
+            }
+            setHomeSpecialLoading(false);
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [useApi, planTab]);
 
     useEffect(() => {
         if (!showCategoriesStep) {
@@ -259,7 +393,11 @@ export default function Home({ navigation }) {
         try {
             const { status } = await Location.requestForegroundPermissionsAsync();
             if (status !== 'granted') {
-                Alert.alert('Permission needed', 'Allow location to pin your event area.');
+                showToast({
+                    variant: 'info',
+                    title: 'Permission needed',
+                    message: 'Allow location to pin your event area.',
+                });
                 return;
             }
             const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
@@ -282,11 +420,15 @@ export default function Home({ navigation }) {
                 location_preference: line || [rev?.city, rev?.region].filter(Boolean).join(', ') || 'Current location',
             }));
         } catch (e) {
-            Alert.alert('Location', e?.message || 'Could not get your position.');
+            showToast({
+                variant: 'error',
+                title: 'Location',
+                message: e?.message || 'Could not get your position.',
+            });
         } finally {
             setEventLocLoading(false);
         }
-    }, []);
+    }, [showToast]);
 
     const handleEventTypePress = (typeObj) => {
         const id = typeof typeObj === 'object' ? typeObj.id : typeObj;
@@ -300,11 +442,19 @@ export default function Home({ navigation }) {
 
     const handleFormSubmit = async () => {
         if (!form.contact_name.trim() || !form.contact_mobile.trim()) {
-            Alert.alert('Required', 'Please fill in your name and mobile number.');
+            showToast({
+                variant: 'info',
+                title: 'Required',
+                message: 'Please fill in your name and mobile number.',
+            });
             return;
         }
         if (!form.planned_budget?.trim()) {
-            Alert.alert('Budget required', 'Please pick a budget range or set your budget with the slider before continuing.');
+            showToast({
+                variant: 'info',
+                title: 'Budget required',
+                message: 'Please pick a budget range or set your budget with the slider before continuing.',
+            });
             return;
         }
         setFormSubmitting(true);
@@ -380,6 +530,7 @@ export default function Home({ navigation }) {
                 });
                 if (!recErr && recData?.categories?.length) {
                     setRecommendationsData(recData);
+                    setUserInfoModalVisible(false);
                     setRecommendationsModalVisible(true);
                     setFormSubmitting(false);
                     return;
@@ -388,6 +539,7 @@ export default function Home({ navigation }) {
         } catch (e) {
             console.warn('[Form submit]', e);
         }
+        setUserInfoModalVisible(false);
         setFormSubmitted(true);
         setFormSubmitting(false);
     };
@@ -395,6 +547,7 @@ export default function Home({ navigation }) {
     const handleSkipForm = () => {
         setEventForm(null);
         setSkipForm(true);
+        setUserInfoModalVisible(false);
     };
 
     const toggleCategory = (cat) => {
@@ -439,6 +592,141 @@ export default function Home({ navigation }) {
     const selectedInOthers = !!selectedType && otherOccasions.some((t) => t.id === selectedType);
     const catColors = ['#FF7A00', '#1E3A8A', '#10B981', '#8B5CF6', '#F59E0B', '#EC4899', '#06B6D4', '#EF4444', '#14B8A6', '#6366F1'];
 
+    const renderLatestPartnersSection = () => {
+        if (!useApi || (!homeLatestVendorsLoading && homeLatestVendors.length === 0)) return null;
+        return (
+            <View style={[styles.anonVendorsOuter, { borderColor: colors.primary + '28', backgroundColor: theme.card }]}>
+                <LinearGradient
+                    colors={isDarkMode ? ['rgba(255,122,0,0.14)', 'transparent'] : ['rgba(255,122,0,0.09)', 'transparent']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.anonVendorsOuterGrad}
+                    pointerEvents="none"
+                />
+                <View style={styles.anonVendorsInner}>
+                    <View style={styles.anonVendorsHeader}>
+                        <Text style={[styles.anonVendorsTitle, { color: theme.text }]}>{tr('home_latest_partners')}</Text>
+                        <Text style={[styles.anonVendorsSub, { color: theme.textLight }]}>{tr('home_latest_partners_sub')}</Text>
+                    </View>
+                    {homeLatestVendorsLoading ? (
+                        <View style={styles.anonVendorsLoading}>
+                            <ActivityIndicator color={colors.primary} />
+                        </View>
+                    ) : (
+                        <ScrollView
+                            horizontal
+                            nestedScrollEnabled
+                            showsHorizontalScrollIndicator={false}
+                            style={styles.anonVendorsScrollView}
+                            contentContainerStyle={styles.anonVendorsScroll}
+                        >
+                            {homeLatestVendors.map((item) => {
+                                const galleryUrls = (item.gallery_urls || []).filter(Boolean);
+                                const displayGalleryUrls =
+                                    resolvedPartnerGalleries[item.id]?.length > 0
+                                        ? resolvedPartnerGalleries[item.id]
+                                        : galleryUrls.map((u) => getVendorImageUrl(u, 'gallery'));
+                                const serviceNames = (item.services || []).filter(Boolean).slice(0, 12);
+                                const svcLine = (item.services || []).filter(Boolean).slice(0, 3).join(' · ');
+                                const cityLine = item.city
+                                    ? tr('home_featured_in_city').replace('{city}', String(item.city))
+                                    : tr('home_partner_services_hint');
+                                const stripHasItems = displayGalleryUrls.length > 0 || serviceNames.length > 0;
+                                const goPartnerDetail = () =>
+                                    navigation.navigate('VendorDetail', {
+                                        vendor: {
+                                            id: item.id,
+                                            business_name: item.display_label || 'Vendor',
+                                            logo_url: item.gallery_urls?.[0],
+                                            gallery_urls: item.gallery_urls,
+                                            city: item.city,
+                                        },
+                                        city: currentCity,
+                                        contactLocked: true,
+                                    });
+                                return (
+                                    <View
+                                        key={item.id}
+                                        style={[
+                                            styles.anonVendorCard,
+                                            {
+                                                backgroundColor: isDarkMode ? theme.card : '#FFFCF9',
+                                                borderColor: colors.primary + '35',
+                                                borderLeftColor: colors.primary,
+                                            },
+                                        ]}
+                                    >
+                                        <GHScrollView
+                                            horizontal
+                                            nestedScrollEnabled
+                                            showsHorizontalScrollIndicator={false}
+                                            bounces
+                                            keyboardShouldPersistTaps="handled"
+                                            style={styles.anonVendorStripScroll}
+                                            contentContainerStyle={styles.anonVendorStripContent}
+                                        >
+                                            {displayGalleryUrls.map((uri, idx) => (
+                                                <View key={`${item.id}-g-${idx}`} style={styles.anonVendorStripBox}>
+                                                    <Image
+                                                        source={{ uri }}
+                                                        style={styles.anonVendorStripImg}
+                                                        resizeMode="cover"
+                                                    />
+                                                </View>
+                                            ))}
+                                            {serviceNames.map((svcName, idx) => (
+                                                <View
+                                                    key={`${item.id}-s-${idx}`}
+                                                    style={[
+                                                        styles.anonVendorStripBox,
+                                                        styles.anonVendorServiceTile,
+                                                        { borderColor: colors.primary + '28', backgroundColor: isDarkMode ? '#1e2433' : '#FFF8F3' },
+                                                    ]}
+                                                >
+                                                    <Ionicons name="briefcase-outline" size={22} color={colors.primary} />
+                                                    <Text style={[styles.anonVendorServiceTileText, { color: theme.text }]} numberOfLines={2}>
+                                                        {svcName}
+                                                    </Text>
+                                                </View>
+                                            ))}
+                                            {!stripHasItems ? (
+                                                <View style={[styles.anonVendorStripBox, styles.anonVendorStripPlaceholder, { backgroundColor: isDarkMode ? '#334155' : '#E5E7EB' }]}>
+                                                    <Ionicons name="images-outline" size={26} color={theme.textLight} />
+                                                </View>
+                                            ) : null}
+                                        </GHScrollView>
+                                        <Pressable
+                                            onPress={goPartnerDetail}
+                                            style={({ pressed }) => [
+                                                styles.anonVendorCardFooter,
+                                                pressed && { opacity: 0.85 },
+                                            ]}
+                                            accessibilityRole="button"
+                                            accessibilityLabel={`${item.display_label || 'Partner'}, ${cityLine}`}
+                                        >
+                                            <Text style={[styles.anonVendorCity, { color: theme.text }]} numberOfLines={1}>
+                                                {cityLine}
+                                            </Text>
+                                            {svcLine ? (
+                                                <Text style={[styles.anonVendorSvc, { color: theme.textLight }]} numberOfLines={2}>
+                                                    {svcLine}
+                                                </Text>
+                                            ) : null}
+                                            <View style={styles.anonVendorFooterHint}>
+                                                <Text style={[styles.anonVendorFooterHintText, { color: colors.primary }]}>View partner</Text>
+                                                <Ionicons name="chevron-forward" size={16} color={colors.primary} />
+                                            </View>
+                                        </Pressable>
+                                    </View>
+                                );
+                            })}
+                        </ScrollView>
+                    )}
+                </View>
+            </View>
+        );
+    };
+
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top', 'left', 'right']}>
             <AnimatedBackground>
@@ -466,27 +754,7 @@ export default function Home({ navigation }) {
                                 </View>
                             </TouchableOpacity>
                         </View>
-                        <View style={styles.headerActions}>
-                            <TouchableOpacity
-                                style={[styles.headerIconBtn, { backgroundColor: isDarkMode ? '#1F2333' : '#F3F4F6' }]}
-                                onPress={() => setLangModalVisible(true)}
-                                activeOpacity={0.7}
-                            >
-                                <Ionicons name="language-outline" size={22} color={theme.text} />
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                                style={[styles.headerIconBtn, { backgroundColor: isDarkMode ? '#1F2333' : '#F3F4F6' }]}
-                                onPress={() => navigation.navigate('Cart')}
-                                activeOpacity={0.7}
-                            >
-                                <Ionicons name="cart-outline" size={22} color={theme.text} />
-                                {cartItemCount > 0 && (
-                                    <View style={[styles.cartBadge, { backgroundColor: colors.primary }]}>
-                                        <Text style={styles.cartBadgeText}>{cartItemCount > 99 ? '99+' : cartItemCount}</Text>
-                                    </View>
-                                )}
-                            </TouchableOpacity>
-                        </View>
+                        <View style={styles.headerRightSpacer} />
                     </View>
 
                     {/* Location Picker Modal */}
@@ -523,127 +791,7 @@ export default function Home({ navigation }) {
                         </TouchableOpacity>
                     </Modal>
 
-                    <Modal visible={langModalVisible} animationType="fade" transparent>
-                        <TouchableOpacity style={styles.modalOverlay} onPress={() => setLangModalVisible(false)} activeOpacity={1}>
-                            <View style={[styles.pickerContent, { backgroundColor: theme.card }]} onStartShouldSetResponder={() => true}>
-                                <View style={styles.pickerHandle} />
-                                <Text style={[styles.pickerTitle, { color: theme.text }]}>{tr('select_language')}</Text>
-                                {[
-                                    { code: 'en', label: tr('lang_en') },
-                                    { code: 'hi', label: tr('lang_hi') },
-                                    { code: 'or', label: tr('lang_or') },
-                                ].map((opt) => {
-                                    const isSel = language === opt.code;
-                                    return (
-                                        <TouchableOpacity
-                                            key={opt.code}
-                                            style={[
-                                                styles.pickerItem,
-                                                { borderBottomColor: theme.border },
-                                                isSel && { backgroundColor: colors.primary + '10' },
-                                            ]}
-                                            onPress={() => {
-                                                setLanguage(opt.code);
-                                                setLangModalVisible(false);
-                                            }}
-                                        >
-                                            <Ionicons name="globe-outline" size={18} color={isSel ? colors.primary : theme.textLight} />
-                                            <Text style={[
-                                                styles.pickerItemText,
-                                                { color: theme.text },
-                                                isSel && { color: colors.primary, fontWeight: '700' },
-                                            ]}>{opt.label}</Text>
-                                            {isSel ? <Ionicons name="checkmark-circle" size={20} color={colors.primary} /> : null}
-                                        </TouchableOpacity>
-                                    );
-                                })}
-                            </View>
-                        </TouchableOpacity>
-                    </Modal>
-
-                    {/* AI Chat Input */}
-                    <TouchableOpacity
-                        style={[styles.aiChatBar, { backgroundColor: theme.inputBackground, borderColor: colors.primary + '40' }]}
-                        onPress={() => setChatModalVisible(true)}
-                        activeOpacity={0.8}
-                    >
-                        <View style={[styles.aiIconWrap, { backgroundColor: colors.primary + '15' }]}>
-                            <Ionicons name="sparkles" size={18} color={colors.primary} />
-                        </View>
-                        <Text style={[styles.aiPlaceholder, { color: theme.textLight }]}>
-                            {tr('home_ai_placeholder')}
-                        </Text>
-                        <Ionicons name="arrow-forward-circle" size={24} color={colors.primary} />
-                    </TouchableOpacity>
-
-                    {/* Banner Ads — pairs of 2 sliding horizontally */}
-                    {banners.length > 0 && (
-                        <View style={styles.bannerSection}>
-                            <FlatList
-                                data={banners.reduce((pairs, item, i) => {
-                                    if (i % 2 === 0) pairs.push([item]);
-                                    else pairs[pairs.length - 1].push(item);
-                                    return pairs;
-                                }, [])}
-                                renderItem={({ item: pair }) => {
-                                    const pageW = width - BANNER_EDGE_PAD * 2;
-                                    const colW = (pageW - BANNER_TILE_GAP) / 2;
-                                    return (
-                                        <View style={[styles.bannerPairPage, { width: pageW }]}>
-                                            {pair.map((banner) => {
-                                                const discount = bannerDiscountLabel(banner);
-                                                return (
-                                                    <TouchableOpacity
-                                                        key={banner.id}
-                                                        style={[styles.bannerBentoTile, { width: colW, height: 160 }]}
-                                                        activeOpacity={0.92}
-                                                    >
-                                                        <Image
-                                                            source={{
-                                                                uri:
-                                                                    banner.image_url ||
-                                                                    'https://images.unsplash.com/photo-1519741497674-611481863552?w=800',
-                                                            }}
-                                                            style={styles.bannerImage}
-                                                            resizeMode="cover"
-                                                        />
-                                                        <LinearGradient
-                                                            colors={['rgba(0,0,0,0.06)', 'rgba(0,0,0,0.82)']}
-                                                            style={styles.bannerOverlayFill}
-                                                        >
-                                                            {discount ? (
-                                                                <View style={[styles.bannerDiscountPill, { backgroundColor: colors.primary }]}>
-                                                                    <Text style={styles.bannerDiscountPillText}>{discount}</Text>
-                                                                </View>
-                                                            ) : null}
-                                                            <View style={styles.bannerTextBlock}>
-                                                                <Text style={styles.bannerBentoTitle} numberOfLines={2}>
-                                                                    {banner.title}
-                                                                </Text>
-                                                                {banner.subtitle ? (
-                                                                    <Text style={styles.bannerBentoSubtitle} numberOfLines={2}>
-                                                                        {banner.subtitle}
-                                                                    </Text>
-                                                                ) : null}
-                                                            </View>
-                                                        </LinearGradient>
-                                                    </TouchableOpacity>
-                                                );
-                                            })}
-                                        </View>
-                                    );
-                                }}
-                                keyExtractor={(_, i) => String(i)}
-                                horizontal
-                                showsHorizontalScrollIndicator={false}
-                                pagingEnabled
-                                decelerationRate="fast"
-                                contentContainerStyle={styles.bannerList}
-                            />
-                        </View>
-                    )}
-
-                    {/* Plan Your Occasion - Wedding, Janeyu, Others in single row */}
+                    {/* Plan Your Occasion — tabs: occasions / special add-ons */}
                     <View style={styles.section}>
                         <View style={styles.sectionTitleRow}>
                             <View>
@@ -651,7 +799,40 @@ export default function Home({ navigation }) {
                                 <Text style={[styles.sectionSubtitle, { color: theme.textLight }]}>{tr('home_plan_subtitle')}</Text>
                             </View>
                         </View>
-                        {loading ? (
+                        <View style={styles.planTabRow}>
+                            <TouchableOpacity
+                                style={[
+                                    styles.planTabBtn,
+                                    { backgroundColor: theme.card, borderColor: theme.border },
+                                    planTab === 'occasions' && { borderColor: colors.primary, backgroundColor: colors.primary + '12' },
+                                ]}
+                                onPress={() => setPlanTab('occasions')}
+                                activeOpacity={0.85}
+                            >
+                                <Text style={[
+                                    styles.planTabBtnText,
+                                    { color: theme.text },
+                                    planTab === 'occasions' && { color: colors.primary, fontWeight: '800' },
+                                ]}>{tr('home_plan_tab_occasions')}</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[
+                                    styles.planTabBtn,
+                                    { backgroundColor: theme.card, borderColor: theme.border },
+                                    planTab === 'special' && { borderColor: colors.primary, backgroundColor: colors.primary + '12' },
+                                ]}
+                                onPress={() => setPlanTab('special')}
+                                activeOpacity={0.85}
+                            >
+                                <Text style={[
+                                    styles.planTabBtnText,
+                                    { color: theme.text },
+                                    planTab === 'special' && { color: colors.primary, fontWeight: '800' },
+                                ]}>{tr('home_plan_tab_special')}</Text>
+                            </TouchableOpacity>
+                        </View>
+                        {planTab === 'occasions' ? (
+                            loading ? (
                             <View style={styles.occasionRowSingle}>
                                 {[1, 2, 3].map(i => (
                                     <View key={i} style={[styles.occasionCardSingle, { backgroundColor: theme.card, borderColor: theme.border }]}>
@@ -662,7 +843,7 @@ export default function Home({ navigation }) {
                                     </View>
                                 ))}
                             </View>
-                        ) : (
+                            ) : (
                             <View>
                                 <View style={styles.occasionRowSingle}>
                                     {weddingOccasion && (
@@ -821,344 +1002,464 @@ export default function Home({ navigation }) {
                                     </View>
                                 )}
                             </View>
+                            )
+                        ) : !useApi ? null : homeSpecialLoading ? (
+                            <View style={styles.homeSpecialCenter}>
+                                <ActivityIndicator color={colors.primary} />
+                            </View>
+                        ) : homeSpecialServices.length === 0 ? (
+                            <Text style={[styles.homeSpecialEmpty, { color: theme.textLight, paddingHorizontal: 20 }]}>
+                                {tr('special_catalog_empty')}
+                            </Text>
+                        ) : (
+                            <View style={styles.homeSpecialBody}>
+                                <ScrollView
+                                    horizontal
+                                    nestedScrollEnabled
+                                    showsHorizontalScrollIndicator={false}
+                                    style={styles.homeSpecialHScroll}
+                                    contentContainerStyle={styles.homeSpecialHContent}
+                                >
+                                    {homeSpecialServices.map((svc) => {
+                                        const tiers = getOfferableTierRows(svc);
+                                        const prices = tiers.map((t) => t.value).filter((n) => n > 0);
+                                        const low = prices.length ? Math.min(...prices) : null;
+                                        return (
+                                            <LinearGradient
+                                                key={svc.id}
+                                                colors={[colors.primary + '55', colors.secondary + '40', colors.primary + '28']}
+                                                start={{ x: 0, y: 0 }}
+                                                end={{ x: 1, y: 1 }}
+                                                style={styles.homeSpecialCardRing}
+                                            >
+                                                <TouchableOpacity
+                                                    style={[
+                                                        styles.homeSpecialCardInner,
+                                                        {
+                                                            width: HOME_SPECIAL_H_CARD_W,
+                                                            backgroundColor: theme.card,
+                                                            borderColor: isDarkMode ? theme.border : colors.primary + '22',
+                                                        },
+                                                    ]}
+                                                    onPress={() =>
+                                                        navigation.navigate('SpecialServices', {
+                                                            occasionId: null,
+                                                            occasionName: null,
+                                                            city: currentCity,
+                                                        })
+                                                    }
+                                                    activeOpacity={0.9}
+                                                >
+                                                    <View style={styles.homeSpecialCardImgWrap}>
+                                                        {svc.image_url ? (
+                                                            <Image source={{ uri: svc.image_url }} style={styles.homeSpecialCardImg} resizeMode="cover" />
+                                                        ) : (
+                                                            <View style={[styles.homeSpecialCardImgPh, { backgroundColor: isDarkMode ? '#334155' : '#E2E8F0' }]}>
+                                                                <Ionicons name="sparkles" size={24} color={colors.primary} />
+                                                            </View>
+                                                        )}
+                                                    </View>
+                                                    <Text style={[styles.homeSpecialCardName, { color: theme.text }]} numberOfLines={2}>
+                                                        {svc.name}
+                                                    </Text>
+                                                    {low != null ? (
+                                                        <Text style={[styles.homeSpecialCardFrom, { color: colors.primary }]}>
+                                                            from ₹{low.toLocaleString('en-IN')}
+                                                        </Text>
+                                                    ) : null}
+                                                </TouchableOpacity>
+                                            </LinearGradient>
+                                        );
+                                    })}
+                                </ScrollView>
+                                <TouchableOpacity
+                                    style={[styles.homeSpecialBrowseBtn, { marginHorizontal: 20 }]}
+                                    onPress={() =>
+                                        navigation.navigate('SpecialServices', {
+                                            occasionId: null,
+                                            occasionName: null,
+                                            city: currentCity,
+                                        })
+                                    }
+                                    activeOpacity={0.9}
+                                >
+                                    <LinearGradient
+                                        colors={[colors.primary, colors.secondary]}
+                                        start={{ x: 0, y: 0 }}
+                                        end={{ x: 1, y: 0 }}
+                                        style={styles.homeSpecialBrowseGrad}
+                                    >
+                                        <Text style={styles.homeSpecialBrowseText}>{tr('home_special_browse_all')}</Text>
+                                        <Ionicons name="arrow-forward" size={18} color="#FFF" />
+                                    </LinearGradient>
+                                </TouchableOpacity>
+                            </View>
                         )}
                     </View>
 
-                    {/* User Info Form - shown when occasion selected, before categories */}
-                    {selectedType && !formSubmitted && !skipForm && (
-                        <View style={[styles.formSection, { backgroundColor: theme.card, borderColor: theme.border }]}>
-                            <Text style={[styles.formSectionTitle, { color: theme.text }]}>{tr('home_form_title')}</Text>
-                            <Text style={[styles.formSectionSubtitle, { color: theme.textLight }]}>
-                                {tr('home_form_help')} {selectedOccasionObj?.name || tr('home_your_occasion')}
-                            </Text>
-                            <TouchableOpacity
-                                style={styles.specialSkipWrap}
-                                onPress={() =>
-                                    navigation.navigate('SpecialServices', {
-                                        occasionId: selectedType,
-                                        occasionName: selectedOccasionObj?.name,
-                                        city: currentCity,
-                                    })
-                                }
-                                activeOpacity={0.92}
+                    {!showCategoriesStep ? renderLatestPartnersSection() : null}
+
+                    {/* Event details: reopen banner when modal dismissed; full form opens in modal */}
+                    {selectedType && !formSubmitted && !skipForm && !userInfoModalVisible && (
+                        <TouchableOpacity
+                            style={[styles.eventFormBanner, { marginHorizontal: 16, marginBottom: 16 }]}
+                            onPress={() => setUserInfoModalVisible(true)}
+                            activeOpacity={0.9}
+                        >
+                            <LinearGradient
+                                colors={isDarkMode ? ['#1e293b', '#0f172a'] : ['#FFF7ED', '#FFEDD5']}
+                                style={styles.eventFormBannerGrad}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 1 }}
                             >
-                                <LinearGradient
-                                    colors={['#4F46E5', '#7C3AED', '#A855F7']}
-                                    start={{ x: 0, y: 0 }}
-                                    end={{ x: 1, y: 1 }}
-                                    style={styles.specialSkipGradient}
-                                >
-                                    <View style={styles.specialSkipIconCircle}>
-                                        <Ionicons name="sparkles" size={22} color="#4F46E5" />
-                                    </View>
-                                    <View style={{ flex: 1 }}>
-                                        <Text style={styles.specialSkipTitle}>{tr('home_special_skip')}</Text>
-                                        <Text style={styles.specialSkipSub}>
-                                            Odiya Bhara, Puja Samagri, party poppers, beverages & more — all occasions
-                                        </Text>
-                                    </View>
-                                    <Ionicons name="chevron-forward" size={22} color="#FFF" />
-                                </LinearGradient>
-                            </TouchableOpacity>
-                            <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-                                <View style={styles.formGroup}>
-                                    <Text style={[styles.formLabel, { color: theme.textLight }]}>{tr('home_i_am')}</Text>
-                                    <View style={styles.roleRow}>
-                                        {[
-                                            { key: 'Groom', label: tr('home_role_groom') },
-                                            { key: 'Bride', label: tr('home_role_bride') },
-                                            { key: 'Host', label: tr('home_role_host') },
-                                            { key: 'Other', label: tr('home_role_other') },
-                                        ].map(({ key: role, label: roleLabel }) => (
-                                            <TouchableOpacity
-                                                key={role}
-                                                style={[
-                                                    styles.roleChip,
-                                                    { backgroundColor: isDarkMode ? '#252840' : '#FFF', borderColor: theme.border },
-                                                    form.role === role && { backgroundColor: colors.primary, borderColor: colors.primary },
-                                                ]}
-                                                onPress={() => setForm(p => ({ ...p, role }))}
-                                            >
-                                                <Text style={[
-                                                    styles.roleText,
-                                                    { color: theme.text },
-                                                    form.role === role && { color: '#FFF', fontWeight: '700' },
-                                                ]}>{roleLabel}</Text>
-                                            </TouchableOpacity>
-                                        ))}
-                                    </View>
+                                <View style={[styles.eventFormBannerIcon, { backgroundColor: colors.primary + '22' }]}>
+                                    <Ionicons name="clipboard-outline" size={22} color={colors.primary} />
                                 </View>
-                                <View style={styles.formRow}>
-                                    <View style={styles.formCol}>
-                                        <Text style={[styles.formLabel, { color: theme.textLight }]}>{tr('home_name')}</Text>
-                                        <View style={[styles.inputWrap, { backgroundColor: isDarkMode ? '#1F2333' : '#FFF', borderColor: theme.border }]}>
-                                            <Ionicons name="person-outline" size={16} color={theme.textLight} />
-                                            <TextInput
-                                                style={[styles.input, { color: theme.text }]}
-                                                placeholder="Your name"
-                                                placeholderTextColor={theme.textLight}
-                                                value={form.contact_name}
-                                                onChangeText={t => setForm(p => ({ ...p, contact_name: t }))}
-                                            />
-                                        </View>
-                                    </View>
-                                    <View style={styles.formCol}>
-                                        <Text style={[styles.formLabel, { color: theme.textLight }]}>{tr('home_phone')}</Text>
-                                        <View style={[styles.inputWrap, { backgroundColor: isDarkMode ? '#1F2333' : '#FFF', borderColor: theme.border }]}>
-                                            <Ionicons name="call-outline" size={16} color={theme.textLight} />
-                                            <TextInput
-                                                style={[styles.input, { color: theme.text }]}
-                                                placeholder="Mobile number"
-                                                placeholderTextColor={theme.textLight}
-                                                value={form.contact_mobile}
-                                                onChangeText={t => setForm(p => ({ ...p, contact_mobile: t }))}
-                                                keyboardType="phone-pad"
-                                            />
-                                        </View>
-                                    </View>
-                                </View>
-                                <View style={styles.formRow}>
-                                    <View style={styles.formCol}>
-                                        <Text style={[styles.formLabel, { color: theme.textLight }]}>{tr('home_email')}</Text>
-                                        <View style={[styles.inputWrap, { backgroundColor: isDarkMode ? '#1F2333' : '#FFF', borderColor: theme.border }]}>
-                                            <Ionicons name="mail-outline" size={16} color={theme.textLight} />
-                                            <TextInput
-                                                style={[styles.input, { color: theme.text }]}
-                                                placeholder="Email address"
-                                                placeholderTextColor={theme.textLight}
-                                                value={form.contact_email}
-                                                onChangeText={t => setForm(p => ({ ...p, contact_email: t }))}
-                                                keyboardType="email-address"
-                                            />
-                                        </View>
-                                    </View>
-                                    <View style={styles.formCol}>
-                                        <Text style={[styles.formLabel, { color: theme.textLight }]}>{tr('home_event_date')}</Text>
-                                        <TouchableOpacity
-                                            style={[styles.inputWrap, styles.dateBtn, { backgroundColor: isDarkMode ? '#1F2333' : '#FFF', borderColor: theme.border }]}
-                                            onPress={() => setShowDatePicker(true)}
-                                        >
-                                            <Ionicons name="calendar-outline" size={16} color={theme.textLight} />
-                                            <Text style={[styles.dateText, { color: form.event_date ? theme.text : theme.textLight }]}>
-                                                {form.event_date ? new Date(form.event_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : tr('home_select_date')}
-                                            </Text>
-                                        </TouchableOpacity>
-                                        {showDatePicker && (
-                                            <DateTimePicker
-                                                value={form.event_date ? new Date(form.event_date) : new Date()}
-                                                mode="date"
-                                                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-                                                minimumDate={new Date()}
-                                                onChange={(e, d) => {
-                                                    setShowDatePicker(false);
-                                                    if (d) setForm(p => ({ ...p, event_date: d.toISOString() }));
-                                                }}
-                                            />
-                                        )}
-                                    </View>
-                                </View>
-                                <View style={styles.formRow}>
-                                    <View style={styles.formCol}>
-                                        <Text style={[styles.formLabel, { color: theme.textLight }]}>{tr('home_guest_count')}</Text>
-                                        <View style={[styles.inputWrap, { backgroundColor: isDarkMode ? '#1F2333' : '#FFF', borderColor: theme.border }]}>
-                                            <Ionicons name="people-outline" size={16} color={theme.textLight} />
-                                            <TextInput
-                                                style={[styles.input, { color: theme.text }]}
-                                                placeholder="Number of guests"
-                                                placeholderTextColor={theme.textLight}
-                                                value={form.guest_count}
-                                                onChangeText={t => setForm(p => ({ ...p, guest_count: t }))}
-                                                keyboardType="number-pad"
-                                            />
-                                        </View>
-                                    </View>
-                                </View>
-                                <View style={styles.formGroup}>
-                                    <Text style={[styles.formLabel, { color: theme.textLight }]}>{tr('home_event_location')}</Text>
-                                    <Text style={[styles.formHint, { color: theme.textLight }]}>
-                                        {tr('home_event_location_hint')}
+                                <View style={{ flex: 1 }}>
+                                    <Text style={[styles.eventFormBannerTitle, { color: theme.text }]}>
+                                        {tr('home_event_form_banner_title')}
                                     </Text>
-                                    <View style={styles.roleRow}>
-                                        {[
-                                            { key: 'own_place', label: tr('home_own_place') },
-                                            { key: 'venue', label: tr('home_venue') },
-                                        ].map((opt) => (
-                                            <TouchableOpacity
-                                                key={opt.key}
-                                                style={[
-                                                    styles.roleChip,
-                                                    {
-                                                        backgroundColor: isDarkMode ? '#252840' : '#FFF',
-                                                        borderColor: theme.border,
-                                                    },
-                                                    form.location_kind === opt.key && {
-                                                        backgroundColor: colors.primary,
-                                                        borderColor: colors.primary,
-                                                    },
-                                                ]}
-                                                onPress={() =>
-                                                    setForm((p) => ({
-                                                        ...p,
-                                                        location_kind: opt.key,
-                                                    }))
-                                                }
-                                            >
-                                                <Text
+                                    <Text style={[styles.eventFormBannerSub, { color: theme.textLight }]} numberOfLines={2}>
+                                        {tr('home_event_form_banner_sub')}
+                                    </Text>
+                                </View>
+                                <Ionicons name="chevron-forward-circle" size={26} color={colors.primary} />
+                            </LinearGradient>
+                        </TouchableOpacity>
+                    )}
+
+                    <Modal
+                        visible={userInfoModalVisible}
+                        animationType="slide"
+                        presentationStyle="pageSheet"
+                        onRequestClose={() => setUserInfoModalVisible(false)}
+                    >
+                        <SafeAreaView style={[styles.userInfoModalRoot, { backgroundColor: theme.background }]} edges={['top', 'left', 'right', 'bottom']}>
+                            <View style={[styles.userInfoModalHeader, { borderBottomColor: theme.border }]}>
+                                <TouchableOpacity
+                                    onPress={() => setUserInfoModalVisible(false)}
+                                    style={styles.userInfoModalClose}
+                                    hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                                >
+                                    <Ionicons name="close" size={26} color={theme.text} />
+                                </TouchableOpacity>
+                                <Text style={[styles.userInfoModalHeaderTitle, { color: theme.text }]} numberOfLines={1}>
+                                    {tr('home_form_title')}
+                                </Text>
+                                <View style={{ width: 40 }} />
+                            </View>
+                            <KeyboardAvoidingView
+                                style={{ flex: 1 }}
+                                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                                keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
+                            >
+                                <ScrollView
+                                    keyboardShouldPersistTaps="handled"
+                                    showsVerticalScrollIndicator={false}
+                                    contentContainerStyle={styles.userInfoModalScroll}
+                                >
+                                    <Text style={[styles.formSectionSubtitle, { color: theme.textLight, marginBottom: 14 }]}>
+                                        {tr('home_form_help')} {selectedOccasionObj?.name || tr('home_your_occasion')}
+                                    </Text>
+                                    <View style={styles.formGroup}>
+                                        <Text style={[styles.formLabel, { color: theme.textLight }]}>{tr('home_i_am')}</Text>
+                                        <View style={styles.roleRow}>
+                                            {[
+                                                { key: 'Groom', label: tr('home_role_groom') },
+                                                { key: 'Bride', label: tr('home_role_bride') },
+                                                { key: 'Host', label: tr('home_role_host') },
+                                                { key: 'Other', label: tr('home_role_other') },
+                                            ].map(({ key: role, label: roleLabel }) => (
+                                                <TouchableOpacity
+                                                    key={role}
                                                     style={[
+                                                        styles.roleChip,
+                                                        { backgroundColor: isDarkMode ? '#252840' : '#FFF', borderColor: theme.border },
+                                                        form.role === role && { backgroundColor: colors.primary, borderColor: colors.primary },
+                                                    ]}
+                                                    onPress={() => setForm(p => ({ ...p, role }))}
+                                                >
+                                                    <Text style={[
                                                         styles.roleText,
                                                         { color: theme.text },
-                                                        form.location_kind === opt.key && { color: '#FFF', fontWeight: '700' },
-                                                    ]}
-                                                >
-                                                    {opt.label}
+                                                        form.role === role && { color: '#FFF', fontWeight: '700' },
+                                                    ]}>{roleLabel}</Text>
+                                                </TouchableOpacity>
+                                            ))}
+                                        </View>
+                                    </View>
+                                    <View style={styles.formRow}>
+                                        <View style={styles.formCol}>
+                                            <Text style={[styles.formLabel, { color: theme.textLight }]}>{tr('home_name')}</Text>
+                                            <View style={[styles.inputWrap, { backgroundColor: isDarkMode ? '#1F2333' : '#FFF', borderColor: theme.border }]}>
+                                                <Ionicons name="person-outline" size={16} color={theme.textLight} />
+                                                <TextInput
+                                                    style={[styles.input, { color: theme.text }]}
+                                                    placeholder="Your name"
+                                                    placeholderTextColor={theme.textLight}
+                                                    value={form.contact_name}
+                                                    onChangeText={t => setForm(p => ({ ...p, contact_name: t }))}
+                                                />
+                                            </View>
+                                        </View>
+                                        <View style={styles.formCol}>
+                                            <Text style={[styles.formLabel, { color: theme.textLight }]}>{tr('home_phone')}</Text>
+                                            <View style={[styles.inputWrap, { backgroundColor: isDarkMode ? '#1F2333' : '#FFF', borderColor: theme.border }]}>
+                                                <Ionicons name="call-outline" size={16} color={theme.textLight} />
+                                                <TextInput
+                                                    style={[styles.input, { color: theme.text }]}
+                                                    placeholder="Mobile number"
+                                                    placeholderTextColor={theme.textLight}
+                                                    value={form.contact_mobile}
+                                                    onChangeText={t => setForm(p => ({ ...p, contact_mobile: t }))}
+                                                    keyboardType="phone-pad"
+                                                />
+                                            </View>
+                                        </View>
+                                    </View>
+                                    <View style={styles.formRow}>
+                                        <View style={styles.formCol}>
+                                            <Text style={[styles.formLabel, { color: theme.textLight }]}>{tr('home_email')}</Text>
+                                            <View style={[styles.inputWrap, { backgroundColor: isDarkMode ? '#1F2333' : '#FFF', borderColor: theme.border }]}>
+                                                <Ionicons name="mail-outline" size={16} color={theme.textLight} />
+                                                <TextInput
+                                                    style={[styles.input, { color: theme.text }]}
+                                                    placeholder="Email address"
+                                                    placeholderTextColor={theme.textLight}
+                                                    value={form.contact_email}
+                                                    onChangeText={t => setForm(p => ({ ...p, contact_email: t }))}
+                                                    keyboardType="email-address"
+                                                />
+                                            </View>
+                                        </View>
+                                        <View style={styles.formCol}>
+                                            <Text style={[styles.formLabel, { color: theme.textLight }]}>{tr('home_event_date')}</Text>
+                                            <TouchableOpacity
+                                                style={[styles.inputWrap, styles.dateBtn, { backgroundColor: isDarkMode ? '#1F2333' : '#FFF', borderColor: theme.border }]}
+                                                onPress={() => setShowDatePicker(true)}
+                                            >
+                                                <Ionicons name="calendar-outline" size={16} color={theme.textLight} />
+                                                <Text style={[styles.dateText, { color: form.event_date ? theme.text : theme.textLight }]}>
+                                                    {form.event_date ? new Date(form.event_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : tr('home_select_date')}
                                                 </Text>
                                             </TouchableOpacity>
-                                        ))}
-                                    </View>
-                                    {form.location_kind ? (
-                                        <>
-                                            <View style={styles.locActionRow}>
-                                                <TouchableOpacity
-                                                    style={[
-                                                        styles.locActionBtn,
-                                                        { borderColor: theme.border, backgroundColor: isDarkMode ? '#1F2333' : '#FFF' },
-                                                    ]}
-                                                    onPress={handleEventCurrentLocationPress}
-                                                    disabled={eventLocLoading}
-                                                >
-                                                    {eventLocLoading ? (
-                                                        <ActivityIndicator size="small" color={colors.primary} />
-                                                    ) : (
-                                                        <Ionicons name="navigate" size={18} color={colors.primary} />
-                                                    )}
-                                                    <Text style={[styles.locActionText, { color: theme.text }]}>
-                                                        {tr('home_use_current_location')}
-                                                    </Text>
-                                                </TouchableOpacity>
-                                                <TouchableOpacity
-                                                    style={[
-                                                        styles.locActionBtn,
-                                                        { borderColor: theme.border, backgroundColor: isDarkMode ? '#1F2333' : '#FFF' },
-                                                    ]}
-                                                    onPress={() => setMapPickerVisible(true)}
-                                                >
-                                                    <Ionicons name="map" size={18} color={colors.primary} />
-                                                    <Text style={[styles.locActionText, { color: theme.text }]}>
-                                                        {tr('home_select_on_map')}
-                                                    </Text>
-                                                </TouchableOpacity>
-                                            </View>
-                                            {form.location_preference ? (
-                                                <View style={[styles.locPreview, { borderColor: theme.border, backgroundColor: isDarkMode ? '#1A1D27' : '#F9FAFB' }]}>
-                                                    <Ionicons name="location" size={16} color={colors.primary} />
-                                                    <Text style={[styles.locPreviewText, { color: theme.text }]} numberOfLines={3}>
-                                                        {form.location_preference}
-                                                    </Text>
-                                                </View>
-                                            ) : (
-                                                <Text style={[styles.formHint, { color: theme.textLight, marginTop: 6 }]}>
-                                                    {tr('home_pick_location_hint')}
-                                                </Text>
+                                            {showDatePicker && (
+                                                <DateTimePicker
+                                                    value={form.event_date ? new Date(form.event_date) : new Date()}
+                                                    mode="date"
+                                                    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                                                    minimumDate={new Date()}
+                                                    onChange={(e, d) => {
+                                                        setShowDatePicker(false);
+                                                        if (d) setForm(p => ({ ...p, event_date: d.toISOString() }));
+                                                    }}
+                                                />
                                             )}
-                                            {form.location_kind === 'venue' && (
-                                                <View style={{ marginTop: 10 }}>
-                                                    <Text style={[styles.formLabel, { color: theme.textLight }]}>{tr('home_venue_optional')}</Text>
-                                                    <View
+                                        </View>
+                                    </View>
+                                    <View style={styles.formRow}>
+                                        <View style={styles.formCol}>
+                                            <Text style={[styles.formLabel, { color: theme.textLight }]}>{tr('home_guest_count')}</Text>
+                                            <View style={[styles.inputWrap, { backgroundColor: isDarkMode ? '#1F2333' : '#FFF', borderColor: theme.border }]}>
+                                                <Ionicons name="people-outline" size={16} color={theme.textLight} />
+                                                <TextInput
+                                                    style={[styles.input, { color: theme.text }]}
+                                                    placeholder="Number of guests"
+                                                    placeholderTextColor={theme.textLight}
+                                                    value={form.guest_count}
+                                                    onChangeText={t => setForm(p => ({ ...p, guest_count: t }))}
+                                                    keyboardType="number-pad"
+                                                />
+                                            </View>
+                                        </View>
+                                    </View>
+                                    <View style={styles.formGroup}>
+                                        <Text style={[styles.formLabel, { color: theme.textLight }]}>{tr('home_event_location')}</Text>
+                                        <Text style={[styles.formHint, { color: theme.textLight }]}>
+                                            {tr('home_event_location_hint')}
+                                        </Text>
+                                        <View style={styles.roleRow}>
+                                            {[
+                                                { key: 'own_place', label: tr('home_own_place') },
+                                                { key: 'venue', label: tr('home_venue') },
+                                            ].map((opt) => (
+                                                <TouchableOpacity
+                                                    key={opt.key}
+                                                    style={[
+                                                        styles.roleChip,
+                                                        {
+                                                            backgroundColor: isDarkMode ? '#252840' : '#FFF',
+                                                            borderColor: theme.border,
+                                                        },
+                                                        form.location_kind === opt.key && {
+                                                            backgroundColor: colors.primary,
+                                                            borderColor: colors.primary,
+                                                        },
+                                                    ]}
+                                                    onPress={() =>
+                                                        setForm((p) => ({
+                                                            ...p,
+                                                            location_kind: opt.key,
+                                                        }))
+                                                    }
+                                                >
+                                                    <Text
                                                         style={[
-                                                            styles.inputWrap,
-                                                            { backgroundColor: isDarkMode ? '#1F2333' : '#FFF', borderColor: theme.border },
+                                                            styles.roleText,
+                                                            { color: theme.text },
+                                                            form.location_kind === opt.key && { color: '#FFF', fontWeight: '700' },
                                                         ]}
                                                     >
-                                                        <Ionicons name="business-outline" size={16} color={theme.textLight} />
-                                                        <TextInput
-                                                            style={[styles.input, { color: theme.text }]}
-                                                            placeholder={tr('home_venue_ph')}
-                                                            placeholderTextColor={theme.textLight}
-                                                            value={form.venue_detail}
-                                                            onChangeText={(t) => setForm((p) => ({ ...p, venue_detail: t }))}
-                                                        />
-                                                    </View>
+                                                        {opt.label}
+                                                    </Text>
+                                                </TouchableOpacity>
+                                            ))}
+                                        </View>
+                                        {form.location_kind ? (
+                                            <>
+                                                <View style={styles.locActionRow}>
+                                                    <TouchableOpacity
+                                                        style={[
+                                                            styles.locActionBtn,
+                                                            { borderColor: theme.border, backgroundColor: isDarkMode ? '#1F2333' : '#FFF' },
+                                                        ]}
+                                                        onPress={handleEventCurrentLocationPress}
+                                                        disabled={eventLocLoading}
+                                                    >
+                                                        {eventLocLoading ? (
+                                                            <ActivityIndicator size="small" color={colors.primary} />
+                                                        ) : (
+                                                            <Ionicons name="navigate" size={18} color={colors.primary} />
+                                                        )}
+                                                        <Text style={[styles.locActionText, { color: theme.text }]}>
+                                                            {tr('home_use_current_location')}
+                                                        </Text>
+                                                    </TouchableOpacity>
+                                                    <TouchableOpacity
+                                                        style={[
+                                                            styles.locActionBtn,
+                                                            { borderColor: theme.border, backgroundColor: isDarkMode ? '#1F2333' : '#FFF' },
+                                                        ]}
+                                                        onPress={() => setMapPickerVisible(true)}
+                                                    >
+                                                        <Ionicons name="map" size={18} color={colors.primary} />
+                                                        <Text style={[styles.locActionText, { color: theme.text }]}>
+                                                            {tr('home_select_on_map')}
+                                                        </Text>
+                                                    </TouchableOpacity>
                                                 </View>
-                                            )}
-                                        </>
-                                    ) : null}
-                                </View>
-                                <View style={styles.formGroup}>
-                                    <Text style={[styles.formLabel, { color: theme.textLight }]}>{tr('home_budget_label')}</Text>
-                                    <Text style={[styles.budgetSliderHint, { color: theme.textLight }]}>
-                                        {tr('home_budget_slider_hint')}
-                                    </Text>
-                                    <Text style={[styles.budgetSliderValue, { color: colors.primary }]}>
-                                        {formatBudgetInrLabel(plannedBudgetInr)} (₹{Math.round(plannedBudgetInr).toLocaleString('en-IN')})
-                                    </Text>
-                                    <Slider
-                                        style={styles.budgetSlider}
-                                        minimumValue={MIN_PLANNED_BUDGET_INR}
-                                        maximumValue={MAX_PLANNED_BUDGET_INR}
-                                        value={plannedBudgetInr}
-                                        onValueChange={(v) => setPlannedBudgetInr(Math.round(v))}
-                                        onSlidingComplete={(v) => {
-                                            const x = Math.round(v);
-                                            setPlannedBudgetInr(x);
-                                            setForm(p => ({ ...p, planned_budget: formatBudgetInrLabel(x) }));
-                                        }}
-                                        minimumTrackTintColor={colors.primary}
-                                        maximumTrackTintColor={theme.border}
-                                        thumbTintColor={colors.primary}
-                                    />
-                                    <View style={styles.budgetRow}>
-                                        {BUDGET_OPTIONS.map(opt => (
-                                            <TouchableOpacity
-                                                key={opt}
-                                                style={[
-                                                    styles.budgetChip,
-                                                    { backgroundColor: isDarkMode ? '#252840' : '#FFF', borderColor: theme.border },
-                                                    form.planned_budget === opt && { backgroundColor: colors.primary, borderColor: colors.primary },
-                                                ]}
-                                                onPress={() => {
-                                                    const inr = BUDGET_CHIP_TO_INR[opt];
-                                                    if (inr) setPlannedBudgetInr(inr);
-                                                    setForm(p => ({ ...p, planned_budget: opt }));
-                                                }}
-                                            >
-                                                <Text style={[
-                                                    styles.budgetText,
-                                                    { color: theme.text },
-                                                    form.planned_budget === opt && { color: '#FFF', fontWeight: '700' },
-                                                ]}>₹{opt}</Text>
-                                            </TouchableOpacity>
-                                        ))}
+                                                {form.location_preference ? (
+                                                    <View style={[styles.locPreview, { borderColor: theme.border, backgroundColor: isDarkMode ? '#1A1D27' : '#F9FAFB' }]}>
+                                                        <Ionicons name="location" size={16} color={colors.primary} />
+                                                        <Text style={[styles.locPreviewText, { color: theme.text }]} numberOfLines={3}>
+                                                            {form.location_preference}
+                                                        </Text>
+                                                    </View>
+                                                ) : (
+                                                    <Text style={[styles.formHint, { color: theme.textLight, marginTop: 6 }]}>
+                                                        {tr('home_pick_location_hint')}
+                                                    </Text>
+                                                )}
+                                                {form.location_kind === 'venue' && (
+                                                    <View style={{ marginTop: 10 }}>
+                                                        <Text style={[styles.formLabel, { color: theme.textLight }]}>{tr('home_venue_optional')}</Text>
+                                                        <View
+                                                            style={[
+                                                                styles.inputWrap,
+                                                                { backgroundColor: isDarkMode ? '#1F2333' : '#FFF', borderColor: theme.border },
+                                                            ]}
+                                                        >
+                                                            <Ionicons name="business-outline" size={16} color={theme.textLight} />
+                                                            <TextInput
+                                                                style={[styles.input, { color: theme.text }]}
+                                                                placeholder={tr('home_venue_ph')}
+                                                                placeholderTextColor={theme.textLight}
+                                                                value={form.venue_detail}
+                                                                onChangeText={(t) => setForm((p) => ({ ...p, venue_detail: t }))}
+                                                            />
+                                                        </View>
+                                                    </View>
+                                                )}
+                                            </>
+                                        ) : null}
                                     </View>
-                                </View>
-                                <View style={styles.formActions}>
-                                    <TouchableOpacity
-                                        style={[styles.skipBtn, { borderColor: theme.border }]}
-                                        onPress={handleSkipForm}
-                                        activeOpacity={0.8}
-                                    >
-                                        <Text style={[styles.skipBtnText, { color: theme.text }]}>{tr('home_skip_browse')}</Text>
-                                    </TouchableOpacity>
-                                    <TouchableOpacity
-                                        style={styles.submitBtn}
-                                        onPress={handleFormSubmit}
-                                        activeOpacity={0.85}
-                                        disabled={formSubmitting}
-                                    >
-                                        <LinearGradient
-                                            colors={[colors.primary, colors.secondary]}
-                                            start={{ x: 0, y: 0 }}
-                                            end={{ x: 1, y: 0 }}
-                                            style={styles.submitBtnGradient}
+                                    <View style={styles.formGroup}>
+                                        <Text style={[styles.formLabel, { color: theme.textLight }]}>{tr('home_budget_label')}</Text>
+                                        <Text style={[styles.budgetSliderHint, { color: theme.textLight }]}>
+                                            {tr('home_budget_slider_hint')}
+                                        </Text>
+                                        <Text style={[styles.budgetSliderValue, { color: colors.primary }]}>
+                                            {formatBudgetInrLabel(plannedBudgetInr)} (₹{Math.round(plannedBudgetInr).toLocaleString('en-IN')})
+                                        </Text>
+                                        <Slider
+                                            style={styles.budgetSlider}
+                                            minimumValue={MIN_PLANNED_BUDGET_INR}
+                                            maximumValue={MAX_PLANNED_BUDGET_INR}
+                                            value={plannedBudgetInr}
+                                            onValueChange={(v) => setPlannedBudgetInr(Math.round(v))}
+                                            onSlidingComplete={(v) => {
+                                                const x = Math.round(v);
+                                                setPlannedBudgetInr(x);
+                                                setForm(p => ({ ...p, planned_budget: formatBudgetInrLabel(x) }));
+                                            }}
+                                            minimumTrackTintColor={colors.primary}
+                                            maximumTrackTintColor={theme.border}
+                                            thumbTintColor={colors.primary}
+                                        />
+                                        <View style={styles.budgetRow}>
+                                            {BUDGET_OPTIONS.map(opt => (
+                                                <TouchableOpacity
+                                                    key={opt}
+                                                    style={[
+                                                        styles.budgetChip,
+                                                        { backgroundColor: isDarkMode ? '#252840' : '#FFF', borderColor: theme.border },
+                                                        form.planned_budget === opt && { backgroundColor: colors.primary, borderColor: colors.primary },
+                                                    ]}
+                                                    onPress={() => {
+                                                        const inr = BUDGET_CHIP_TO_INR[opt];
+                                                        if (inr) setPlannedBudgetInr(inr);
+                                                        setForm(p => ({ ...p, planned_budget: opt }));
+                                                    }}
+                                                >
+                                                    <Text style={[
+                                                        styles.budgetText,
+                                                        { color: theme.text },
+                                                        form.planned_budget === opt && { color: '#FFF', fontWeight: '700' },
+                                                    ]}>₹{opt}</Text>
+                                                </TouchableOpacity>
+                                            ))}
+                                        </View>
+                                    </View>
+                                    <View style={styles.formActions}>
+                                        <TouchableOpacity
+                                            style={[styles.skipBtn, { borderColor: theme.border }]}
+                                            onPress={handleSkipForm}
+                                            activeOpacity={0.8}
                                         >
-                                            {formSubmitting && <ActivityIndicator size="small" color="#FFF" style={{ marginRight: 8 }} />}
-                                            <Text style={styles.submitBtnText}>{tr('home_continue')}</Text>
-                                            <Ionicons name="arrow-forward" size={18} color="#FFF" />
-                                        </LinearGradient>
-                                    </TouchableOpacity>
-                                </View>
+                                            <Text style={[styles.skipBtnText, { color: theme.text }]}>{tr('home_skip_browse')}</Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                            style={styles.submitBtn}
+                                            onPress={handleFormSubmit}
+                                            activeOpacity={0.85}
+                                            disabled={formSubmitting}
+                                        >
+                                            <LinearGradient
+                                                colors={[colors.primary, colors.secondary]}
+                                                start={{ x: 0, y: 0 }}
+                                                end={{ x: 1, y: 0 }}
+                                                style={styles.submitBtnGradient}
+                                            >
+                                                {formSubmitting && <ActivityIndicator size="small" color="#FFF" style={{ marginRight: 8 }} />}
+                                                <Text style={styles.submitBtnText}>{tr('home_continue')}</Text>
+                                                <Ionicons name="arrow-forward" size={18} color="#FFF" />
+                                            </LinearGradient>
+                                        </TouchableOpacity>
+                                    </View>
+                                </ScrollView>
                             </KeyboardAvoidingView>
-                        </View>
-                    )}
+                        </SafeAreaView>
+                    </Modal>
 
                     {/* Category Multi-Select Section - only when form submitted or skipped */}
                     {showCategoriesStep && categoriesLoading && (
@@ -1281,6 +1582,173 @@ export default function Home({ navigation }) {
                         </Animated.View>
                     )}
 
+                    {showCategoriesStep ? renderLatestPartnersSection() : null}
+
+                    {showCategoriesStep && !categoriesLoading && useApi && (vendorsPreviewLoading || vendorsPreview.length > 0) ? (
+                        <View style={[styles.previewSection, { backgroundColor: theme.card, borderColor: theme.border }]}>
+                            <Text style={[styles.previewTitle, { color: theme.text }]}>{tr('home_top_vendors_title')}</Text>
+                            <Text style={[styles.previewSub, { color: theme.textLight }]}>{tr('home_top_vendors_sub')}</Text>
+                            {vendorsPreviewLoading ? (
+                                <View style={styles.previewLoading}>
+                                    <ActivityIndicator color={colors.primary} />
+                                </View>
+                            ) : (
+                                <ScrollView
+                                    horizontal
+                                    showsHorizontalScrollIndicator={false}
+                                    contentContainerStyle={styles.previewScroll}
+                                >
+                                    {vendorsPreview.map((item) => {
+                                        const thumbs = (item.gallery_urls || []).filter(Boolean).slice(0, 4);
+                                        const svcLine = (item.services || []).filter(Boolean).slice(0, 3).join(' · ');
+                                        const cityLine = item.city
+                                            ? tr('home_featured_in_city').replace('{city}', String(item.city))
+                                            : tr('home_partner_services_hint');
+                                        return (
+                                            <TouchableOpacity
+                                                key={item.id}
+                                                style={[styles.previewCard, { backgroundColor: isDarkMode ? '#1A1D27' : '#FFF', borderColor: theme.border }]}
+                                                activeOpacity={0.85}
+                                                onPress={() =>
+                                                    navigation.navigate('VendorDetail', {
+                                                        vendor: {
+                                                            id: item.id,
+                                                            business_name: item.display_label || 'Vendor',
+                                                            logo_url: item.gallery_urls?.[0],
+                                                            gallery_urls: item.gallery_urls,
+                                                            city: item.city,
+                                                        },
+                                                        city: currentCity,
+                                                        contactLocked: true,
+                                                    })
+                                                }
+                                            >
+                                                <View style={styles.previewCardGallery}>
+                                                    {thumbs.length > 0 ? (
+                                                        thumbs.map((uri, idx) => (
+                                                            <Image
+                                                                key={`${item.id}-pv-${idx}`}
+                                                                source={{ uri: getVendorImageUrl(uri, 'gallery') }}
+                                                                style={styles.previewCardThumb}
+                                                                resizeMode="cover"
+                                                            />
+                                                        ))
+                                                    ) : (
+                                                        <View style={[styles.previewCardThumbPh, { backgroundColor: isDarkMode ? '#334155' : '#E5E7EB' }]}>
+                                                            <Ionicons name="images-outline" size={20} color={theme.textLight} />
+                                                        </View>
+                                                    )}
+                                                </View>
+                                                <Text style={[styles.previewCardLabel, { color: theme.text }]} numberOfLines={2}>
+                                                    {cityLine}
+                                                </Text>
+                                                {svcLine ? (
+                                                    <Text style={[styles.previewCardHint, { color: theme.textLight }]} numberOfLines={2}>
+                                                        {svcLine}
+                                                    </Text>
+                                                ) : null}
+                                            </TouchableOpacity>
+                                        );
+                                    })}
+                                </ScrollView>
+                            )}
+                        </View>
+                    ) : null}
+
+                    {/* Guest Manager */}
+                    <TouchableOpacity
+                        style={[styles.guestManagerCard, { backgroundColor: theme.card, borderColor: theme.border }]}
+                        onPress={() => navigation.navigate('GuestManage')}
+                        activeOpacity={0.8}
+                    >
+                        <LinearGradient
+                            colors={isDarkMode ? ['#181B25', '#1A1D27'] : ['#EEF2FF', '#E8EDFF']}
+                            style={styles.guestManagerGradient}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                        >
+                            <View style={styles.guestManagerContent}>
+                                <View style={[styles.guestManagerIcon, { backgroundColor: '#8B5CF6' + '20' }]}>
+                                    <Ionicons name="people" size={26} color="#8B5CF6" />
+                                </View>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={[styles.guestManagerTitle, { color: theme.text }]}>{tr('home_guest_manager_card')}</Text>
+                                    <Text style={[styles.guestManagerDesc, { color: theme.textLight }]}>
+                                        {tr('home_guest_manager_desc')}
+                                    </Text>
+                                </View>
+                                <Ionicons name="chevron-forward" size={22} color={theme.textLight} />
+                            </View>
+                        </LinearGradient>
+                    </TouchableOpacity>
+
+                    {/* Banner Ads — pairs of 2 sliding horizontally */}
+                    {banners.length > 0 && (
+                        <View style={styles.bannerSection}>
+                            <FlatList
+                                data={banners.reduce((pairs, item, i) => {
+                                    if (i % 2 === 0) pairs.push([item]);
+                                    else pairs[pairs.length - 1].push(item);
+                                    return pairs;
+                                }, [])}
+                                renderItem={({ item: pair }) => {
+                                    const pageW = width - BANNER_EDGE_PAD * 2;
+                                    const colW = (pageW - BANNER_TILE_GAP) / 2;
+                                    return (
+                                        <View style={[styles.bannerPairPage, { width: pageW }]}>
+                                            {pair.map((banner) => {
+                                                const discount = bannerDiscountLabel(banner);
+                                                return (
+                                                    <TouchableOpacity
+                                                        key={banner.id}
+                                                        style={[styles.bannerBentoTile, { width: colW, height: 160 }]}
+                                                        activeOpacity={0.92}
+                                                    >
+                                                        <Image
+                                                            source={{
+                                                                uri:
+                                                                    banner.image_url ||
+                                                                    'https://images.unsplash.com/photo-1519741497674-611481863552?w=800',
+                                                            }}
+                                                            style={styles.bannerImage}
+                                                            resizeMode="cover"
+                                                        />
+                                                        <LinearGradient
+                                                            colors={['rgba(0,0,0,0.06)', 'rgba(0,0,0,0.82)']}
+                                                            style={styles.bannerOverlayFill}
+                                                        >
+                                                            {discount ? (
+                                                                <View style={[styles.bannerDiscountPill, { backgroundColor: colors.primary }]}>
+                                                                    <Text style={styles.bannerDiscountPillText}>{discount}</Text>
+                                                                </View>
+                                                            ) : null}
+                                                            <View style={styles.bannerTextBlock}>
+                                                                <Text style={styles.bannerBentoTitle} numberOfLines={2}>
+                                                                    {banner.title}
+                                                                </Text>
+                                                                {banner.subtitle ? (
+                                                                    <Text style={styles.bannerBentoSubtitle} numberOfLines={2}>
+                                                                        {banner.subtitle}
+                                                                    </Text>
+                                                                ) : null}
+                                                            </View>
+                                                        </LinearGradient>
+                                                    </TouchableOpacity>
+                                                );
+                                            })}
+                                        </View>
+                                    );
+                                }}
+                                keyExtractor={(_, i) => String(i)}
+                                horizontal
+                                showsHorizontalScrollIndicator={false}
+                                pagingEnabled
+                                decelerationRate="fast"
+                                contentContainerStyle={styles.bannerList}
+                            />
+                        </View>
+                    )}
+
                     {/* Help & Contact Us */}
                     <View style={[styles.helpSection, { backgroundColor: theme.card, borderColor: theme.border }]}>
                         <Text style={[styles.helpTitle, { color: theme.text }]}>{tr('home_need_help')}</Text>
@@ -1309,33 +1777,6 @@ export default function Home({ navigation }) {
                             </TouchableOpacity>
                         </View>
                     </View>
-
-                    {/* Guest Manager */}
-                    <TouchableOpacity
-                        style={[styles.guestManagerCard, { backgroundColor: theme.card, borderColor: theme.border }]}
-                        onPress={() => navigation.navigate('GuestManage')}
-                        activeOpacity={0.8}
-                    >
-                        <LinearGradient
-                            colors={isDarkMode ? ['#181B25', '#1A1D27'] : ['#EEF2FF', '#E8EDFF']}
-                            style={styles.guestManagerGradient}
-                            start={{ x: 0, y: 0 }}
-                            end={{ x: 1, y: 1 }}
-                        >
-                            <View style={styles.guestManagerContent}>
-                                <View style={[styles.guestManagerIcon, { backgroundColor: '#8B5CF6' + '20' }]}>
-                                    <Ionicons name="people" size={26} color="#8B5CF6" />
-                                </View>
-                                <View style={{ flex: 1 }}>
-                                    <Text style={[styles.guestManagerTitle, { color: theme.text }]}>{tr('home_guest_manager_card')}</Text>
-                                    <Text style={[styles.guestManagerDesc, { color: theme.textLight }]}>
-                                        {tr('home_guest_manager_desc')}
-                                    </Text>
-                                </View>
-                                <Ionicons name="chevron-forward" size={22} color={theme.textLight} />
-                            </View>
-                        </LinearGradient>
-                    </TouchableOpacity>
 
                     {testimonials.length > 0 ? (
                         <View style={[styles.testimonialsSection, { borderColor: theme.border, backgroundColor: theme.card }]}>
@@ -1528,34 +1969,10 @@ const styles = StyleSheet.create({
     locationLabel: { fontSize: 11, letterSpacing: 0.5, textTransform: 'uppercase', fontWeight: '600' },
     locationRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
     locationValue: { fontSize: 15, fontWeight: '700' },
-    headerActions: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 10,
-    },
-    headerIconBtn: {
-        width: 42,
+    /** Reserve space for global language + cart overlay */
+    headerRightSpacer: {
+        width: 100,
         height: 42,
-        borderRadius: 14,
-        alignItems: 'center',
-        justifyContent: 'center',
-        position: 'relative',
-    },
-    cartBadge: {
-        position: 'absolute',
-        top: -3,
-        right: -3,
-        minWidth: 18,
-        height: 18,
-        borderRadius: 9,
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingHorizontal: 4,
-    },
-    cartBadgeText: {
-        color: '#FFF',
-        fontSize: 10,
-        fontWeight: '800',
     },
     section: { marginBottom: 28 },
     sectionTitleRow: {
@@ -1570,6 +1987,235 @@ const styles = StyleSheet.create({
     sectionSubtitle: {
         fontSize: 13,
         marginTop: 3,
+    },
+    planTabRow: {
+        flexDirection: 'row',
+        paddingHorizontal: 20,
+        gap: 10,
+        marginBottom: 16,
+    },
+    planTabBtn: {
+        flex: 1,
+        paddingVertical: 12,
+        paddingHorizontal: 12,
+        borderRadius: 14,
+        borderWidth: 1.5,
+        alignItems: 'center',
+    },
+    planTabBtnText: {
+        fontSize: 14,
+        fontWeight: '600',
+    },
+    homeSpecialCenter: {
+        paddingVertical: 28,
+        alignItems: 'center',
+    },
+    homeSpecialEmpty: {
+        textAlign: 'center',
+        fontSize: 14,
+        paddingVertical: 20,
+    },
+    homeSpecialBody: {
+        paddingBottom: 4,
+    },
+    homeSpecialHScroll: {
+        flexGrow: 0,
+    },
+    homeSpecialHContent: {
+        flexDirection: 'row',
+        alignItems: 'stretch',
+        paddingLeft: 20,
+        paddingRight: 22,
+        paddingVertical: 10,
+        gap: 14,
+    },
+    homeSpecialCardRing: {
+        borderRadius: 22,
+        padding: 2,
+        overflow: 'hidden',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.14,
+        shadowRadius: 12,
+        elevation: 6,
+    },
+    homeSpecialCardInner: {
+        borderRadius: 19,
+        borderWidth: 1.5,
+        overflow: 'hidden',
+        paddingBottom: 10,
+    },
+    homeSpecialCardImgWrap: {
+        width: '100%',
+        aspectRatio: 1,
+        backgroundColor: '#E5E7EB',
+        borderTopLeftRadius: 17,
+        borderTopRightRadius: 17,
+        overflow: 'hidden',
+    },
+    homeSpecialCardImg: {
+        width: '100%',
+        height: '100%',
+    },
+    homeSpecialCardImgPh: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    homeSpecialCardName: {
+        fontSize: 13,
+        fontWeight: '700',
+        paddingHorizontal: 8,
+        marginTop: 8,
+        minHeight: 34,
+    },
+    homeSpecialCardFrom: {
+        fontSize: 12,
+        fontWeight: '700',
+        paddingHorizontal: 8,
+        marginTop: 4,
+    },
+    homeSpecialBrowseBtn: {
+        marginTop: 16,
+        borderRadius: 14,
+        overflow: 'hidden',
+        marginBottom: 8,
+    },
+    homeSpecialBrowseGrad: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 14,
+        gap: 8,
+    },
+    homeSpecialBrowseText: {
+        color: '#FFF',
+        fontSize: 15,
+        fontWeight: '800',
+    },
+    anonVendorsOuter: {
+        marginHorizontal: 0,
+        marginBottom: 20,
+        borderRadius: 0,
+        borderWidth: 0,
+        borderTopWidth: 1,
+        borderBottomWidth: 1,
+        padding: 0,
+        overflow: 'hidden',
+        position: 'relative',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.08,
+        shadowRadius: 12,
+        elevation: 4,
+    },
+    anonVendorsOuterGrad: {
+        ...StyleSheet.absoluteFillObject,
+    },
+    anonVendorsInner: {
+        zIndex: 1,
+        paddingTop: 16,
+        paddingBottom: 4,
+    },
+    anonVendorsHeader: {
+        marginBottom: 12,
+        paddingHorizontal: 20,
+    },
+    anonVendorsTitle: {
+        fontSize: 18,
+        fontWeight: '800',
+    },
+    anonVendorsSub: {
+        fontSize: 12,
+        marginTop: 4,
+        lineHeight: 17,
+    },
+    anonVendorsLoading: {
+        paddingVertical: 20,
+        alignItems: 'center',
+    },
+    anonVendorsScrollView: {
+        flexGrow: 0,
+    },
+    anonVendorsScroll: {
+        flexDirection: 'row',
+        flexWrap: 'nowrap',
+        alignItems: 'stretch',
+        paddingLeft: 20,
+        paddingRight: 20,
+        gap: 12,
+    },
+    anonVendorCard: {
+        width: ANON_PARTNER_CARD_W,
+        borderRadius: 20,
+        borderWidth: 1,
+        borderLeftWidth: 4,
+        overflow: 'hidden',
+        paddingBottom: 12,
+        marginRight: 0,
+    },
+    anonVendorStripScroll: {
+        width: '100%',
+        flexGrow: 0,
+        maxHeight: ANON_STRIP_BOX + 24,
+    },
+    anonVendorStripContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 10,
+        paddingVertical: 10,
+        gap: 10,
+    },
+    anonVendorStripBox: {
+        width: ANON_STRIP_BOX,
+        height: ANON_STRIP_BOX,
+        borderRadius: 14,
+        overflow: 'hidden',
+        backgroundColor: '#E8EAEF',
+    },
+    anonVendorStripImg: {
+        width: '100%',
+        height: '100%',
+    },
+    anonVendorServiceTile: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 4,
+    },
+    anonVendorServiceTileText: {
+        fontSize: 10,
+        fontWeight: '700',
+        marginTop: 4,
+        textAlign: 'center',
+        lineHeight: 13,
+    },
+    anonVendorStripPlaceholder: {
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    anonVendorCardFooter: {
+        paddingHorizontal: 12,
+        paddingTop: 4,
+        paddingBottom: 4,
+    },
+    anonVendorCity: {
+        fontSize: 14,
+        fontWeight: '800',
+    },
+    anonVendorSvc: {
+        fontSize: 12,
+        marginTop: 4,
+        lineHeight: 17,
+    },
+    anonVendorFooterHint: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        marginTop: 8,
+    },
+    anonVendorFooterHintText: {
+        fontSize: 12,
+        fontWeight: '700',
     },
     occasionRowSingle: {
         flexDirection: 'row',
@@ -1891,6 +2537,62 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         gap: 10,
     },
+    eventFormBanner: {
+        borderRadius: 18,
+        overflow: 'hidden',
+        borderWidth: 1,
+        borderColor: 'transparent',
+    },
+    eventFormBannerGrad: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 14,
+        paddingHorizontal: 14,
+    },
+    eventFormBannerIcon: {
+        width: 44,
+        height: 44,
+        borderRadius: 14,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 12,
+    },
+    eventFormBannerTitle: {
+        fontSize: 16,
+        fontWeight: '800',
+    },
+    eventFormBannerSub: {
+        fontSize: 12,
+        marginTop: 2,
+        lineHeight: 17,
+    },
+    userInfoModalRoot: {
+        flex: 1,
+    },
+    userInfoModalHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 8,
+        paddingVertical: 8,
+        borderBottomWidth: 1,
+    },
+    userInfoModalClose: {
+        width: 40,
+        height: 40,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    userInfoModalHeaderTitle: {
+        flex: 1,
+        textAlign: 'center',
+        fontSize: 17,
+        fontWeight: '800',
+    },
+    userInfoModalScroll: {
+        paddingHorizontal: 18,
+        paddingBottom: 36,
+    },
     formSection: {
         marginHorizontal: 16,
         marginBottom: 24,
@@ -2035,6 +2737,73 @@ const styles = StyleSheet.create({
         gap: 8,
     },
     submitBtnText: { color: '#FFF', fontSize: 16, fontWeight: '700' },
+    previewSection: {
+        marginHorizontal: 16,
+        borderRadius: 20,
+        borderWidth: 1,
+        padding: 16,
+        marginBottom: 16,
+    },
+    previewTitle: {
+        fontSize: 18,
+        fontWeight: '800',
+        marginBottom: 4,
+    },
+    previewSub: {
+        fontSize: 12,
+        marginBottom: 12,
+        lineHeight: 18,
+    },
+    previewLoading: {
+        paddingVertical: 24,
+        alignItems: 'center',
+    },
+    previewScroll: {
+        paddingRight: 8,
+    },
+    previewCard: {
+        width: 156,
+        borderRadius: 14,
+        borderWidth: 1,
+        overflow: 'hidden',
+        marginRight: 12,
+    },
+    previewCardGallery: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 4,
+        padding: 8,
+    },
+    previewCardThumb: {
+        width: 66,
+        height: 66,
+        borderRadius: 10,
+        backgroundColor: '#E5E7EB',
+    },
+    previewCardThumbPh: {
+        width: '100%',
+        minHeight: 136,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderRadius: 10,
+    },
+    previewCardImg: {
+        width: '100%',
+        height: 96,
+        backgroundColor: '#E5E7EB',
+    },
+    previewCardLabel: {
+        fontSize: 12,
+        fontWeight: '700',
+        paddingHorizontal: 10,
+        paddingTop: 4,
+    },
+    previewCardHint: {
+        fontSize: 11,
+        paddingHorizontal: 10,
+        paddingBottom: 10,
+        lineHeight: 15,
+    },
     helpSection: {
         marginHorizontal: 16,
         borderRadius: 20,

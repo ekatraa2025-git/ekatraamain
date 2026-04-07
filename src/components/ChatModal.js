@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, Modal, TouchableOpacity, TextInput, FlatList, KeyboardAvoidingView, Platform, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, StyleSheet, Modal, TouchableOpacity, TextInput, FlatList, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
+import { useToast } from '../context/ToastContext';
 import { api } from '../services/api';
 import { sanitizeAiDisplayText } from '../utils/sanitizeAiDisplayText';
 
@@ -19,6 +20,7 @@ function buildWelcomeMessages(city, occasionName) {
 
 export default function ChatModal({ visible, onClose, city, occasionId, occasionName, plannedBudgetInr }) {
     const { theme, isDarkMode } = useTheme();
+    const { showToast } = useToast();
     const insets = useSafeAreaInsets();
     const [messages, setMessages] = useState(() => buildWelcomeMessages(city, occasionName));
     const [inputText, setInputText] = useState('');
@@ -39,7 +41,11 @@ export default function ChatModal({ visible, onClose, city, occasionId, occasion
         const trimmed = inputText.trim();
         if (!trimmed || isTyping) return;
         if (trimmed.length > MAX_MESSAGE_LENGTH) {
-            Alert.alert('Message too long', `Please keep messages under ${MAX_MESSAGE_LENGTH} characters.`);
+            showToast({
+                variant: 'error',
+                title: 'Message too long',
+                message: `Please keep messages under ${MAX_MESSAGE_LENGTH} characters.`,
+            });
             return;
         }
 

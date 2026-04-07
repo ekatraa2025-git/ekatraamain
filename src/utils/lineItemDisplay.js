@@ -98,8 +98,9 @@ export function getLineItemParts(item) {
     const categoryName =
         svc.categories?.name ||
         svc.category?.name ||
-        (typeof opt.category === 'string' ? opt.category : null);
-    const serviceName = svc.name || item.name || 'Service';
+        (typeof opt.category === 'string' ? opt.category : null) ||
+        null;
+    const serviceName = svc.name || item.name || null;
     const idx = tierIndexFromOptions(opt);
     const tierName = getTierLabel(opt);
     const qtyLabel =
@@ -110,11 +111,23 @@ export function getLineItemParts(item) {
         opt.sub_variety ||
         (idx >= 0 ? svc[TIER_SUB_KEYS[idx]] : null) ||
         null;
+    const occasion =
+        typeof opt.occasion === 'string' && opt.occasion.trim() ? opt.occasion.trim() : null;
+    const unitRaw = item.unit_price;
+    const unitPrice =
+        unitRaw != null && unitRaw !== '' && Number.isFinite(Number(unitRaw)) ? Number(unitRaw) : null;
+    const quantity =
+        item.quantity != null && item.quantity !== '' && Number.isFinite(Number(item.quantity))
+            ? Number(item.quantity)
+            : null;
     return {
         categoryName,
         serviceName,
         tierName,
         qtyLabel,
         subVariety,
+        occasion,
+        unitPrice,
+        quantity,
     };
 }

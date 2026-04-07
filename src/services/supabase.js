@@ -187,16 +187,38 @@ export const authService = {
         }
     },
 
-    // Sign out
+    // Sign out — use local scope so clearing AsyncStorage never throws AuthSessionMissingError
     async signOut() {
-        const { error } = await supabase.auth.signOut();
+        const { error } = await supabase.auth.signOut({ scope: 'local' });
         return { error };
     },
 
-    // Get current session
+    // Get current session (may still have expired access_token until refreshed)
     async getSession() {
         const { data: { session }, error } = await supabase.auth.getSession();
         return { session, error };
+    },
+
+    /**
+     * Refresh access_token via refresh_token (fixes "Invalid or expired token" on backend JWT verify).
+     * Falls back to getSession if refresh is not possible.
+     */
+    async refreshSessionTokens() {
+        const { data: refreshed, error: refreshErr } = await supabase.auth.refreshSession();
+        if (refreshed?.session?.access_token) {
+            return { session: refreshed.session, error: null };
+        }
+        const { data: { session }, error } = await supabase.auth.getSession();
+        const expMs = session?.expires_at ? session.expires_at * 1000 : null;
+        const likelyExpired = expMs != null && expMs < Date.now() + 5000;
+        // Do not return a cached access_token that is already past expiry — backend getUser(JWT) will 401.
+        if (session?.access_token && likelyExpired) {
+            return {
+                session: null,
+                error: refreshErr || error || { message: 'Session expired. Sign in again.' },
+            };
+        }
+        return { session, error: error || refreshErr };
     },
 
     // Get current user

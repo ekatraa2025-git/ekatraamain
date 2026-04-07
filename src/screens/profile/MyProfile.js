@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity, TextInput, Alert, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, Image, TouchableOpacity, TextInput, ScrollView, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
@@ -7,9 +7,11 @@ import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../services/supabase';
 import BottomTabBar from '../../components/BottomTabBar';
+import { useToast } from '../../context/ToastContext';
 
 export default function MyProfile({ navigation }) {
     const { theme, isDarkMode } = useTheme();
+    const { showToast } = useToast();
     const { user, isAuthenticated } = useAuth();
     
     const [loading, setLoading] = useState(false);
@@ -76,26 +78,26 @@ export default function MyProfile({ navigation }) {
     const handleSave = async () => {
         const trimmedName = profile.full_name.trim();
         if (!trimmedName) {
-            Alert.alert('Error', 'Please enter your name');
+            showToast({ variant: 'error', title: 'Error', message: 'Please enter your name' });
             return;
         }
         if (trimmedName.length > 100) {
-            Alert.alert('Error', 'Name must be under 100 characters');
+            showToast({ variant: 'error', title: 'Error', message: 'Name must be under 100 characters' });
             return;
         }
         if (profile.phone) {
             const digits = profile.phone.replace(/\D/g, '');
             if (digits.length < 10 || digits.length > 15) {
-                Alert.alert('Error', 'Please enter a valid phone number');
+                showToast({ variant: 'error', title: 'Error', message: 'Please enter a valid phone number' });
                 return;
             }
         }
         if (profile.city && profile.city.length > 100) {
-            Alert.alert('Error', 'City name must be under 100 characters');
+            showToast({ variant: 'error', title: 'Error', message: 'City name must be under 100 characters' });
             return;
         }
         if (profile.address && profile.address.length > 300) {
-            Alert.alert('Error', 'Address must be under 300 characters');
+            showToast({ variant: 'error', title: 'Error', message: 'Address must be under 300 characters' });
             return;
         }
 
@@ -125,10 +127,10 @@ export default function MyProfile({ navigation }) {
                     updated_at: new Date().toISOString(),
                 }, { onConflict: 'id' });
 
-            Alert.alert('Success', 'Profile updated successfully!');
+            showToast({ variant: 'success', title: 'Success', message: 'Profile updated successfully!' });
         } catch (err) {
             console.log('[PROFILE] Save error:', err);
-            Alert.alert('Error', 'Failed to update profile. Please try again.');
+            showToast({ variant: 'error', title: 'Error', message: 'Failed to update profile. Please try again.' });
         } finally {
             setSaving(false);
         }

@@ -1,6 +1,19 @@
-import React from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import React, { useState, useCallback } from 'react';
+import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
+
+/** RN 7 may not export this from native — same logic as @react-navigation/core */
+function getFocusedRouteNameFromState(state) {
+    if (!state?.routes?.length) return undefined;
+    const index = state.index ?? 0;
+    const route = state.routes[index];
+    if (!route) return undefined;
+    if (route.state != null) {
+        return getFocusedRouteNameFromState(route.state);
+    }
+    return route.name;
+}
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import GlobalAppHeader from '../components/GlobalAppHeader';
 
 // Screens
 import Splash from '../screens/onboarding/Splash';
@@ -30,12 +43,41 @@ import MyOrders from '../screens/orders/MyOrders';
 import About from '../screens/about/About';
 import HelpSupport from '../screens/help/HelpSupport';
 import GuestManage from '../screens/guests/GuestManage';
+import NotificationsList from '../screens/notifications/NotificationsList';
 
 const Stack = createNativeStackNavigator();
 
+const SCREENS_WITHOUT_GLOBAL_HEADER = new Set([
+    'Splash',
+    'Onboarding',
+    'Login',
+    'Otp',
+    'Register',
+]);
+
 export default function AppNavigator() {
+    const [routeName, setRouteName] = useState(null);
+    const navigationRef = useNavigationContainerRef();
+
+    const onNavStateChange = useCallback((state) => {
+        if (!state) {
+            setRouteName(null);
+            return;
+        }
+        setRouteName(getFocusedRouteNameFromState(state) ?? null);
+    }, []);
+
+    const onReady = useCallback(() => {
+        const state = navigationRef.getRootState();
+        if (state) {
+            setRouteName(getFocusedRouteNameFromState(state) ?? null);
+        }
+    }, [navigationRef]);
+
+    const showGlobalHeader = routeName != null && !SCREENS_WITHOUT_GLOBAL_HEADER.has(routeName);
+
     return (
-        <NavigationContainer>
+        <NavigationContainer ref={navigationRef} onReady={onReady} onStateChange={onNavStateChange}>
             <Stack.Navigator
                 initialRouteName="Splash"
                 screenOptions={{
@@ -147,6 +189,11 @@ export default function AppNavigator() {
                     component={GuestManage}
                     options={{ animation: 'slide_from_right' }}
                 />
+                <Stack.Screen
+                    name="Notifications"
+                    component={NotificationsList}
+                    options={{ animation: 'slide_from_right' }}
+                />
 
                 {/* Auth Screens - Only shown when login is needed */}
                 <Stack.Screen
@@ -188,6 +235,7 @@ export default function AppNavigator() {
                     options={{ animation: 'slide_from_right' }}
                 />
             </Stack.Navigator>
+            <GlobalAppHeader visible={showGlobalHeader} />
         </NavigationContainer>
     );
 }

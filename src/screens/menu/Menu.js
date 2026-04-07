@@ -1,19 +1,23 @@
 import React from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity, Switch, Alert, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, Image, TouchableOpacity, Switch, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { useTheme } from '../../context/ThemeContext';
 import { useLocale } from '../../context/LocaleContext';
 import { useAuth } from '../../context/AuthContext';
+import { useUserNotifications } from '../../context/UserNotificationContext';
 import { useBackendApi } from '../../services/api';
 import BottomTabBar from '../../components/BottomTabBar';
+import { useToast } from '../../context/ToastContext';
 
 export default function Menu({ navigation }) {
     const { isDarkMode, toggleTheme, theme } = useTheme();
     const { t: tr } = useLocale();
+    const { showConfirm } = useToast();
     const { user, isAuthenticated, signOut } = useAuth();
     const useApi = useBackendApi();
+    const { unreadCount: notificationUnread } = useUserNotifications();
 
     // Get user display info
     const getUserName = () => {
@@ -40,24 +44,20 @@ export default function Menu({ navigation }) {
     };
 
     const handleLogout = () => {
-        Alert.alert(
-            tr('menu_logout'),
-            tr('menu_logout_confirm'),
-            [
-                { text: tr('button_cancel'), style: "cancel" },
-                {
-                    text: tr('menu_logout'),
-                    style: 'destructive',
-                    onPress: async () => {
-                        await signOut();
-                        navigation.reset({
-                            index: 0,
-                            routes: [{ name: 'Home' }],
-                        });
-                    }
-                }
-            ]
-        );
+        showConfirm({
+            title: tr('menu_logout'),
+            message: tr('menu_logout_confirm'),
+            cancelLabel: tr('button_cancel'),
+            confirmLabel: tr('menu_logout'),
+            destructive: true,
+            onConfirm: async () => {
+                await signOut();
+                navigation.reset({
+                    index: 0,
+                    routes: [{ name: 'Home' }],
+                });
+            },
+        });
     };
 
     const containerStyle = { flex: 1, backgroundColor: theme.background };
@@ -69,9 +69,27 @@ export default function Menu({ navigation }) {
         <SafeAreaView style={containerStyle} edges={['top', 'left', 'right']}>
             <View style={[styles.header, borderStyle]}>
                 <Text style={[styles.title, textStyle]}>{tr('menu_title')}</Text>
-                <TouchableOpacity onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.replace('Home')} style={styles.closeBtn}>
-                    <Ionicons name="close" size={28} color={theme.text} />
-                </TouchableOpacity>
+                <View style={styles.headerActions}>
+                    {isAuthenticated ? (
+                        <TouchableOpacity
+                            onPress={() => navigation.navigate('Notifications')}
+                            style={styles.headerIconBtn}
+                            accessibilityLabel={tr('notifications_title')}
+                        >
+                            <Ionicons name="notifications-outline" size={26} color={theme.text} />
+                            {notificationUnread > 0 ? (
+                                <View style={[styles.notifBadge, { backgroundColor: colors.primary }]}>
+                                    <Text style={styles.notifBadgeText}>
+                                        {notificationUnread > 99 ? '99+' : notificationUnread}
+                                    </Text>
+                                </View>
+                            ) : null}
+                        </TouchableOpacity>
+                    ) : null}
+                    <TouchableOpacity onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.replace('Home')} style={styles.closeBtn}>
+                        <Ionicons name="close" size={28} color={theme.text} />
+                    </TouchableOpacity>
+                </View>
             </View>
 
             <ScrollView contentContainerStyle={styles.scrollContent}>
@@ -122,10 +140,13 @@ export default function Menu({ navigation }) {
                         style={[styles.menuItem, borderStyle]}
                         onPress={() => {
                             if (!isAuthenticated) {
-                                Alert.alert(tr('menu_sign_in_title'), tr('menu_sign_in_msg'), [
-                                    { text: tr('button_cancel'), style: 'cancel' },
-                                    { text: tr('button_login'), onPress: () => navigation.navigate('Login') },
-                                ]);
+                                showConfirm({
+                                    title: tr('menu_sign_in_title'),
+                                    message: tr('menu_sign_in_msg'),
+                                    cancelLabel: tr('button_cancel'),
+                                    confirmLabel: tr('button_login'),
+                                    onConfirm: () => navigation.navigate('Login'),
+                                });
                                 return;
                             }
                             navigation.navigate('SavedRecommendations');
@@ -226,6 +247,31 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         padding: 20,
         borderBottomWidth: 1,
+    },
+    headerActions: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    headerIconBtn: {
+        padding: 6,
+        marginRight: 4,
+        position: 'relative',
+    },
+    notifBadge: {
+        position: 'absolute',
+        top: 2,
+        right: 2,
+        minWidth: 18,
+        height: 18,
+        borderRadius: 9,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 4,
+    },
+    notifBadgeText: {
+        color: '#FFF',
+        fontSize: 10,
+        fontWeight: '800',
     },
     title: {
         fontSize: 24,

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, KeyboardAvoidingView, Platform, TouchableWithoutFeedback, Keyboard, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, KeyboardAvoidingView, Platform, TouchableWithoutFeedback, Keyboard, TouchableOpacity, ActivityIndicator } from 'react-native';
 import UserTermsModal from '../../components/UserTermsModal';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -10,11 +10,13 @@ import { colors } from '../../theme/colors';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { useLocale } from '../../context/LocaleContext';
+import { useToast } from '../../context/ToastContext';
 import Logo from '../../components/Logo';
 
 export default function Login({ navigation, route }) {
     const { theme } = useTheme();
     const { t: tr } = useLocale();
+    const { showToast } = useToast();
     const { sendOtp, signInWithGoogle } = useAuth();
     const [phone, setPhone] = useState('');
     const [loading, setLoading] = useState(false);
@@ -28,7 +30,11 @@ export default function Login({ navigation, route }) {
         // Validate phone
         const cleanPhone = phone.replace(/\D/g, '');
         if (cleanPhone.length < 10) {
-            Alert.alert('Invalid Phone', 'Please enter a valid 10-digit phone number');
+            showToast({
+                variant: 'error',
+                title: 'Invalid phone',
+                message: 'Please enter a valid 10-digit phone number.',
+            });
             return;
         }
 
@@ -41,10 +47,10 @@ export default function Login({ navigation, route }) {
                     redirect: redirectAfterLogin,
                 });
             } else {
-                Alert.alert('Error', result.error || 'Failed to send OTP. Please try again.');
+                showToast({ variant: 'error', title: 'Error', message: result.error || 'Failed to send OTP. Please try again.' });
             }
         } catch (error) {
-            Alert.alert('Error', 'Something went wrong. Please try again.');
+            showToast({ variant: 'error', title: 'Error', message: 'Something went wrong. Please try again.' });
         } finally {
             setLoading(false);
         }
@@ -62,10 +68,10 @@ export default function Login({ navigation, route }) {
                     navigation.replace('Home');
                 }
             } else if (result.error) {
-                Alert.alert('Error', result.error || 'Google sign-in failed. Please try again.');
+                showToast({ variant: 'error', title: 'Error', message: result.error || 'Google sign-in failed. Please try again.' });
             }
         } catch (error) {
-            Alert.alert('Error', 'Something went wrong. Please try again.');
+            showToast({ variant: 'error', title: 'Error', message: 'Something went wrong. Please try again.' });
         } finally {
             setGoogleLoading(false);
         }

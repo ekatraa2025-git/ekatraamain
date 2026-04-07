@@ -7,7 +7,6 @@ import {
     TouchableOpacity,
     ScrollView,
     TextInput,
-    Alert,
     Platform,
     Image,
 } from 'react-native';
@@ -16,6 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
 import { colors } from '../theme/colors';
+import { useToast } from '../context/ToastContext';
 
 const TIER_LABELS = [
     { key: 'classic', label: 'Classic Value', priceKey: 'price_classic_value' },
@@ -34,6 +34,7 @@ export default function ServiceInfoModal({
     occasionName,
 }) {
     const { theme, isDarkMode } = useTheme();
+    const { showToast } = useToast();
     const { isAuthenticated, user } = useAuth();
 
     const [role, setRole] = useState(null);
@@ -126,11 +127,11 @@ export default function ServiceInfoModal({
 
     const handleSubmitRequest = () => {
         if (!contactName.trim()) {
-            Alert.alert('Required', 'Please enter your name.');
+            showToast({ variant: 'info', title: 'Required', message: 'Please enter your name.' });
             return;
         }
         if (!contactPhone.trim() || contactPhone.replace(/\D/g, '').length < 10) {
-            Alert.alert('Required', 'Please enter a valid phone number.');
+            showToast({ variant: 'info', title: 'Required', message: 'Please enter a valid phone number.' });
             return;
         }
         if (onSubmitRequest) {
@@ -148,7 +149,11 @@ export default function ServiceInfoModal({
             }).finally(() => setLoading(false));
             onClose();
         } else {
-            Alert.alert('Request submitted', 'Services under this category can be added to cart from the list below.');
+            showToast({
+                variant: 'success',
+                title: 'Request submitted',
+                message: 'Services under this category can be added to cart from the list below.',
+            });
             onClose();
         }
     };

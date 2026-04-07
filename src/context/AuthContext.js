@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { supabase, authService } from '../services/supabase';
 
 const AuthContext = createContext(undefined);
@@ -59,15 +59,30 @@ export function AuthProvider({ children }) {
         try {
             const { data, error } = await authService.verifyOtp(phone, token);
             if (error) throw error;
-            setUser(data.user);
-            setSession(data.session);
-            setIsAuthenticated(true);
-            return { success: true, data };
+            // Persisted session in AsyncStorage is source of truth (fixes payment / API token race)
+            const { session: persisted } = await authService.getSession();
+            const session = persisted ?? data?.session ?? null;
+            const user = session?.user ?? data?.user ?? null;
+            setSession(session);
+            setUser(user);
+            setIsAuthenticated(!!user);
+            return { success: true, data: { ...data, session, user } };
         } catch (error) {
             console.error('[AUTH] Verify OTP error:', error);
             return { success: false, error: error.message };
         }
     };
+
+    const refreshSession = useCallback(async () => {
+        const { session, error } = await authService.refreshSessionTokens();
+        if (error) {
+            console.error('[AUTH] refreshSession:', error);
+        }
+        setSession(session);
+        setUser(session?.user ?? null);
+        setIsAuthenticated(!!session?.user);
+        return session;
+    }, []);
 
     const signInWithGoogle = async () => {
         try {
@@ -86,15 +101,17 @@ export function AuthProvider({ children }) {
     const signOut = async () => {
         try {
             const { error } = await authService.signOut();
-            if (error) throw error;
+            if (error) {
+                console.warn('[AUTH] Sign out:', error.message || error);
+            }
+        } catch (error) {
+            console.warn('[AUTH] Sign out:', error?.message || error);
+        } finally {
             setUser(null);
             setSession(null);
             setIsAuthenticated(false);
-            return { success: true };
-        } catch (error) {
-            console.error('[AUTH] Sign out error:', error);
-            return { success: false, error: error.message };
         }
+        return { success: true };
     };
 
     const value = {
@@ -107,6 +124,7 @@ export function AuthProvider({ children }) {
         signInWithGoogle,
         signOut,
         checkSession,
+        refreshSession,
     };
 
     return (

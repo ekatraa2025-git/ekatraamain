@@ -10,11 +10,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { useTheme } from '../../context/ThemeContext';
+import { useLocale } from '../../context/LocaleContext';
 import BottomTabBar from '../../components/BottomTabBar';
-import { getLineItemParts, tierIndexFromOptions, TIER_ACCENT_COLORS } from '../../utils/lineItemDisplay';
+import OrderLineItemRows from '../../components/OrderLineItemRows';
 
 export default function OrderSummary({ route, navigation }) {
     const { theme } = useTheme();
+    const { t: tr } = useLocale();
     const {
         orderId,
         order,
@@ -43,7 +45,7 @@ export default function OrderSummary({ route, navigation }) {
                 <TouchableOpacity onPress={() => navigation.navigate('Home')} style={styles.backBtn}>
                     <Ionicons name="arrow-back" size={24} color={theme.text} />
                 </TouchableOpacity>
-                <Text style={[styles.headerTitle, { color: theme.text }]}>Order summary</Text>
+                <Text style={[styles.headerTitle, { color: theme.text }]}>{tr('order_summary_title')}</Text>
             </View>
 
             <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
@@ -51,90 +53,56 @@ export default function OrderSummary({ route, navigation }) {
                     <View style={styles.successIconWrap}>
                         <Ionicons name="checkmark-circle" size={56} color={colors.primary} />
                     </View>
-                    <Text style={[styles.successTitle, { color: theme.text }]}>Order placed successfully</Text>
+                    <Text style={[styles.successTitle, { color: theme.text }]}>{tr('order_placed_success')}</Text>
                     {orderId && (
                         <Text style={[styles.orderId, { color: theme.textLight }]}>Order #{(orderId + '').slice(-8)}</Text>
                     )}
                 </View>
 
-                <Text style={[styles.sectionTitle, { color: theme.text }]}>Services selected</Text>
-                {(cartItems || []).map((item, index) => {
-                    const parts = getLineItemParts(item);
-                    const accentIdx = tierIndexFromOptions(item.options);
-                    const accent =
-                        accentIdx >= 0
-                            ? TIER_ACCENT_COLORS[accentIdx % TIER_ACCENT_COLORS.length]
-                            : colors.primary;
-                    const tierLine = [parts.tierName, parts.qtyLabel].filter(Boolean).join(' · ');
-                    const price = Number(item.unit_price || 0);
-                    const qty = Number(item.quantity) || 1;
-                    const lineTotal = price * qty;
-                    return (
-                        <View
-                            key={item.id || index}
-                            style={[
-                                styles.itemCard,
-                                {
-                                    backgroundColor: theme.card,
-                                    borderLeftWidth: 4,
-                                    borderLeftColor: accent,
-                                },
-                            ]}
-                        >
-                            {parts.categoryName ? (
-                                <Text style={[styles.itemCat, { color: theme.textLight }]}>{parts.categoryName}</Text>
-                            ) : null}
-                            <Text style={[styles.itemName, { color: theme.text }]}>{parts.serviceName}</Text>
-                            {tierLine ? (
-                                <Text style={[styles.itemTier, { color: accent }]}>{tierLine}</Text>
-                            ) : null}
-                            {parts.subVariety ? (
-                                <Text style={[styles.itemSub, { color: theme.textLight }]}>{parts.subVariety}</Text>
-                            ) : null}
-                            <View style={styles.itemRow}>
-                                <Text style={[styles.itemMeta, { color: theme.textLight }]}>
-                                    ₹{price.toLocaleString()} × {qty}
-                                </Text>
-                                <Text style={[styles.itemTotal, { color: theme.text }]}>₹{lineTotal.toLocaleString()}</Text>
-                            </View>
-                        </View>
-                    );
-                })}
+                <Text style={[styles.sectionTitle, { color: theme.text }]}>{tr('order_services_selected')}</Text>
+                {(cartItems || []).map((item, index) => (
+                    <View
+                        key={item.id || index}
+                        style={[styles.itemCard, { backgroundColor: theme.card, borderColor: theme.border }]}
+                    >
+                        <OrderLineItemRows item={item} theme={theme} tr={tr} />
+                    </View>
+                ))}
 
                 <View style={[styles.totalCard, { backgroundColor: theme.card }]}>
                     {svcSub != null && prot > 0 ? (
                         <>
                             <View style={styles.totalRow}>
-                                <Text style={[styles.totalLabel, { color: theme.textLight }]}>Services subtotal</Text>
+                                <Text style={[styles.totalLabel, { color: theme.textLight }]}>{tr('order_services_subtotal')}</Text>
                                 <Text style={[styles.totalValue, { color: theme.text }]}>₹{svcSub.toLocaleString()}</Text>
                             </View>
                             <View style={styles.totalRow}>
-                                <Text style={[styles.totalLabel, { color: theme.textLight }]}>Booking protection</Text>
+                                <Text style={[styles.totalLabel, { color: theme.textLight }]}>{tr('order_booking_protection')}</Text>
                                 <Text style={[styles.totalValue, { color: theme.text }]}>₹{prot.toLocaleString()}</Text>
                             </View>
                         </>
                     ) : null}
                     <View style={styles.totalRow}>
-                        <Text style={[styles.totalLabel, { color: theme.text }]}>Total amount</Text>
+                        <Text style={[styles.totalLabel, { color: theme.text }]}>{tr('order_total_amount')}</Text>
                         <Text style={[styles.totalValue, { color: theme.text }]}>₹{displayGrand.toLocaleString()}</Text>
                     </View>
                     {advanceAmount != null && advanceAmount > 0 && (
                         <View style={styles.totalRow}>
-                            <Text style={[styles.totalLabel, { color: theme.textLight }]}>Advance paid (20%)</Text>
+                            <Text style={[styles.totalLabel, { color: theme.textLight }]}>{tr('order_advance_paid_20')}</Text>
                             <Text style={[styles.totalValue, { color: '#16a34a' }]}>₹{Number(advanceAmount).toLocaleString()}</Text>
                         </View>
                     )}
                     {balanceAmount != null && balanceAmount > 0 && (
                         <View style={styles.totalRow}>
                             <Text style={[styles.totalLabel, { color: theme.textLight }]}>
-                                {paymentMode === 'on_finalization' ? 'Pay on order finalization' : 'Balance payable'}
+                                {paymentMode === 'on_finalization' ? tr('order_pay_on_finalization') : tr('order_balance_payable')}
                             </Text>
                             <Text style={[styles.totalValue, { color: theme.text }]}>₹{Number(balanceAmount).toLocaleString()}</Text>
                         </View>
                     )}
                     {plannedBudget != null && plannedBudget > 0 && (
                         <View style={styles.totalRow}>
-                            <Text style={[styles.totalLabel, { color: theme.textLight }]}>Your budget</Text>
+                            <Text style={[styles.totalLabel, { color: theme.textLight }]}>{tr('order_your_budget')}</Text>
                             <Text style={[styles.totalValue, { color: theme.text }]}>₹{Number(plannedBudget).toLocaleString()}</Text>
                         </View>
                     )}
@@ -144,15 +112,13 @@ export default function OrderSummary({ route, navigation }) {
                     <View style={styles.vendorsIconWrap}>
                         <Ionicons name="people" size={32} color={colors.primary} />
                     </View>
-                    <Text style={[styles.vendorsTitle, { color: theme.text }]}>Vendors for your services</Text>
+                    <Text style={[styles.vendorsTitle, { color: theme.text }]}>{tr('order_vendors_title')}</Text>
                     <Text style={[styles.vendorsCount, { color: colors.primary }]}>
-                        {vendorsCountPlaceholder}+ vendors available
+                        {tr('order_vendors_count').replace('{n}', String(vendorsCountPlaceholder))}
                     </Text>
-                    <Text style={[styles.vendorsDesc, { color: theme.textLight }]}>
-                        Vendors are matched by service type and your budget. You'll receive quotes from vendors—compare prices and confirm from your order details.
-                    </Text>
+                    <Text style={[styles.vendorsDesc, { color: theme.textLight }]}>{tr('order_vendors_desc')}</Text>
                     <Text style={[styles.vendorsBreakdown, { color: theme.textLight }]}>
-                        {itemCount} service{itemCount !== 1 ? 's' : ''} selected. Each service may have multiple vendors; quotes will appear on the order detail screen as vendors respond.
+                        {tr('order_vendors_breakdown').replace('{count}', String(itemCount))}
                     </Text>
                 </View>
 
@@ -160,13 +126,13 @@ export default function OrderSummary({ route, navigation }) {
                     style={styles.primaryBtn}
                     onPress={() => navigation.navigate('OrderDetail', { orderId })}
                 >
-                    <Text style={styles.primaryBtnText}>View order details</Text>
+                    <Text style={styles.primaryBtnText}>{tr('order_view_details')}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                     style={[styles.secondaryBtn, { borderColor: colors.primary }]}
                     onPress={() => navigation.navigate('Home')}
                 >
-                    <Text style={[styles.secondaryBtnText, { color: colors.primary }]}>Back to home</Text>
+                    <Text style={[styles.secondaryBtnText, { color: colors.primary }]}>{tr('order_back_home')}</Text>
                 </TouchableOpacity>
             </ScrollView>
             <BottomTabBar navigation={navigation} activeRoute="MyOrders" />

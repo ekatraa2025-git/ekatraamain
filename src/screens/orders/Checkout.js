@@ -5,7 +5,6 @@ import {
     StyleSheet,
     ScrollView,
     TouchableOpacity,
-    Alert,
     ActivityIndicator,
     KeyboardAvoidingView,
     Platform,
@@ -21,6 +20,7 @@ import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import { useCart } from '../../context/CartContext';
 import BottomTabBar from '../../components/BottomTabBar';
+import { useToast } from '../../context/ToastContext';
 import {
     ADVANCE_PAYMENT_POLICY,
     CANCELLATION_POLICY,
@@ -65,7 +65,8 @@ const POLICY_KEYS = ['advance', 'cancellation', 'refund', 'terms', 'protection']
 export default function Checkout({ route, navigation }) {
     const { openCheckout, closeCheckout, RazorpayUI } = useRazorpay();
     const { theme } = useTheme();
-    const { isAuthenticated, user } = useAuth();
+    const { showToast } = useToast();
+    const { isAuthenticated, user, session, refreshSession } = useAuth();
     const { clearCart, cartItemCount } = useCart();
     const { cartId, userId: paramUserId, cart } = route.params || {};
 
@@ -124,21 +125,22 @@ export default function Checkout({ route, navigation }) {
     const handleSubmit = async () => {
         const uid = paramUserId || (isAuthenticated && user?.id ? user.id : null);
         if (!uid) {
-            Alert.alert('Login required', 'Please sign in to place an order.');
+            showToast({ variant: 'info', title: 'Login required', message: 'Please sign in to place an order.' });
             navigation.navigate('Login');
             return;
         }
         if (!cartId) {
-            Alert.alert('Error', 'No cart to checkout.');
+            showToast({ variant: 'error', title: 'Error', message: 'No cart to checkout.' });
             return;
         }
 
         if (!allPoliciesAgreed) {
             const pending = POLICY_KEYS.filter((k) => !agreements[k]).map((k) => POLICY_MODAL_LABELS[k] || k);
-            Alert.alert(
-                'Review policies',
-                `Please open each policy below and tap “I have read and agree”. Pending: ${pending.join(', ')}.`
-            );
+            showToast({
+                variant: 'info',
+                title: 'Review policies',
+                message: `Please open each policy below and tap “I have read and agree”. Pending: ${pending.join(', ')}.`,
+            });
             return;
         }
 
@@ -152,7 +154,11 @@ export default function Checkout({ route, navigation }) {
             });
             setSaving(false);
             if (error) {
-                Alert.alert('Checkout failed', error?.message || 'Could not place order. Please try again.');
+                showToast({
+                    variant: 'error',
+                    title: 'Checkout failed',
+                    message: error?.message || 'Could not place order. Please try again.',
+                });
                 return;
             }
             clearCart();
@@ -173,12 +179,21 @@ export default function Checkout({ route, navigation }) {
             return;
         }
 
+        const sessionForPay = await refreshSession();
+        const accessToken = sessionForPay?.access_token;
+        if (!accessToken) {
+            showToast({ variant: 'info', title: 'Login required', message: 'Please sign in again to complete payment.' });
+            navigation.navigate('Login');
+            return;
+        }
         setSaving(true);
-        const { data: paymentData, error: paymentErr } = await api.createPaymentOrder({
-            cart_id: cartId,
-            user_id: uid,
-            booking_protection: protectionPlanEnabled,
-        });
+        const { data: paymentData, error: paymentErr } = await api.createPaymentOrder(
+            {
+                cart_id: cartId,
+                booking_protection: protectionPlanEnabled,
+            },
+            accessToken
+        );
         setSaving(false);
         if (paymentErr || !paymentData?.razorpay_order_id) {
             let errMsg = paymentErr?.message || paymentData?.error || 'Could not create payment. Please try again.';
@@ -188,7 +203,7 @@ export default function Checkout({ route, navigation }) {
             } else if (errMsg.toLowerCase().includes('not found') || errMsg.toLowerCase().includes('endpoint')) {
                 hint = '\n\nRedeploy the backend to Vercel so payment routes are included. Or use local backend: set EXPO_PUBLIC_API_URL=http://localhost:3000 in ekatraa .env.';
             }
-            Alert.alert('Payment setup failed', errMsg + hint);
+            showToast({ variant: 'error', title: 'Payment setup failed', message: errMsg + hint });
             return;
         }
         openCheckout(
@@ -210,17 +225,36 @@ export default function Checkout({ route, navigation }) {
                 onSuccess: async (data) => {
                     closeCheckout();
                     setSaving(true);
-                    const { data: order, error: verifyErr } = await api.verifyPayment({
-                        razorpay_payment_id: data.razorpay_payment_id,
-                        razorpay_order_id: data.razorpay_order_id,
-                        razorpay_signature: data.razorpay_signature,
-                        cart_id: cartId,
-                        user_id: uid,
-                        booking_protection: protectionPlanEnabled,
-                    });
+                    const verifySess = await refreshSession();
+                    const verifyTok = verifySess?.access_token;
+                    if (!verifyTok) {
+                        setSaving(false);
+                        showToast({
+                            variant: 'error',
+                            title: 'Session expired',
+                            message: 'Sign in again to complete payment verification.',
+                        });
+                        navigation.navigate('Login');
+                        return;
+                    }
+                    const { data: order, error: verifyErr } = await api.verifyPayment(
+                        {
+                            razorpay_payment_id: data.razorpay_payment_id,
+                            razorpay_order_id: data.razorpay_order_id,
+                            razorpay_signature: data.razorpay_signature,
+                            cart_id: cartId,
+                            user_id: uid,
+                            booking_protection: protectionPlanEnabled,
+                        },
+                        verifyTok
+                    );
                     setSaving(false);
                     if (verifyErr) {
-                        Alert.alert('Verification failed', verifyErr.message || 'Payment could not be verified.');
+                        showToast({
+                            variant: 'error',
+                            title: 'Verification failed',
+                            message: verifyErr.message || 'Payment could not be verified.',
+                        });
                         return;
                     }
                     clearCart();
@@ -242,7 +276,11 @@ export default function Checkout({ route, navigation }) {
                     });
                 },
                 onFailure: (err) => {
-                    Alert.alert('Payment failed', err?.description || 'Payment could not be completed.');
+                    showToast({
+                        variant: 'error',
+                        title: 'Payment failed',
+                        message: err?.description || 'Payment could not be completed.',
+                    });
                 },
                 onClose: () => { },
             }

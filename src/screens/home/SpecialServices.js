@@ -6,20 +6,21 @@ import {
     ScrollView,
     TouchableOpacity,
     ActivityIndicator,
-    Alert,
     Dimensions,
-    Platform,
     FlatList,
+    Image,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { colors } from '../../theme/colors';
 import { useTheme } from '../../context/ThemeContext';
+import { useLocale } from '../../context/LocaleContext';
 import { useAuth } from '../../context/AuthContext';
 import { api, useBackendApi } from '../../services/api';
 import { resolveStorageUrl } from '../../services/supabase';
 import { useCart } from '../../context/CartContext';
+import { useToast } from '../../context/ToastContext';
 import BottomTabBar from '../../components/BottomTabBar';
 import { getOfferableTierRows } from '../../utils/lineItemDisplay';
 
@@ -35,9 +36,11 @@ function numPrice(v) {
 
 export default function SpecialServices({ route, navigation }) {
     const { theme, isDarkMode } = useTheme();
+    const { t: tr } = useLocale();
     const insets = useSafeAreaInsets();
     const { isAuthenticated, user } = useAuth();
     const { cartId: globalCartId, setCartId: setGlobalCartId, refreshCartCount } = useCart();
+    const { showToast } = useToast();
     const { occasionId, occasionName, city } = route.params || {};
 
     const [services, setServices] = useState([]);
@@ -55,7 +58,7 @@ export default function SpecialServices({ route, navigation }) {
         setLoading(true);
         const { data, error } = await api.getSpecialServices();
         if (error) {
-            Alert.alert('Could not load', error.message || 'Try again later.');
+            showToast({ variant: 'error', title: 'Could not load', message: error.message || 'Try again later.' });
             setServices([]);
         } else {
             const resolved = await Promise.all(
@@ -67,7 +70,7 @@ export default function SpecialServices({ route, navigation }) {
             setServices(resolved);
         }
         setLoading(false);
-    }, [useApi]);
+    }, [useApi, showToast]);
 
     useEffect(() => {
         load();
@@ -115,7 +118,7 @@ export default function SpecialServices({ route, navigation }) {
 
     const addToCart = async () => {
         if (selected.size === 0) {
-            Alert.alert('Select items', 'Choose at least one special add-on.');
+            showToast({ variant: 'info', title: 'Select items', message: 'Choose at least one special add-on.' });
             return;
         }
         setAdding(true);
@@ -157,12 +160,14 @@ export default function SpecialServices({ route, navigation }) {
                 if (e2) throw new Error(e2.message);
             }
             await refreshCartCount?.(cid);
-            Alert.alert('Added to cart', `${selected.size} item(s) added.`, [
-                { text: 'View cart', onPress: () => navigation.navigate('Cart') },
-                { text: 'OK', style: 'cancel' },
-            ]);
+            showToast({
+                variant: 'success',
+                title: 'Added to cart',
+                message: `${selected.size} item(s) added.`,
+                action: { label: 'View cart', onPress: () => navigation.navigate('Cart') },
+            });
         } catch (e) {
-            Alert.alert('Cart', e?.message || 'Could not add items.');
+            showToast({ variant: 'error', title: 'Cart', message: e?.message || 'Could not add items.' });
         } finally {
             setAdding(false);
         }
@@ -177,17 +182,15 @@ export default function SpecialServices({ route, navigation }) {
                     </View>
                 </TouchableOpacity>
                 <View style={{ flex: 1 }}>
-                    <Text style={[styles.headerTitle, { color: theme.text }]}>Special add-ons</Text>
-                    <Text style={[styles.headerSub, { color: theme.textLight }]}>
-                        For every occasion · curated extras
-                    </Text>
+                    <Text style={[styles.headerTitle, { color: theme.text }]}>{tr('special_catalog_title')}</Text>
+                    <Text style={[styles.headerSub, { color: theme.textLight }]}>{tr('special_catalog_header_sub')}</Text>
                 </View>
             </View>
 
             {loading ? (
                 <View style={styles.centered}>
                     <ActivityIndicator size="large" color={colors.primary} />
-                    <Text style={[styles.loadingText, { color: theme.textLight }]}>Loading catalogue…</Text>
+                    <Text style={[styles.loadingText, { color: theme.textLight }]}>{tr('special_catalog_loading')}</Text>
                 </View>
             ) : (
                 <ScrollView
@@ -195,22 +198,23 @@ export default function SpecialServices({ route, navigation }) {
                     showsVerticalScrollIndicator={false}
                 >
                     <LinearGradient
-                        colors={isDarkMode ? ['#312e81', '#1e1b4b'] : ['#4338CA', '#C2410C']}
+                        colors={isDarkMode ? ['#4c1d95', '#1e1b4b'] : ['#5B21B6', '#C2410C']}
                         start={{ x: 0, y: 0 }}
                         end={{ x: 1, y: 1 }}
                         style={styles.hero}
                     >
-                        <Ionicons name="gift" size={28} color="#FFF" />
-                        <Text style={styles.heroTitle}>Special add-ons for any occasion</Text>
-                        <Text style={styles.heroSub}>
-                            Create your digital e-invites (AI-enabled). Your budget, your shortlisted vendors, your ideas — pick a tier per add-on.
-                        </Text>
+                        <View style={styles.heroIconRow}>
+                            <Ionicons name="gift" size={26} color="#FFF" />
+                            <View style={styles.heroBadge}>
+                                <Text style={styles.heroBadgeText}>{tr('special_catalog_badge')}</Text>
+                            </View>
+                        </View>
+                        <Text style={styles.heroTitle}>{tr('special_catalog_hero_title')}</Text>
+                        <Text style={styles.heroSub}>{tr('special_catalog_hero_sub')}</Text>
                     </LinearGradient>
 
                     {services.length === 0 ? (
-                        <Text style={[styles.empty, { color: theme.textLight }]}>
-                            No special services yet. Ask your coordinator or check back soon.
-                        </Text>
+                        <Text style={[styles.empty, { color: theme.textLight }]}>{tr('special_catalog_empty')}</Text>
                     ) : (
                         <FlatList
                             data={services}
@@ -231,23 +235,42 @@ export default function SpecialServices({ route, navigation }) {
                                                 backgroundColor: theme.card,
                                                 borderColor: isOn ? colors.primary : theme.border,
                                             },
-                                            isOn && { shadowColor: colors.primary, shadowOpacity: 0.15, shadowRadius: 8 },
+                                            isOn && { shadowColor: colors.primary, shadowOpacity: 0.18, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },
                                         ]}
                                     >
-                                        <TouchableOpacity onPress={() => toggleService(svc)} activeOpacity={0.9}>
-                                            <View style={styles.gridCardTop}>
+                                        <TouchableOpacity onPress={() => toggleService(svc)} activeOpacity={0.92}>
+                                            <View style={styles.cardImageWrap}>
+                                                {svc.image_url ? (
+                                                    <Image source={{ uri: svc.image_url }} style={styles.cardImage} resizeMode="cover" />
+                                                ) : (
+                                                    <LinearGradient
+                                                        colors={isDarkMode ? ['#334155', '#1e293b'] : ['#E2E8F0', '#F8FAFC']}
+                                                        style={styles.cardImagePlaceholder}
+                                                    >
+                                                        <Ionicons name="sparkles" size={32} color={colors.primary} />
+                                                    </LinearGradient>
+                                                )}
+                                                <LinearGradient
+                                                    colors={['transparent', 'rgba(0,0,0,0.65)']}
+                                                    style={styles.cardImageScrim}
+                                                />
+                                                <View style={styles.cardImageBadge}>
+                                                    <Text style={styles.cardImageBadgeText}>{tr('special_catalog_badge')}</Text>
+                                                </View>
                                                 <View
                                                     style={[
-                                                        styles.check,
+                                                        styles.checkFloating,
                                                         {
-                                                            borderColor: isOn ? colors.primary : theme.border,
-                                                            backgroundColor: isOn ? colors.primary : 'transparent',
+                                                            borderColor: isOn ? '#FFF' : 'rgba(255,255,255,0.5)',
+                                                            backgroundColor: isOn ? colors.primary : 'rgba(0,0,0,0.35)',
                                                         },
                                                     ]}
                                                 >
-                                                    {isOn ? <Ionicons name="checkmark" size={16} color="#FFF" /> : null}
+                                                    {isOn ? <Ionicons name="checkmark" size={14} color="#FFF" /> : null}
                                                 </View>
-                                                <Text style={[styles.svcName, { color: theme.text, fontSize: 15 }]} numberOfLines={2}>
+                                            </View>
+                                            <View style={styles.cardBody}>
+                                                <Text style={[styles.svcName, { color: theme.text }]} numberOfLines={2}>
                                                     {svc.name}
                                                 </Text>
                                             </View>
@@ -266,7 +289,7 @@ export default function SpecialServices({ route, navigation }) {
                                                                 styles.tierChip,
                                                                 {
                                                                     borderColor: active ? t.color : theme.border,
-                                                                    backgroundColor: active ? t.color + '22' : 'transparent',
+                                                                    backgroundColor: active ? t.color + '22' : theme.background,
                                                                 },
                                                             ]}
                                                         >
@@ -276,6 +299,11 @@ export default function SpecialServices({ route, navigation }) {
                                                             <Text style={[styles.tierChipPrice, { color: t.color }]}>
                                                                 ₹{t.value.toLocaleString('en-IN')}
                                                             </Text>
+                                                            {t.subVariety ? (
+                                                                <Text style={[styles.tierSubVariety, { color: theme.textLight }]} numberOfLines={2}>
+                                                                    {t.subVariety}
+                                                                </Text>
+                                                            ) : null}
                                                         </TouchableOpacity>
                                                     );
                                                 })}
@@ -359,17 +387,71 @@ const styles = StyleSheet.create({
         padding: 18,
         marginBottom: 18,
     },
+    heroIconRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    heroBadge: {
+        backgroundColor: 'rgba(255,255,255,0.22)',
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 20,
+    },
+    heroBadgeText: { color: '#FFF', fontSize: 11, fontWeight: '800', letterSpacing: 0.4 },
     heroTitle: { color: '#FFF', fontSize: 18, fontWeight: '800', marginTop: 10 },
     heroSub: { color: 'rgba(255,255,255,0.9)', fontSize: 13, lineHeight: 19, marginTop: 6 },
     empty: { textAlign: 'center', marginTop: 40, paddingHorizontal: 24 },
     gridCard: {
-        borderRadius: 14,
+        borderRadius: 16,
         borderWidth: 1.5,
-        padding: 10,
+        padding: 0,
         overflow: 'hidden',
     },
+    cardImageWrap: {
+        width: '100%',
+        height: 108,
+        position: 'relative',
+        backgroundColor: '#E5E7EB',
+    },
+    cardImage: { width: '100%', height: '100%' },
+    cardImagePlaceholder: {
+        width: '100%',
+        height: '100%',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    cardImageScrim: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        bottom: 0,
+        height: '60%',
+    },
+    cardImageBadge: {
+        position: 'absolute',
+        left: 8,
+        bottom: 8,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: 8,
+    },
+    cardImageBadgeText: { color: '#FFF', fontSize: 9, fontWeight: '800', letterSpacing: 0.3 },
+    checkFloating: {
+        position: 'absolute',
+        top: 8,
+        right: 8,
+        width: 26,
+        height: 26,
+        borderRadius: 8,
+        borderWidth: 2,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    cardBody: { paddingHorizontal: 10, paddingTop: 10, paddingBottom: 2 },
     gridCardTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
-    tierChips: { marginTop: 8, gap: 6 },
+    tierChips: { marginTop: 4, paddingHorizontal: 10, paddingBottom: 10, gap: 6 },
     tierChip: {
         borderRadius: 10,
         borderWidth: 1,
@@ -379,6 +461,7 @@ const styles = StyleSheet.create({
     },
     tierChipLabel: { fontSize: 10, fontWeight: '700' },
     tierChipPrice: { fontSize: 13, fontWeight: '800', marginTop: 2 },
+    tierSubVariety: { fontSize: 9, marginTop: 4, lineHeight: 12 },
     tierHint: { fontSize: 11, marginTop: 6 },
     unitSmall: { fontSize: 10, marginTop: 4 },
     card: {

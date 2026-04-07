@@ -7,7 +7,6 @@ import {
     Pressable,
     Modal,
     ActivityIndicator,
-    Alert,
     Share,
     StyleSheet,
     Dimensions,
@@ -20,6 +19,7 @@ import Slider from '@react-native-community/slider';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '../context/ThemeContext';
+import { useToast } from '../context/ToastContext';
 import { api } from '../services/api';
 import { sanitizeAiDisplayText } from '../utils/sanitizeAiDisplayText';
 
@@ -116,6 +116,7 @@ export default function RecommendationBudgetModal({
     formSnapshot,
 }) {
     const { isDarkMode } = useTheme();
+    const { showToast } = useToast();
     const [modalBudgetInr, setModalBudgetInr] = useState(MIN_BUDGET_INR);
     const [categoryEdits, setCategoryEdits] = useState(null);
     const [narrative, setNarrative] = useState(null);
@@ -142,7 +143,11 @@ export default function RecommendationBudgetModal({
                     weights && typeof weights === 'object' && Object.keys(weights).length > 0 ? weights : undefined;
                 const { data: d, error } = await fetchRecommendationPage(inr, w);
                 if (error) {
-                    Alert.alert('Recommendations', error.message || 'Could not update recommendations.');
+                    showToast({
+                        variant: 'error',
+                        title: 'Recommendations',
+                        message: error.message || 'Could not update recommendations.',
+                    });
                     return;
                 }
                 if (d) setData(d);
@@ -150,7 +155,7 @@ export default function RecommendationBudgetModal({
                 setRecRefreshLoading(false);
             }
         },
-        [fetchRecommendationPage, setData]
+        [fetchRecommendationPage, setData, showToast]
     );
 
     const scheduleRefetch = useCallback(
@@ -278,7 +283,7 @@ export default function RecommendationBudgetModal({
         try {
             await Share.share({ message: buildShareText(), title: 'My Ekatraa budget plan' });
         } catch (e) {
-            Alert.alert('Share', e?.message || 'Could not share.');
+            showToast({ variant: 'error', title: 'Share', message: e?.message || 'Could not share.' });
         }
     };
 
@@ -310,9 +315,13 @@ export default function RecommendationBudgetModal({
                           : null,
             });
             if (error) throw new Error(error.message);
-            Alert.alert('Saved', 'Your budget plan was saved. Our team can review it.');
+            showToast({
+                variant: 'success',
+                title: 'Saved',
+                message: 'Your budget plan was saved. Our team can review it.',
+            });
         } catch (e) {
-            Alert.alert('Save failed', e?.message || 'Unknown error');
+            showToast({ variant: 'error', title: 'Save failed', message: e?.message || 'Unknown error' });
         } finally {
             setSavingSnapshot(false);
         }
@@ -320,7 +329,7 @@ export default function RecommendationBudgetModal({
 
     const handleAddToCart = async () => {
         if (selected.size === 0) {
-            Alert.alert('Select services', 'Choose at least one service and tier.');
+            showToast({ variant: 'info', title: 'Select services', message: 'Choose at least one service and tier.' });
             return;
         }
         setAddingCart(true);
@@ -330,6 +339,8 @@ export default function RecommendationBudgetModal({
                 const { data: created, error: cartErr } = await api.createCart({
                     session_id: 'app-' + Date.now(),
                     user_id: isAuthenticated && user?.id ? user.id : null,
+                    event_name: occasionName ?? null,
+                    event_role: formSnapshot?.role ?? null,
                     contact_name: formSnapshot?.contact_name ?? null,
                     contact_mobile: formSnapshot?.contact_mobile ?? null,
                     contact_email: formSnapshot?.contact_email ?? null,
@@ -345,6 +356,8 @@ export default function RecommendationBudgetModal({
                 if (cid) await setCartId(cid);
             } else {
                 await api.updateCart(cid, {
+                    event_name: occasionName ?? null,
+                    event_role: formSnapshot?.role ?? null,
                     contact_name: formSnapshot?.contact_name ?? null,
                     contact_mobile: formSnapshot?.contact_mobile ?? null,
                     contact_email: formSnapshot?.contact_email ?? null,
@@ -389,11 +402,14 @@ export default function RecommendationBudgetModal({
                 if (error) throw new Error(error.message);
             }
             refreshCartCount?.(cid);
-            Alert.alert('Added to cart', `${selected.size} item(s) added.`, [
-                { text: 'OK', onPress: () => onClose('cart') },
-            ]);
+            showToast({
+                variant: 'success',
+                title: 'Added to cart',
+                message: `${selected.size} item(s) added.`,
+                action: { label: 'OK', onPress: () => onClose('cart') },
+            });
         } catch (e) {
-            Alert.alert('Cart', e?.message || 'Could not add to cart.');
+            showToast({ variant: 'error', title: 'Cart', message: e?.message || 'Could not add to cart.' });
         } finally {
             setAddingCart(false);
         }

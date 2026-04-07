@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
     View, Text, StyleSheet, ScrollView, TouchableOpacity,
-    TextInput, Alert, FlatList, Modal, Share, ActivityIndicator,
+    TextInput, FlatList, Modal, Share, ActivityIndicator,
     Platform, Linking,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -16,6 +16,7 @@ import { useLocale } from '../../context/LocaleContext';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import BottomTabBar from '../../components/BottomTabBar';
+import { useToast } from '../../context/ToastContext';
 
 const TABS_LIST = ['Guests', 'Gifts', 'Invite'];
 
@@ -52,8 +53,15 @@ export default function GuestManage({ navigation }) {
     const insets = useSafeAreaInsets();
     const { theme, isDarkMode } = useTheme();
     const { t } = useLocale();
-    const { user, isAuthenticated } = useAuth();
+    const { showToast, showConfirm } = useToast();
+    const { user, isAuthenticated, refreshSession } = useAuth();
     const userId = user?.id;
+
+    /** Always refresh JWT before API calls — stale session.access_token causes "Invalid or expired token". */
+    const resolveAccessToken = useCallback(async () => {
+        const s = await refreshSession();
+        return s?.access_token ?? null;
+    }, [refreshSession]);
     const [activeTab, setActiveTab] = useState('Guests');
     const [guests, setGuests] = useState([]);
     const [gifts, setGifts] = useState([]);
@@ -113,12 +121,20 @@ export default function GuestManage({ navigation }) {
     const waChunks = useMemo(() => chunkArr(guestsWithPhoneList, 5), [guestsWithPhoneList]);
 
     const loadData = useCallback(async () => {
-        if (!userId) { setDataLoading(false); return; }
+        if (!userId) {
+            setDataLoading(false);
+            return;
+        }
         setDataLoading(true);
         try {
+            const token = await resolveAccessToken();
+            if (!token) {
+                setDataLoading(false);
+                return;
+            }
             const [guestRes, giftRes] = await Promise.all([
-                api.getGuests(userId),
-                api.getGifts(userId),
+                api.getGuests(token),
+                api.getGifts(token),
             ]);
             if (Array.isArray(guestRes.data)) setGuests(guestRes.data);
             if (Array.isArray(giftRes.data)) setGifts(giftRes.data);
@@ -127,7 +143,7 @@ export default function GuestManage({ navigation }) {
         } finally {
             setDataLoading(false);
         }
-    }, [userId]);
+    }, [userId, resolveAccessToken]);
 
     useFocusEffect(
         useCallback(() => {
@@ -140,42 +156,50 @@ export default function GuestManage({ navigation }) {
     const addGuest = async () => {
         const trimmedName = guestForm.name.trim();
         if (!trimmedName) {
-            Alert.alert('Required', 'Please enter guest name.');
+            showToast({ variant: 'info', title: 'Required', message: 'Please enter guest name.' });
             return;
         }
         if (trimmedName.length > GUEST_LIMITS.name) {
-            Alert.alert('Too long', `Name must be under ${GUEST_LIMITS.name} characters.`);
+            showToast({ variant: 'info', title: 'Too long', message: `Name must be under ${GUEST_LIMITS.name} characters.` });
             return;
         }
         const phoneDigits = guestForm.phone.replace(/\D/g, '');
         if (guestForm.phone && (phoneDigits.length < 10 || phoneDigits.length > 15)) {
-            Alert.alert('Invalid phone', 'Please enter a valid phone number.');
+            showToast({ variant: 'info', title: 'Invalid phone', message: 'Please enter a valid phone number.' });
             return;
         }
         if (!userId) {
-            Alert.alert('Login Required', 'Please login to manage guests.');
+            showToast({ variant: 'info', title: 'Login required', message: 'Please login to manage guests.' });
             navigation.navigate('Login');
             return;
         }
         setSaving(true);
         try {
-            const { data, error } = await api.addGuest({
-                user_id: userId,
-                name: trimmedName.substring(0, GUEST_LIMITS.name),
-                phone: guestForm.phone ? guestForm.phone.substring(0, GUEST_LIMITS.phone) : null,
-                relation: guestForm.relation ? guestForm.relation.substring(0, GUEST_LIMITS.relation) : null,
-                group_name: guestForm.group ? guestForm.group.substring(0, GUEST_LIMITS.group) : null,
-                notes: guestForm.notes ? guestForm.notes.substring(0, GUEST_LIMITS.notes) : null,
-                invited: true,
-                rsvp: 'pending',
-            });
+            const token = await resolveAccessToken();
+            if (!token) {
+                showToast({ variant: 'info', title: 'Login required', message: 'Please sign in again to manage guests.' });
+                navigation.navigate('Login');
+                return;
+            }
+            const { data, error } = await api.addGuest(
+                {
+                    name: trimmedName.substring(0, GUEST_LIMITS.name),
+                    phone: guestForm.phone ? guestForm.phone.substring(0, GUEST_LIMITS.phone) : null,
+                    relation: guestForm.relation ? guestForm.relation.substring(0, GUEST_LIMITS.relation) : null,
+                    group_name: guestForm.group ? guestForm.group.substring(0, GUEST_LIMITS.group) : null,
+                    notes: guestForm.notes ? guestForm.notes.substring(0, GUEST_LIMITS.notes) : null,
+                    invited: true,
+                    rsvp: 'pending',
+                },
+                token
+            );
             if (error) {
-                Alert.alert('Error', error.message || 'Failed to add guest.');
+                showToast({ variant: 'error', title: 'Error', message: error.message || 'Failed to add guest.' });
             } else if (data) {
                 setGuests(prev => [data, ...prev]);
             }
         } catch (e) {
-            Alert.alert('Error', 'Failed to add guest.');
+            showToast({ variant: 'error', title: 'Error', message: 'Failed to add guest.' });
         } finally {
             setSaving(false);
             setGuestForm({ name: '', phone: '', relation: '', group: '', notes: '' });
@@ -185,30 +209,38 @@ export default function GuestManage({ navigation }) {
 
     const addGift = async () => {
         if (!giftForm.guest_id) {
-            Alert.alert('Required', 'Please select a guest.');
+            showToast({ variant: 'info', title: 'Required', message: 'Please select a guest.' });
             return;
         }
         if (!userId) {
-            Alert.alert('Login Required', 'Please login to manage gifts.');
+            showToast({ variant: 'info', title: 'Login required', message: 'Please login to manage gifts.' });
             navigation.navigate('Login');
             return;
         }
         setSaving(true);
         try {
-            const { data, error } = await api.addGift({
-                user_id: userId,
-                guest_id: giftForm.guest_id,
-                type: giftForm.type || 'cash',
-                amount: giftForm.amount || '0',
-                description: giftForm.description || null,
-            });
+            const token = await resolveAccessToken();
+            if (!token) {
+                showToast({ variant: 'info', title: 'Login required', message: 'Please sign in again to manage gifts.' });
+                navigation.navigate('Login');
+                return;
+            }
+            const { data, error } = await api.addGift(
+                {
+                    guest_id: giftForm.guest_id,
+                    type: giftForm.type || 'cash',
+                    amount: giftForm.amount || '0',
+                    description: giftForm.description || null,
+                },
+                token
+            );
             if (error) {
-                Alert.alert('Error', error.message || 'Failed to save gift.');
+                showToast({ variant: 'error', title: 'Error', message: error.message || 'Failed to save gift.' });
             } else if (data) {
                 setGifts(prev => [data, ...prev]);
             }
         } catch (e) {
-            Alert.alert('Error', 'Failed to save gift.');
+            showToast({ variant: 'error', title: 'Error', message: 'Failed to save gift.' });
         } finally {
             setSaving(false);
             setGiftForm({ guest_id: '', type: 'cash', amount: '', description: '' });
@@ -218,36 +250,50 @@ export default function GuestManage({ navigation }) {
     };
 
     const removeGuest = (id) => {
-        Alert.alert('Remove Guest', 'Are you sure? Associated gifts will also be removed.', [
-            { text: 'Cancel', style: 'cancel' },
-            {
-                text: 'Remove', style: 'destructive', onPress: async () => {
-                    const { error } = await api.deleteGuest(id);
-                    if (!error) {
-                        setGuests(prev => prev.filter(g => g.id !== id));
-                        setGifts(prev => prev.filter(g => g.guest_id !== id));
-                    } else {
-                        Alert.alert('Error', 'Failed to remove guest.');
-                    }
+        showConfirm({
+            title: 'Remove guest',
+            message: 'Are you sure? Associated gifts will also be removed.',
+            cancelLabel: 'Cancel',
+            confirmLabel: 'Remove',
+            destructive: true,
+            onConfirm: async () => {
+                const token = await resolveAccessToken();
+                if (!token) {
+                    showToast({ variant: 'info', title: 'Login required', message: 'Please sign in again.' });
+                    return;
+                }
+                const { error } = await api.deleteGuest(id, token);
+                if (!error) {
+                    setGuests(prev => prev.filter(g => g.id !== id));
+                    setGifts(prev => prev.filter(g => g.guest_id !== id));
+                } else {
+                    showToast({ variant: 'error', title: 'Error', message: 'Failed to remove guest.' });
                 }
             },
-        ]);
+        });
     };
 
     const removeGift = (id) => {
-        Alert.alert('Remove Gift', 'Are you sure?', [
-            { text: 'Cancel', style: 'cancel' },
-            {
-                text: 'Remove', style: 'destructive', onPress: async () => {
-                    const { error } = await api.deleteGift(id);
-                    if (!error) {
-                        setGifts(prev => prev.filter(g => g.id !== id));
-                    } else {
-                        Alert.alert('Error', 'Failed to remove gift.');
-                    }
+        showConfirm({
+            title: 'Remove gift',
+            message: 'Are you sure?',
+            cancelLabel: 'Cancel',
+            confirmLabel: 'Remove',
+            destructive: true,
+            onConfirm: async () => {
+                const token = await resolveAccessToken();
+                if (!token) {
+                    showToast({ variant: 'info', title: 'Login required', message: 'Please sign in again.' });
+                    return;
+                }
+                const { error } = await api.deleteGift(id, token);
+                if (!error) {
+                    setGifts(prev => prev.filter(g => g.id !== id));
+                } else {
+                    showToast({ variant: 'error', title: 'Error', message: 'Failed to remove gift.' });
                 }
             },
-        ]);
+        });
     };
 
     const toggleRsvp = async (id) => {
@@ -255,7 +301,10 @@ export default function GuestManage({ navigation }) {
         if (!guest) return;
         const next = guest.rsvp === 'pending' ? 'confirmed' : guest.rsvp === 'confirmed' ? 'declined' : 'pending';
         setGuests(prev => prev.map(g => g.id === id ? { ...g, rsvp: next } : g));
-        await api.updateGuest(id, { rsvp: next });
+        const token = await resolveAccessToken();
+        if (token) {
+            await api.updateGuest(id, { rsvp: next }, token);
+        }
     };
 
     const loadPhoneContacts = async () => {
@@ -263,7 +312,11 @@ export default function GuestManage({ navigation }) {
         try {
             const { status } = await Contacts.requestPermissionsAsync();
             if (status !== 'granted') {
-                Alert.alert('Permission Required', 'Please allow access to contacts to import your guest list.');
+                showToast({
+                    variant: 'info',
+                    title: 'Permission required',
+                    message: 'Please allow access to contacts to import your guest list.',
+                });
                 setContactsLoading(false);
                 return;
             }
@@ -287,7 +340,11 @@ export default function GuestManage({ navigation }) {
             setShowImportContacts(true);
         } catch (e) {
             console.log('[CONTACTS ERROR]', e?.message || e);
-            Alert.alert('Error', `Could not load contacts: ${e?.message || 'Unknown error'}. Please try again.`);
+            showToast({
+                variant: 'error',
+                title: 'Error',
+                message: `Could not load contacts: ${e?.message || 'Unknown error'}. Please try again.`,
+            });
         } finally {
             setContactsLoading(false);
         }
@@ -304,13 +361,13 @@ export default function GuestManage({ navigation }) {
 
     const importSelectedContacts = async () => {
         if (!userId) {
-            Alert.alert('Login Required', 'Please login to import contacts.');
+            showToast({ variant: 'info', title: 'Login required', message: 'Please login to import contacts.' });
             navigation.navigate('Login');
             return;
         }
         const toImport = phoneContacts.filter(c => selectedContacts.has(c.id));
         if (toImport.length === 0) {
-            Alert.alert('No Selection', 'Please select at least one contact to import.');
+            showToast({ variant: 'info', title: 'No selection', message: 'Please select at least one contact to import.' });
             return;
         }
         const existingNames = new Set(guests.map(g => (g.name || '').toLowerCase().trim()));
@@ -333,15 +390,29 @@ export default function GuestManage({ navigation }) {
         if (newContacts.length === 0) {
             setShowImportContacts(false);
             setSelectedContacts(new Set());
-            Alert.alert('No New Contacts', `All ${toImport.length} selected contacts already exist in your guest list.`);
+            showToast({
+                variant: 'info',
+                title: 'No new contacts',
+                message: `All ${toImport.length} selected contacts already exist in your guest list.`,
+            });
             return;
         }
         setSaving(true);
         try {
-            const result = await api.bulkImportGuests({ user_id: userId, guests: newContacts });
+            const token = await resolveAccessToken();
+            if (!token) {
+                showToast({ variant: 'info', title: 'Login required', message: 'Please sign in again to import contacts.' });
+                setSaving(false);
+                return;
+            }
+            const result = await api.bulkImportGuests({ guests: newContacts }, token);
             console.log('[IMPORT RESULT]', JSON.stringify(result));
             if (result.error) {
-                Alert.alert('Import Error', result.error.message || 'Server returned an error. Please try again.');
+                showToast({
+                    variant: 'error',
+                    title: 'Import error',
+                    message: result.error.message || 'Server returned an error. Please try again.',
+                });
             } else {
                 const imported = result.data?.imported || newContacts.length;
                 if (result.data?.guests?.length) {
@@ -351,11 +422,19 @@ export default function GuestManage({ navigation }) {
                 }
                 setShowImportContacts(false);
                 setSelectedContacts(new Set());
-                Alert.alert('Imported', `${imported} contact${imported !== 1 ? 's' : ''} added.${skipped > 0 ? ` ${skipped} skipped (already exist).` : ''}`);
+                showToast({
+                    variant: 'success',
+                    title: 'Imported',
+                    message: `${imported} contact${imported !== 1 ? 's' : ''} added.${skipped > 0 ? ` ${skipped} skipped (already exist).` : ''}`,
+                });
             }
         } catch (e) {
             console.log('[IMPORT ERROR]', e?.message || e);
-            Alert.alert('Import Error', `Something went wrong: ${e?.message || 'Unknown error'}. Please try again.`);
+            showToast({
+                variant: 'error',
+                title: 'Import error',
+                message: `Something went wrong: ${e?.message || 'Unknown error'}. Please try again.`,
+            });
         } finally {
             setSaving(false);
         }
@@ -391,12 +470,12 @@ export default function GuestManage({ navigation }) {
         const url = `https://wa.me/${digits}?text=${encodeURIComponent(body)}`;
         const can = await Linking.canOpenURL(url);
         if (can) await Linking.openURL(url);
-        else Alert.alert('WhatsApp', 'Could not open WhatsApp for this number.');
+        else showToast({ variant: 'error', title: 'WhatsApp', message: 'Could not open WhatsApp for this number.' });
     };
 
     const runGenerateSamples = async () => {
         if (!inviteForm.eventName.trim()) {
-            Alert.alert('Required', 'Please enter event name.');
+            showToast({ variant: 'info', title: 'Required', message: 'Please enter event name.' });
             return;
         }
         setInviteAiLoadingSamples(true);
@@ -415,11 +494,11 @@ export default function GuestManage({ navigation }) {
                 variation: inviteVariation,
             });
             if (error) {
-                Alert.alert('Error', error.message || 'Could not generate samples.');
+                showToast({ variant: 'error', title: 'Error', message: error.message || 'Could not generate samples.' });
                 return;
             }
             if (data?.samples?.length) setInviteAiSamples(data.samples.slice(0, 3));
-            else Alert.alert('Samples', 'No samples returned. Try again.');
+            else showToast({ variant: 'info', title: 'Samples', message: 'No samples returned. Try again.' });
         } finally {
             setInviteAiLoadingSamples(false);
         }
@@ -427,7 +506,7 @@ export default function GuestManage({ navigation }) {
 
     const runGenerateFinal = async () => {
         if (!inviteForm.eventName.trim()) {
-            Alert.alert('Required', 'Please enter event name.');
+            showToast({ variant: 'info', title: 'Required', message: 'Please enter event name.' });
             return;
         }
         setInviteAiLoadingFinal(true);
@@ -446,11 +525,11 @@ export default function GuestManage({ navigation }) {
                 samples: inviteAiSamples,
             });
             if (error) {
-                Alert.alert('Error', error.message || 'Could not generate final invite.');
+                showToast({ variant: 'error', title: 'Error', message: error.message || 'Could not generate final invite.' });
                 return;
             }
             if (data?.final) setInviteAiFinal(String(data.final));
-            else Alert.alert('Final', 'No final text returned.');
+            else showToast({ variant: 'info', title: 'Final', message: 'No final text returned.' });
         } finally {
             setInviteAiLoadingFinal(false);
         }
@@ -458,11 +537,11 @@ export default function GuestManage({ navigation }) {
 
     const startWhatsappBatches = () => {
         if (!inviteForm.eventName.trim()) {
-            Alert.alert('Required', 'Please enter event name.');
+            showToast({ variant: 'info', title: 'Required', message: 'Please enter event name.' });
             return;
         }
         if (!guestsWithPhoneList.length) {
-            Alert.alert('WhatsApp', t('invite_wa_no_phone'));
+            showToast({ variant: 'info', title: 'WhatsApp', message: t('invite_wa_no_phone') });
             return;
         }
         setWaChunkIdx(0);
@@ -471,7 +550,7 @@ export default function GuestManage({ navigation }) {
 
     const shareInvitation = async () => {
         if (!inviteForm.eventName.trim()) {
-            Alert.alert('Required', 'Please enter event name.');
+            showToast({ variant: 'info', title: 'Required', message: 'Please enter event name.' });
             return;
         }
         const text = buildInvitationText();
@@ -482,7 +561,11 @@ export default function GuestManage({ navigation }) {
 
     const shareToSpecificGuest = async (guest) => {
         if (!inviteForm.eventName.trim()) {
-            Alert.alert('Fill Invitation', 'Please fill the invitation details first, then share.');
+            showToast({
+                variant: 'info',
+                title: 'Fill invitation',
+                message: 'Please fill the invitation details first, then share.',
+            });
             return;
         }
         const personalText = `Dear ${guest.name},\n\n${buildInvitationText()}`;
@@ -772,14 +855,13 @@ export default function GuestManage({ navigation }) {
                     <TouchableOpacity
                         style={[styles.shareBtnOutline, { borderColor: colors.primary }]}
                         onPress={() => {
-                            Alert.alert(
-                                t('invite_send_all'),
-                                `Share personalized invitations with ${guests.length} guest${guests.length !== 1 ? 's' : ''}?`,
-                                [
-                                    { text: 'Cancel', style: 'cancel' },
-                                    { text: 'Share', onPress: () => shareInvitation() },
-                                ]
-                            );
+                            showConfirm({
+                                title: t('invite_send_all'),
+                                message: `Share personalized invitations with ${guests.length} guest${guests.length !== 1 ? 's' : ''}?`,
+                                cancelLabel: 'Cancel',
+                                confirmLabel: 'Share',
+                                onConfirm: () => shareInvitation(),
+                            });
                         }}
                     >
                         <Ionicons name="people-outline" size={20} color={colors.primary} />
@@ -913,14 +995,14 @@ export default function GuestManage({ navigation }) {
                         <TouchableOpacity
                             style={[styles.importBtn, { backgroundColor: '#25D366' + '12', borderColor: '#25D366' + '30' }]}
                             onPress={() => {
-                                Alert.alert(
-                                    'Import from WhatsApp',
-                                    'To import WhatsApp group members:\n\n1. Open the WhatsApp group\n2. Tap group name → Members\n3. Long-press each contact → Add to Phone Contacts\n4. Then use "Import Contacts" here\n\nAlternatively, you can manually add guests using the + button.',
-                                    [
-                                        { text: 'Import Contacts', onPress: loadPhoneContacts },
-                                        { text: 'OK', style: 'cancel' },
-                                    ]
-                                );
+                                showConfirm({
+                                    title: 'Import from WhatsApp',
+                                    message:
+                                        'To import WhatsApp group members:\n\n1. Open the WhatsApp group\n2. Tap group name → Members\n3. Long-press each contact → Add to Phone Contacts\n4. Then use "Import Contacts" here\n\nAlternatively, you can manually add guests using the + button.',
+                                    cancelLabel: 'OK',
+                                    confirmLabel: 'Import Contacts',
+                                    onConfirm: () => loadPhoneContacts(),
+                                });
                             }}
                         >
                             <Ionicons name="logo-whatsapp" size={16} color="#25D366" />
@@ -1163,7 +1245,11 @@ export default function GuestManage({ navigation }) {
                                         onPress={() => {
                                             const msg = `Dear ${g.name},\n\n${buildInvitationText()}`;
                                             if (digits) openWhatsAppToNumber(digits, msg);
-                                            else Alert.alert('No number', 'This guest has no valid phone number.');
+                                            else showToast({
+                                                variant: 'info',
+                                                title: 'No number',
+                                                message: 'This guest has no valid phone number.',
+                                            });
                                         }}
                                     >
                                         <View style={{ flex: 1 }}>

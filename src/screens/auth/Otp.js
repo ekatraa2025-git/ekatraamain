@@ -1,16 +1,18 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert, Keyboard } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, Keyboard } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Button } from '../../components/Button';
 import { colors } from '../../theme/colors';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
+import { useToast } from '../../context/ToastContext';
 
 const OTP_LENGTH = 6;
 
 export default function Otp({ navigation, route }) {
     const { theme } = useTheme();
+    const { showToast } = useToast();
     const { verifyOtp, sendOtp } = useAuth();
     const { phone, redirect } = route.params;
     
@@ -58,7 +60,7 @@ export default function Otp({ navigation, route }) {
     const handleVerify = async (otpCode) => {
         const code = otpCode || otp.join('');
         if (code.length !== OTP_LENGTH) {
-            Alert.alert('Invalid OTP', 'Please enter the complete 6-digit OTP');
+            showToast({ variant: 'error', title: 'Invalid OTP', message: 'Please enter the complete 6-digit OTP.' });
             return;
         }
 
@@ -66,25 +68,24 @@ export default function Otp({ navigation, route }) {
         try {
             const result = await verifyOtp(phone, code);
             if (result.success) {
-                Alert.alert('Success', 'Login successful!', [
-                    {
-                        text: 'OK',
-                        onPress: () => {
-                            if (redirect) {
-                                navigation.navigate(redirect);
-                            } else {
-                                navigation.replace('Home');
-                            }
-                        }
-                    }
-                ]);
+                showToast({
+                    variant: 'success',
+                    title: 'Login successful!',
+                    message: 'Welcome to Ekatraa.',
+                    duration: 2200,
+                });
+                if (redirect) {
+                    navigation.replace(redirect);
+                } else {
+                    navigation.replace('Home');
+                }
             } else {
-                Alert.alert('Error', result.error || 'Invalid OTP. Please try again.');
+                showToast({ variant: 'error', title: 'Error', message: result.error || 'Invalid OTP. Please try again.' });
                 setOtp(Array(OTP_LENGTH).fill(''));
                 inputRefs.current[0]?.focus();
             }
         } catch (error) {
-            Alert.alert('Error', 'Something went wrong. Please try again.');
+            showToast({ variant: 'error', title: 'Error', message: 'Something went wrong. Please try again.' });
         } finally {
             setLoading(false);
         }
@@ -101,12 +102,12 @@ export default function Otp({ navigation, route }) {
         try {
             const result = await sendOtp(phone);
             if (result.success) {
-                Alert.alert('OTP Sent', 'A new OTP has been sent to your phone.');
+                showToast({ variant: 'success', title: 'OTP sent', message: 'A new OTP has been sent to your phone.' });
             } else {
-                Alert.alert('Error', result.error || 'Failed to resend OTP.');
+                showToast({ variant: 'error', title: 'Error', message: result.error || 'Failed to resend OTP.' });
             }
         } catch (error) {
-            Alert.alert('Error', 'Failed to resend OTP. Please try again.');
+            showToast({ variant: 'error', title: 'Error', message: 'Failed to resend OTP. Please try again.' });
         } finally {
             setResendLoading(false);
         }

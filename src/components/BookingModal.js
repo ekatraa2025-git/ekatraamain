@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, Modal, TouchableOpacity, ScrollView, TextInput, Alert, Platform, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, Modal, TouchableOpacity, ScrollView, TextInput, Platform, ActivityIndicator } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
@@ -7,9 +7,11 @@ import { useAuth } from '../context/AuthContext';
 import { dbService } from '../services/supabase';
 import { Button } from './Button';
 import { colors } from '../theme/colors';
+import { useToast } from '../context/ToastContext';
 
 export default function BookingModal({ visible, onClose, eventType, navigation }) {
     const { theme, isDarkMode } = useTheme();
+    const { showToast, showConfirm } = useToast();
     const { isAuthenticated, user } = useAuth();
     
     const [role, setRole] = useState(null);
@@ -39,36 +41,36 @@ export default function BookingModal({ visible, onClose, eventType, navigation }
         
         // Validation
         if (!role && (typeId === 'wedding' || typeId === 'janayu')) {
-            Alert.alert('Selection Required', 'Please select if you are the Groom, Bride, or Host.');
+            showToast({
+                variant: 'info',
+                title: 'Selection required',
+                message: 'Please select if you are the Groom, Bride, or Host.',
+            });
             return;
         }
 
         if (!contactName.trim()) {
-            Alert.alert('Required', 'Please enter your name.');
+            showToast({ variant: 'info', title: 'Required', message: 'Please enter your name.' });
             return;
         }
 
         if (!contactPhone.trim() || contactPhone.replace(/\D/g, '').length < 10) {
-            Alert.alert('Required', 'Please enter a valid phone number.');
+            showToast({ variant: 'info', title: 'Required', message: 'Please enter a valid phone number.' });
             return;
         }
 
         // Check if user is logged in for booking
         if (!isAuthenticated) {
-            Alert.alert(
-                'Login Required',
-                'Please login to submit your booking request.',
-                [
-                    { text: 'Cancel', style: 'cancel' },
-                    { 
-                        text: 'Login', 
-                        onPress: () => {
-                            onClose();
-                            navigation?.navigate('Login', { redirect: 'Home' });
-                        }
-                    }
-                ]
-            );
+            showConfirm({
+                title: 'Login required',
+                message: 'Please login to submit your booking request.',
+                cancelLabel: 'Cancel',
+                confirmLabel: 'Login',
+                onConfirm: () => {
+                    onClose();
+                    navigation?.navigate('Login', { redirect: 'Home' });
+                },
+            });
             return;
         }
 
@@ -96,24 +98,25 @@ export default function BookingModal({ visible, onClose, eventType, navigation }
                 throw error;
             }
 
-            Alert.alert(
-                'Request Received! 🎉',
-                'An Ekatraa manager will connect with you shortly with relevant quotes and venue options.',
-                [{ 
-                    text: 'OK', 
+            showToast({
+                variant: 'success',
+                title: 'Request received',
+                message: 'An Ekatraa manager will connect with you shortly with relevant quotes and venue options.',
+                action: {
+                    label: 'OK',
                     onPress: () => {
                         resetForm();
                         onClose();
-                    }
-                }]
-            );
+                    },
+                },
+            });
         } catch (error) {
             console.error('[ENQUIRY ERROR]', error);
-            Alert.alert(
-                'Error',
-                'Failed to submit your request. Please try again.',
-                [{ text: 'OK' }]
-            );
+            showToast({
+                variant: 'error',
+                title: 'Error',
+                message: 'Failed to submit your request. Please try again.',
+            });
         } finally {
             setLoading(false);
         }

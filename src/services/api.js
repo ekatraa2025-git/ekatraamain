@@ -238,6 +238,53 @@ async function patch(path, body = {}) {
     }
 }
 
+/** POST with Supabase access token (payments, guests, etc.). */
+async function postWithAuth(path, body = {}, accessToken, timeoutMs = REQUEST_TIMEOUT_MS) {
+    if (!API_BASE) return { data: null, error: { message: 'API URL not configured. Set EXPO_PUBLIC_API_URL in .env' } };
+    try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
+        const res = await fetchWithTimeout(
+            `${API_BASE}${path}`,
+            {
+                method: 'POST',
+                headers,
+                body: JSON.stringify(body),
+            },
+            timeoutMs
+        );
+        const contentType = res.headers.get('content-type') || '';
+        const data = contentType.includes('application/json') ? await res.json().catch(() => null) : null;
+        if (!res.ok) {
+            const msg = stringifyApiError(data?.error) || res.statusText;
+            return { data: null, error: { message: msg } };
+        }
+        if (shouldInvalidateCacheForMutation(path)) invalidateAllGetCache();
+        return { data, error: null };
+    } catch (e) {
+        return { data: null, error: { message: buildError(e) } };
+    }
+}
+
+/** DELETE with Supabase access token. */
+async function delWithAuth(path, accessToken) {
+    if (!API_BASE) return { data: null, error: { message: 'API URL not configured. Set EXPO_PUBLIC_API_URL in .env' } };
+    try {
+        const headers = {};
+        if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
+        const res = await fetchWithTimeout(`${API_BASE}${path}`, { method: 'DELETE', headers });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            const msg = stringifyApiError(data?.error) || res.statusText;
+            return { data: null, error: { message: msg } };
+        }
+        if (shouldInvalidateCacheForMutation(path)) invalidateAllGetCache();
+        return { data: data || {}, error: null };
+    } catch (e) {
+        return { data: null, error: { message: buildError(e) } };
+    }
+}
+
 /** PATCH with Supabase access token (order quotation accept/reject, etc.). */
 async function patchWithAuth(path, body = {}, accessToken) {
     if (!API_BASE) return { data: null, error: { message: 'API URL not configured. Set EXPO_PUBLIC_API_URL in .env' } };
@@ -387,11 +434,22 @@ export const api = {
     async checkout(body) {
         return post('/api/public/checkout', body);
     },
-    async createPaymentOrder(body) {
-        return post('/api/public/payment/create-order', body);
+    /**
+     * Razorpay advance order — backend requires Authorization: Bearer (Supabase access_token).
+     * @param {object} body - { cart_id, booking_protection? }
+     * @param {string} accessToken
+     */
+    async createPaymentOrder(body, accessToken) {
+        if (!accessToken) {
+            return { data: null, error: { message: 'Sign in to pay.' } };
+        }
+        return postWithAuth('/api/public/payment/create-order', body, accessToken);
     },
-    async verifyPayment(body) {
-        return post('/api/public/payment/verify', body);
+    async verifyPayment(body, accessToken) {
+        if (!accessToken) {
+            return { data: null, error: { message: 'Sign in to complete payment.' } };
+        }
+        return postWithAuth('/api/public/payment/verify', body, accessToken);
     },
     async getOrders(userId) {
         return get('/api/public/orders', { user_id: userId });
@@ -416,28 +474,60 @@ export const api = {
         }
         return patchWithAuth(`/api/public/orders/${orderId}/quotation/${quotationId}`, { action }, accessToken);
     },
-    async createBalancePaymentOrder(body) {
-        return post('/api/public/payment/create-balance-order', body);
+    /** Accept vendor final invoice (updates order total for balance payment). */
+    async acceptVendorInvoice(orderId, accessToken) {
+        if (!accessToken) {
+            return { data: null, error: { message: 'Sign in to continue.' } };
+        }
+        return postWithAuth(`/api/public/orders/${orderId}/invoice/accept`, {}, accessToken);
     },
-    async verifyBalancePayment(body) {
-        return post('/api/public/payment/verify-balance', body);
+    async createBalancePaymentOrder(body, accessToken) {
+        if (!accessToken) {
+            return { data: null, error: { message: 'Sign in to pay.' } };
+        }
+        return postWithAuth('/api/public/payment/create-balance-order', body, accessToken);
+    },
+    /**
+     * Balance payment verification — backend requires Authorization: Bearer (same as create-balance-order).
+     * @param {string} accessToken - Supabase session access_token
+     */
+    async verifyBalancePayment(body, accessToken) {
+        if (!accessToken) {
+            return { data: null, error: { message: 'Sign in to complete payment.' } };
+        }
+        return postWithAuth('/api/public/payment/verify-balance', body, accessToken);
     },
 
-    // Guests
-    async getGuests(userId) {
-        return get('/api/public/guests', { user_id: userId });
+    // Guests (backend uses Bearer token; user_id from JWT)
+    async getGuests(accessToken) {
+        if (!accessToken) {
+            return { data: null, error: { message: 'Sign in to manage guests.' } };
+        }
+        return getWithAuth('/api/public/guests', {}, accessToken);
     },
-    async addGuest(body) {
-        return post('/api/public/guests', body);
+    async addGuest(body, accessToken) {
+        if (!accessToken) {
+            return { data: null, error: { message: 'Sign in to add guests.' } };
+        }
+        return postWithAuth('/api/public/guests', body, accessToken);
     },
-    async updateGuest(guestId, body) {
-        return patch(`/api/public/guests/${guestId}`, body);
+    async updateGuest(guestId, body, accessToken) {
+        if (!accessToken) {
+            return { data: null, error: { message: 'Sign in to update guests.' } };
+        }
+        return patchWithAuth(`/api/public/guests/${guestId}`, body, accessToken);
     },
-    async deleteGuest(guestId) {
-        return del(`/api/public/guests/${guestId}`);
+    async deleteGuest(guestId, accessToken) {
+        if (!accessToken) {
+            return { data: null, error: { message: 'Sign in to delete guests.' } };
+        }
+        return delWithAuth(`/api/public/guests/${guestId}`, accessToken);
     },
-    async bulkImportGuests(body) {
-        return post('/api/public/guests/bulk', body);
+    async bulkImportGuests(body, accessToken) {
+        if (!accessToken) {
+            return { data: null, error: { message: 'Sign in to import guests.' } };
+        }
+        return postWithAuth('/api/public/guests/bulk', body, accessToken);
     },
 
     /** Public app copy (en / hi / or) from admin translations. */
@@ -451,14 +541,23 @@ export const api = {
     },
 
     // Gifts
-    async getGifts(userId) {
-        return get('/api/public/gifts', { user_id: userId });
+    async getGifts(accessToken) {
+        if (!accessToken) {
+            return { data: null, error: { message: 'Sign in to view gifts.' } };
+        }
+        return getWithAuth('/api/public/gifts', {}, accessToken);
     },
-    async addGift(body) {
-        return post('/api/public/gifts', body);
+    async addGift(body, accessToken) {
+        if (!accessToken) {
+            return { data: null, error: { message: 'Sign in to add gifts.' } };
+        }
+        return postWithAuth('/api/public/gifts', body, accessToken);
     },
-    async deleteGift(giftId) {
-        return del(`/api/public/gifts/${giftId}`);
+    async deleteGift(giftId, accessToken) {
+        if (!accessToken) {
+            return { data: null, error: { message: 'Sign in to delete gifts.' } };
+        }
+        return delWithAuth(`/api/public/gifts/${giftId}`, accessToken);
     },
 };
 

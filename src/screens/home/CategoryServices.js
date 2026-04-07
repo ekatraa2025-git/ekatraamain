@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
     View, Text, StyleSheet, ScrollView, Image,
-    TouchableOpacity, TextInput, Alert, ActivityIndicator,
+    TouchableOpacity, TextInput, ActivityIndicator,
     Dimensions, Animated, LayoutAnimation, Platform,
     Modal, Linking, KeyboardAvoidingView, UIManager,
 } from 'react-native';
@@ -15,6 +15,7 @@ import { useEventForm } from '../../context/EventFormContext';
 import { api, useBackendApi } from '../../services/api';
 import { supabase, resolveStorageUrl } from '../../services/supabase';
 import { useCart } from '../../context/CartContext';
+import { useToast } from '../../context/ToastContext';
 import BottomTabBar from '../../components/BottomTabBar';
 import { TIER_SUB_KEYS } from '../../utils/lineItemDisplay';
 
@@ -35,12 +36,19 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
     UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
+/** At least 10 digits (handles spaces / +91). */
+function isValidPhoneDigits(mobile) {
+    const d = String(mobile || '').replace(/\D/g, '');
+    return d.length >= 10;
+}
+
 export default function CategoryServices({ route, navigation }) {
     const { theme, isDarkMode } = useTheme();
     const insets = useSafeAreaInsets();
     const { isAuthenticated, user } = useAuth();
     const { eventForm } = useEventForm();
     const { cartId: globalCartId, setCartId: setGlobalCartId, refreshCartCount } = useCart();
+    const { showToast } = useToast();
 
     const {
         categoryIds = [],
@@ -186,11 +194,23 @@ export default function CategoryServices({ route, navigation }) {
 
     const handleAddToCart = async () => {
         if (selectedServices.size === 0) {
-            Alert.alert('Select Services', 'Please select at least one service.');
+            showToast({
+                variant: 'info',
+                title: 'Select services',
+                message: 'Please select at least one service to add to your cart.',
+            });
+            return;
+        }
+        if (!occasionName || !String(occasionName).trim()) {
+            showToast({
+                variant: 'error',
+                title: 'Occasion required',
+                message: 'Go back to Home, select an occasion, then open categories again.',
+            });
             return;
         }
         const effectiveForm = getEffectiveForm();
-        if (!effectiveForm.contact_name.trim() || !effectiveForm.contact_mobile.trim()) {
+        if (!effectiveForm.contact_name.trim() || !isValidPhoneDigits(effectiveForm.contact_mobile)) {
             setShowContactModal(true);
             return;
         }
@@ -203,7 +223,7 @@ export default function CategoryServices({ route, navigation }) {
                 user_id: isAuthenticated && user?.id ? user.id : null,
             });
             if (cartErr) {
-                Alert.alert('Error', cartErr.message);
+                showToast({ variant: 'error', title: 'Cart error', message: cartErr.message });
                 setAdding(false);
                 return;
             }
@@ -216,8 +236,10 @@ export default function CategoryServices({ route, navigation }) {
         if (!cid) { setAdding(false); return; }
 
         const cartPayload = {
-            contact_name: effectiveForm.contact_name || null,
-            contact_mobile: effectiveForm.contact_mobile || null,
+            event_name: String(occasionName).trim(),
+            event_role: effectiveForm.role || null,
+            contact_name: effectiveForm.contact_name.trim(),
+            contact_mobile: effectiveForm.contact_mobile.trim(),
             contact_email: effectiveForm.contact_email || null,
             event_date: effectiveForm.event_date || null,
             guest_count: effectiveForm.guest_count || null,
@@ -250,19 +272,34 @@ export default function CategoryServices({ route, navigation }) {
         setAdding(false);
         setShowContactModal(false);
         refreshCartCount(cid);
-        Alert.alert(
-            'Added to Cart',
-            `${selectedServices.size} service(s) added successfully!`,
-            [
-                { text: 'Continue Shopping', onPress: () => navigation.goBack() },
-                { text: 'View Cart', onPress: () => navigation.navigate('Cart') },
-            ]
-        );
+        const n = selectedServices.size;
+        showToast({
+            variant: 'success',
+            title: 'Added to cart',
+            message: `${n} service${n === 1 ? '' : 's'} saved. Continue browsing or open your cart.`,
+            action: { label: 'View cart', onPress: () => navigation.navigate('Cart') },
+        });
     };
 
     const handleContactModalSubmit = () => {
-        if (!contactModalForm.contact_name.trim() || !contactModalForm.contact_mobile.trim()) {
-            Alert.alert('Required', 'Please fill in your name and mobile number.');
+        if (!occasionName || !String(occasionName).trim()) {
+            showToast({
+                variant: 'error',
+                title: 'Occasion required',
+                message: 'Go back to Home and select an occasion first.',
+            });
+            return;
+        }
+        if (!contactModalForm.contact_name.trim()) {
+            showToast({ variant: 'error', title: 'Name required', message: 'Please enter your name.' });
+            return;
+        }
+        if (!isValidPhoneDigits(contactModalForm.contact_mobile)) {
+            showToast({
+                variant: 'error',
+                title: 'Valid phone required',
+                message: 'Enter a mobile number with at least 10 digits.',
+            });
             return;
         }
         handleAddToCart();
@@ -346,8 +383,19 @@ export default function CategoryServices({ route, navigation }) {
                                 <View style={[styles.contactModalContent, { backgroundColor: theme.card }]}>
                                     <Text style={[styles.contactModalTitle, { color: theme.text }]}>Contact Details Required</Text>
                                     <Text style={[styles.contactModalSubtitle, { color: theme.textLight }]}>
-                                        Please provide your name and phone to add items to cart.
+                                        Occasion is set from your selection. Enter your name and phone to add items to cart.
                                     </Text>
+                                    <View style={[styles.contactModalInputWrap, { backgroundColor: isDarkMode ? '#1F2333' : '#FFF', borderColor: theme.border }]}>
+                                        <Ionicons name="sparkles-outline" size={16} color={theme.textLight} />
+                                        <View style={{ flex: 1, paddingVertical: 10 }}>
+                                            <Text style={{ fontSize: 11, fontWeight: '700', color: theme.textLight, textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                                                Occasion
+                                            </Text>
+                                            <Text style={{ fontSize: 15, fontWeight: '600', color: theme.text, marginTop: 2 }} numberOfLines={2}>
+                                                {occasionName || '—'}
+                                            </Text>
+                                        </View>
+                                    </View>
                                     <View style={[styles.contactModalInputWrap, { backgroundColor: isDarkMode ? '#1F2333' : '#FFF', borderColor: theme.border }]}>
                                         <Ionicons name="person-outline" size={16} color={theme.textLight} />
                                         <TextInput

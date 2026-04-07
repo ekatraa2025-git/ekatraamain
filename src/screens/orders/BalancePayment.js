@@ -5,7 +5,6 @@ import {
     StyleSheet,
     ScrollView,
     TouchableOpacity,
-    Alert,
     ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -16,6 +15,7 @@ import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import BottomTabBar from '../../components/BottomTabBar';
+import { useToast } from '../../context/ToastContext';
 
 const PAYMENT_OPTIONS = [
     { key: 'razorpay', label: 'Pay Now', desc: 'Pay balance via card, UPI, netbanking', icon: 'card' },
@@ -25,7 +25,8 @@ const PAYMENT_OPTIONS = [
 export default function BalancePayment({ route, navigation }) {
     const { openCheckout, closeCheckout, RazorpayUI } = useRazorpay();
     const { theme } = useTheme();
-    const { isAuthenticated, user } = useAuth();
+    const { showToast, showConfirm } = useToast();
+    const { isAuthenticated, user, session, refreshSession } = useAuth();
     const { orderId, order, balanceAmount } = route.params || {};
 
     const [paymentMode, setPaymentMode] = useState('razorpay');
@@ -34,41 +35,47 @@ export default function BalancePayment({ route, navigation }) {
     const handleSubmit = async () => {
         const uid = isAuthenticated && user?.id ? user.id : null;
         if (!uid) {
-            Alert.alert('Login required', 'Please sign in to pay.');
+            showToast({ variant: 'info', title: 'Login required', message: 'Please sign in to pay.' });
             navigation.navigate('Login');
             return;
         }
         if (!orderId) {
-            Alert.alert('Error', 'No order specified.');
+            showToast({ variant: 'error', title: 'Error', message: 'No order specified.' });
             return;
         }
 
         if (paymentMode === 'cod') {
-            Alert.alert(
-                'Pay on Delivery',
-                `Balance of ₹${(balanceAmount || 0).toLocaleString()} will be collected when your order is delivered.`,
-                [
-                    { text: 'Cancel', style: 'cancel' },
-                    {
-                        text: 'Confirm',
-                        onPress: () => {
-                            navigation.replace('OrderDetail', { orderId });
-                        },
-                    },
-                ]
-            );
+            showConfirm({
+                title: 'Pay on Delivery',
+                message: `Balance of ₹${(balanceAmount || 0).toLocaleString()} will be collected when your order is delivered.`,
+                cancelLabel: 'Cancel',
+                confirmLabel: 'Confirm',
+                onConfirm: () => {
+                    navigation.replace('OrderDetail', { orderId });
+                },
+            });
             return;
         }
 
+        const sessionForPay = await refreshSession();
+        const accessToken = sessionForPay?.access_token;
+        if (!accessToken) {
+            showToast({ variant: 'info', title: 'Login required', message: 'Please sign in again to pay.' });
+            navigation.navigate('Login');
+            return;
+        }
         setSaving(true);
-        const { data: paymentData, error: paymentErr } = await api.createBalancePaymentOrder({
-            order_id: orderId,
-            user_id: uid,
-        });
+        const { data: paymentData, error: paymentErr } = await api.createBalancePaymentOrder(
+            {
+                order_id: orderId,
+                user_id: uid,
+            },
+            accessToken
+        );
         setSaving(false);
         if (paymentErr || !paymentData?.razorpay_order_id) {
             const errMsg = paymentErr?.message || paymentData?.error || 'Could not create payment.';
-            Alert.alert('Payment setup failed', errMsg);
+            showToast({ variant: 'error', title: 'Payment setup failed', message: errMsg });
             return;
         }
         openCheckout(
@@ -90,22 +97,44 @@ export default function BalancePayment({ route, navigation }) {
                 onSuccess: async (data) => {
                     closeCheckout();
                     setSaving(true);
-                    const { data: updated, error: verifyErr } = await api.verifyBalancePayment({
-                        razorpay_payment_id: data.razorpay_payment_id,
-                        razorpay_order_id: data.razorpay_order_id,
-                        razorpay_signature: data.razorpay_signature,
-                        order_id: orderId,
-                        user_id: uid,
-                    });
+                    const verifySess = await refreshSession();
+                    const verifyToken = verifySess?.access_token;
+                    if (!verifyToken) {
+                        setSaving(false);
+                        showToast({
+                            variant: 'error',
+                            title: 'Session expired',
+                            message: 'Sign in again to verify your payment.',
+                        });
+                        navigation.navigate('Login');
+                        return;
+                    }
+                    const { data: updated, error: verifyErr } = await api.verifyBalancePayment(
+                        {
+                            razorpay_payment_id: data.razorpay_payment_id,
+                            razorpay_order_id: data.razorpay_order_id,
+                            razorpay_signature: data.razorpay_signature,
+                            order_id: orderId,
+                        },
+                        verifyToken
+                    );
                     setSaving(false);
                     if (verifyErr) {
-                        Alert.alert('Verification failed', verifyErr.message || 'Payment could not be verified.');
+                        showToast({
+                            variant: 'error',
+                            title: 'Verification failed',
+                            message: verifyErr.message || 'Payment could not be verified.',
+                        });
                         return;
                     }
                     navigation.replace('OrderDetail', { orderId });
                 },
                 onFailure: (err) => {
-                    Alert.alert('Payment failed', err?.description || 'Payment could not be completed.');
+                    showToast({
+                        variant: 'error',
+                        title: 'Payment failed',
+                        message: err?.description || 'Payment could not be completed.',
+                    });
                 },
                 onClose: () => {},
             }

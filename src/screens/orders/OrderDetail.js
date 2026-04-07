@@ -10,7 +10,6 @@ import {
     Image,
     Linking,
     Dimensions,
-    Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -22,19 +21,24 @@ import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import BottomTabBar from '../../components/BottomTabBar';
 import { formatFriendlyDate, formatFriendlyDateTime } from '../../utils/formatFriendlyDate';
-import { getOccasionAndApplicant } from '../../utils/orderDisplay';
-import { getLineItemParts, tierIndexFromOptions, TIER_ACCENT_COLORS } from '../../utils/lineItemDisplay';
+import { getOrderEventContext, localizeEventRole } from '../../utils/orderDisplay';
+import { useLocale } from '../../context/LocaleContext';
+import { useToast } from '../../context/ToastContext';
+import OrderLineItemRows from '../../components/OrderLineItemRows';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export default function OrderDetail({ route, navigation }) {
     const { theme } = useTheme();
+    const { t: tr } = useLocale();
+    const { showToast, showConfirm } = useToast();
     const { isAuthenticated, user, session, loading: authLoading } = useAuth();
     const { orderId } = route.params || {};
     const [order, setOrder] = useState(null);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [actioning, setActioning] = useState(null);
+    const [acceptingInvoice, setAcceptingInvoice] = useState(false);
     const [loadError, setLoadError] = useState(null);
 
     const load = useCallback(async () => {
@@ -74,9 +78,30 @@ export default function OrderDetail({ route, navigation }) {
         setRefreshing(false);
     };
 
+    const handleAcceptVendorInvoice = async () => {
+        if (!isAuthenticated || !session?.access_token) {
+            showToast({ variant: 'info', title: tr('alert_login_title'), message: tr('alert_login_quotation_body') });
+            navigation.navigate('Login');
+            return;
+        }
+        setAcceptingInvoice(true);
+        const { data, error } = await api.acceptVendorInvoice(orderId, session.access_token);
+        setAcceptingInvoice(false);
+        if (error) {
+            showToast({ variant: 'error', title: tr('alert_error'), message: error?.message || 'Could not accept invoice.' });
+            return;
+        }
+        await load();
+        showToast({
+            variant: 'success',
+            title: 'Invoice accepted',
+            message: data?.total_amount != null ? `Order total is now ₹${Number(data.total_amount).toLocaleString('en-IN')}.` : 'You can pay the balance from this screen.',
+        });
+    };
+
     const handleAcceptReject = async (quotationId, action) => {
         if (!isAuthenticated || !user?.id) {
-            Alert.alert('Login required', 'Please sign in to accept or reject quotes.');
+            showToast({ variant: 'info', title: tr('alert_login_title'), message: tr('alert_login_quotation_body') });
             navigation.navigate('Login');
             return;
         }
@@ -84,19 +109,20 @@ export default function OrderDetail({ route, navigation }) {
         const { data, error } = await api.acceptQuotation(orderId, quotationId, action, session?.access_token);
         setActioning(null);
         if (error) {
-            Alert.alert('Error', error?.message || 'Could not update quotation.');
+            showToast({ variant: 'error', title: tr('alert_error'), message: error?.message || tr('alert_quote_update_failed') });
             return;
         }
         await load();
         if (action === 'accept') {
             const adv = data?.order?.requires_advance_payment && data?.order?.suggested_advance_inr;
-            Alert.alert(
-                'Quote accepted',
-                adv
-                    ? `Please complete your 20% advance of ₹${Math.round(Number(data.order.suggested_advance_inr)).toLocaleString('en-IN')} to proceed. You can use Pay balance or checkout flows when available.`
-                    : 'Your order is confirmed with the vendor.',
-                [{ text: 'OK' }]
-            );
+            const advAmt = Math.round(Number(data.order.suggested_advance_inr)).toLocaleString('en-IN');
+            showToast({
+                variant: 'success',
+                title: tr('alert_quote_accepted_title'),
+                message: adv
+                    ? tr('alert_quote_accepted_body_advance').replace('{amount}', advAmt)
+                    : tr('alert_quote_accepted_body_simple'),
+            });
         }
     };
 
@@ -112,7 +138,7 @@ export default function OrderDetail({ route, navigation }) {
                 <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
                     <Ionicons name="arrow-back" size={24} color={theme.text} />
                 </TouchableOpacity>
-                <Text style={[styles.emptyText, { color: theme.text }]}>No order specified.</Text>
+                <Text style={[styles.emptyText, { color: theme.text }]}>{tr('order_no_specified')}</Text>
                 <BottomTabBar navigation={navigation} activeRoute="MyOrders" />
             </SafeAreaView>
         );
@@ -125,7 +151,7 @@ export default function OrderDetail({ route, navigation }) {
                     <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
                         <Ionicons name="arrow-back" size={24} color={theme.text} />
                     </TouchableOpacity>
-                    <Text style={[styles.headerTitle, { color: theme.text }]}>Order Details</Text>
+                    <Text style={[styles.headerTitle, { color: theme.text }]}>{tr('order_details_title')}</Text>
                 </View>
                 <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color={colors.primary} />
@@ -142,7 +168,7 @@ export default function OrderDetail({ route, navigation }) {
                     <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
                         <Ionicons name="arrow-back" size={24} color={theme.text} />
                     </TouchableOpacity>
-                    <Text style={[styles.headerTitle, { color: theme.text }]}>Order Details</Text>
+                    <Text style={[styles.headerTitle, { color: theme.text }]}>{tr('order_details_title')}</Text>
                 </View>
                 <View style={[styles.errorWrap, { padding: 20 }]}>
                     <Ionicons
@@ -152,26 +178,24 @@ export default function OrderDetail({ route, navigation }) {
                         style={{ marginBottom: 12 }}
                     />
                     <Text style={[styles.errorTitle, { color: theme.text }]}>
-                        {loadError === 'sign_in' ? 'Sign in required' : 'Could not load order'}
+                        {loadError === 'sign_in' ? tr('order_error_sign_in_title') : tr('order_error_load_title')}
                     </Text>
                     <Text style={[styles.errorSub, { color: theme.textLight }]}>
-                        {loadError === 'sign_in'
-                            ? 'Sign in to see vendor quotes, items, and status for this order.'
-                            : loadError}
+                        {loadError === 'sign_in' ? tr('order_error_sign_in_sub') : loadError}
                     </Text>
                     {loadError === 'sign_in' ? (
                         <TouchableOpacity
                             style={[styles.retryBtn, { backgroundColor: colors.primary, marginTop: 20 }]}
                             onPress={() => navigation.navigate('Login')}
                         >
-                            <Text style={styles.retryBtnText}>Sign in</Text>
+                            <Text style={styles.retryBtnText}>{tr('button_login')}</Text>
                         </TouchableOpacity>
                     ) : (
                         <TouchableOpacity
                             style={[styles.retryBtn, { backgroundColor: colors.primary, marginTop: 20 }]}
                             onPress={() => load()}
                         >
-                            <Text style={styles.retryBtnText}>Try again</Text>
+                            <Text style={styles.retryBtnText}>{tr('order_try_again')}</Text>
                         </TouchableOpacity>
                     )}
                 </View>
@@ -187,9 +211,9 @@ export default function OrderDetail({ route, navigation }) {
                     <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
                         <Ionicons name="arrow-back" size={24} color={theme.text} />
                     </TouchableOpacity>
-                    <Text style={[styles.headerTitle, { color: theme.text }]}>Order Details</Text>
+                    <Text style={[styles.headerTitle, { color: theme.text }]}>{tr('order_details_title')}</Text>
                 </View>
-                <Text style={[styles.emptyText, { color: theme.text, padding: 20 }]}>No order data.</Text>
+                <Text style={[styles.emptyText, { color: theme.text, padding: 20 }]}>{tr('order_no_data')}</Text>
                 <BottomTabBar navigation={navigation} activeRoute="MyOrders" />
             </SafeAreaView>
         );
@@ -200,11 +224,22 @@ export default function OrderDetail({ route, navigation }) {
     const quotes = order?.quotes || order?.vendor_quotes || [];
     const advancePaid = Number(order?.advance_amount || 0);
     const acceptedQuote = quotes.find((q) => (q.status || '').toLowerCase() === 'accepted');
-    const agreedTotal = acceptedQuote ? Number(acceptedQuote.amount || 0) : Number(order?.total_amount || 0);
+    const vendorInv = order?.vendor_invoice;
+    const agreedTotal =
+        vendorInv?.status === 'accepted' && vendorInv.total_amount != null
+            ? Number(vendorInv.total_amount)
+            : acceptedQuote
+              ? Number(acceptedQuote.amount || 0)
+              : Number(order?.total_amount || 0);
     const balanceDue = Math.max(0, agreedTotal - advancePaid);
     const isCompleted = (order?.status || '').toLowerCase() === 'completed';
-    const showPayBalance = !!acceptedQuote && balanceDue > 0 && isCompleted;
-    const { occasionLabel, applicantLabel } = getOccasionAndApplicant(order);
+    const invoicePending = vendorInv && (vendorInv.status || '').toLowerCase() === 'submitted';
+    const showPayBalance =
+        balanceDue > 0 &&
+        isCompleted &&
+        !invoicePending &&
+        (!!acceptedQuote || (vendorInv && (vendorInv.status || '').toLowerCase() === 'accepted'));
+    const eventCtx = getOrderEventContext(order);
 
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top']}>
@@ -212,7 +247,7 @@ export default function OrderDetail({ route, navigation }) {
                 <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
                     <Ionicons name="arrow-back" size={24} color={theme.text} />
                 </TouchableOpacity>
-                <Text style={[styles.headerTitle, { color: theme.text }]}>Order Details</Text>
+                <Text style={[styles.headerTitle, { color: theme.text }]}>{tr('order_details_title')}</Text>
             </View>
 
             <ScrollView
@@ -237,53 +272,72 @@ export default function OrderDetail({ route, navigation }) {
                     </View>
                     {advancePaid > 0 && (
                         <Text style={[styles.meta, { color: theme.textLight }]}>
-                            Advance paid: ₹{advancePaid.toLocaleString()}
+                            {tr('order_advance_paid')}: ₹{advancePaid.toLocaleString()}
                         </Text>
                     )}
-                    <Text style={[styles.detailLabel, { color: theme.textLight }]}>Occasion</Text>
-                    {occasionLabel ? (
-                        <Text style={[styles.occasionLine, { color: theme.text }]}>{occasionLabel}</Text>
-                    ) : (
-                        <Text style={[styles.meta, { color: theme.textLight, fontStyle: 'italic' }]}>Not set</Text>
-                    )}
-                    <Text style={[styles.detailLabel, { color: theme.textLight, marginTop: 10 }]}>Who applied</Text>
-                    {applicantLabel ? (
-                        <Text style={[styles.applicantLine, { color: theme.text }]}>{applicantLabel}</Text>
-                    ) : (
-                        <Text style={[styles.meta, { color: theme.textLight, fontStyle: 'italic' }]}>Not set</Text>
-                    )}
-                    {order?.contact_name && (
-                        <Text style={[styles.meta, { color: theme.textLight, marginTop: 8 }]}>{order.contact_name}</Text>
-                    )}
+                    {eventCtx.occasionName ? (
+                        <>
+                            <Text style={[styles.detailLabel, { color: theme.textLight }]}>{tr('order_label_occasion')}</Text>
+                            <Text style={[styles.occasionLine, { color: theme.text }]}>{eventCtx.occasionName}</Text>
+                        </>
+                    ) : null}
+                    {eventCtx.roleLabel ? (
+                        <>
+                            <Text style={[styles.detailLabel, { color: theme.textLight, marginTop: 10 }]}>
+                                {tr('order_label_who_applied')}
+                            </Text>
+                            <Text style={[styles.applicantLine, { color: theme.text }]}>
+                                {localizeEventRole(eventCtx.roleLabel, tr)}
+                            </Text>
+                        </>
+                    ) : null}
+                    {eventCtx.contactName ? (
+                        <>
+                            <Text style={[styles.detailLabel, { color: theme.textLight, marginTop: 10 }]}>{tr('order_label_contact_name')}</Text>
+                            <Text style={[styles.meta, { color: theme.text }]}>{eventCtx.contactName}</Text>
+                        </>
+                    ) : null}
+                    {eventCtx.contactMobile ? (
+                        <>
+                            <Text style={[styles.detailLabel, { color: theme.textLight, marginTop: 8 }]}>{tr('order_label_contact_phone')}</Text>
+                            <Text style={[styles.meta, { color: theme.text }]}>{eventCtx.contactMobile}</Text>
+                        </>
+                    ) : null}
+                    {eventCtx.contactEmail ? (
+                        <>
+                            <Text style={[styles.detailLabel, { color: theme.textLight, marginTop: 8 }]}>{tr('order_label_contact_email')}</Text>
+                            <Text style={[styles.meta, { color: theme.text }]}>{eventCtx.contactEmail}</Text>
+                        </>
+                    ) : null}
                     {order?.event_date ? (
-                        <Text style={[styles.meta, { color: theme.textLight }]}>
-                            Event date: {formatFriendlyDate(order.event_date)}
+                        <Text style={[styles.meta, { color: theme.textLight, marginTop: 10 }]}>
+                            {tr('order_label_event_date')}: {formatFriendlyDate(order.event_date)}
                         </Text>
                     ) : null}
                     {order?.created_at ? (
                         <Text style={[styles.meta, { color: theme.textLight }]}>
-                            Ordered: {formatFriendlyDateTime(order.created_at)}
+                            {tr('order_label_ordered_at')}: {formatFriendlyDateTime(order.created_at)}
                         </Text>
                     ) : null}
                     {order?.work_started_at ? (
                         <Text style={[styles.meta, { color: theme.textLight, marginTop: 6 }]}>
-                            Work started: {formatFriendlyDateTime(order.work_started_at)}
+                            {tr('order_work_started')}: {formatFriendlyDateTime(order.work_started_at)}
                         </Text>
                     ) : null}
                     {order?.work_completed_at ? (
                         <Text style={[styles.meta, { color: theme.textLight }]}>
-                            Work completed: {formatFriendlyDateTime(order.work_completed_at)}
+                            {tr('order_work_completed')}: {formatFriendlyDateTime(order.work_completed_at)}
                         </Text>
                     ) : null}
                     {order?.start_otp && (
                         <View style={[styles.completionOtpBox, { backgroundColor: colors.primary + '18', borderColor: colors.primary }]}>
-                            <Text style={[styles.completionOtpLabel, { color: theme.textLight }]}>Start work OTP (share with vendor)</Text>
+                            <Text style={[styles.completionOtpLabel, { color: theme.textLight }]}>{tr('order_otp_start_label')}</Text>
                             <Text style={[styles.completionOtpValue, { color: colors.primary }]}>{order.start_otp}</Text>
                         </View>
                     )}
                     {order?.completion_otp && (
                         <View style={[styles.completionOtpBox, { backgroundColor: colors.primary + '20', borderColor: colors.primary }]}>
-                            <Text style={[styles.completionOtpLabel, { color: theme.textLight }]}>Completion OTP (share with vendor)</Text>
+                            <Text style={[styles.completionOtpLabel, { color: theme.textLight }]}>{tr('order_otp_completion_label')}</Text>
                             <Text style={[styles.completionOtpValue, { color: colors.primary }]}>{order.completion_otp}</Text>
                         </View>
                     )}
@@ -293,68 +347,97 @@ export default function OrderDetail({ route, navigation }) {
                             onPress={() =>
                                 navigation.navigate('BalancePayment', {
                                     orderId,
-                                    order,
+                                    order: { ...order, total_amount: agreedTotal },
                                     balanceAmount: balanceDue,
                                 })
                             }
                         >
                             <Ionicons name="card-outline" size={20} color="#FFF" />
-                            <Text style={styles.payBalanceBtnText}>Pay Balance ₹{balanceDue.toLocaleString()}</Text>
+                            <Text style={styles.payBalanceBtnText}>
+                                {tr('order_pay_balance')} ₹{balanceDue.toLocaleString()}
+                            </Text>
                         </TouchableOpacity>
                     )}
                 </View>
 
-                {items.length > 0 && (
+                {vendorInv && (
                     <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>
-                        <Text style={[styles.sectionTitle, { color: theme.text }]}>Items</Text>
-                        {items.map((item, i) => {
-                            const parts = getLineItemParts(item);
-                            const accentIdx = tierIndexFromOptions(item.options);
-                            const accent =
-                                accentIdx >= 0
-                                    ? TIER_ACCENT_COLORS[accentIdx % TIER_ACCENT_COLORS.length]
-                                    : colors.primary;
-                            const tierLine = [parts.tierName, parts.qtyLabel].filter(Boolean).join(' · ');
-                            const qty = Number(item.quantity) || 1;
-                            return (
-                                <View
-                                    key={item.id || i}
-                                    style={[
-                                        styles.orderItemCard,
-                                        {
-                                            borderBottomColor: theme.border,
-                                            borderLeftColor: accent,
-                                        },
-                                    ]}
-                                >
-                                    <View style={{ flex: 1, paddingRight: 8 }}>
-                                        {parts.categoryName ? (
-                                            <Text style={[styles.itemCat, { color: theme.textLight }]}>
-                                                {parts.categoryName}
-                                            </Text>
-                                        ) : null}
-                                        <Text style={[styles.itemTitle, { color: theme.text }]} numberOfLines={2}>
-                                            {parts.serviceName} × {qty}
-                                        </Text>
-                                        {tierLine ? (
-                                            <Text style={[styles.itemTierLine, { color: accent }]}>{tierLine}</Text>
-                                        ) : null}
-                                        {parts.subVariety ? (
-                                            <Text style={[styles.itemSub, { color: theme.textLight }]}>{parts.subVariety}</Text>
-                                        ) : null}
-                                    </View>
-                                    <Text style={[styles.itemPrice, { color: theme.text }]}>
-                                        ₹{(Number(item.unit_price) * qty).toLocaleString()}
+                        <Text style={[styles.sectionTitle, { color: theme.text }]}>Final invoice (vendor)</Text>
+                        {vendorInv.vendor_logo_url &&
+                        (String(vendorInv.vendor_logo_url).startsWith('http') ||
+                            String(vendorInv.vendor_logo_url).startsWith('https')) ? (
+                            <Image
+                                source={{ uri: vendorInv.vendor_logo_url }}
+                                style={{ width: 120, height: 48, resizeMode: 'contain', marginBottom: 8 }}
+                            />
+                        ) : null}
+                        {vendorInv.vendor_display_name ? (
+                            <Text style={[styles.meta, { color: theme.text, fontWeight: '700' }]}>{vendorInv.vendor_display_name}</Text>
+                        ) : null}
+                        {vendorInv.vendor_gstin ? (
+                            <Text style={[styles.meta, { color: theme.textLight }]}>GSTIN: {vendorInv.vendor_gstin}</Text>
+                        ) : null}
+                        {vendorInv.invoice_number ? (
+                            <Text style={[styles.meta, { color: theme.textLight }]}>Invoice #{vendorInv.invoice_number}</Text>
+                        ) : null}
+                        {Array.isArray(vendorInv.line_items) &&
+                            vendorInv.line_items.map((line, idx) => (
+                                <View key={idx} style={[styles.historyItem, { borderBottomColor: theme.border }]}>
+                                    <Text style={{ color: theme.text, fontWeight: '600' }}>{line.description}</Text>
+                                    <Text style={{ color: theme.textLight, fontSize: 12 }}>
+                                        {line.quantity} × ₹{Number(line.unit_price || 0).toLocaleString('en-IN')} = ₹
+                                        {Number(line.amount || 0).toLocaleString('en-IN')}
                                     </Text>
                                 </View>
-                            );
-                        })}
+                            ))}
+                        <Text style={[styles.meta, { color: theme.text, marginTop: 8 }]}>
+                            Subtotal: ₹{Number(vendorInv.subtotal || 0).toLocaleString('en-IN')}
+                        </Text>
+                        <Text style={[styles.meta, { color: theme.textLight }]}>
+                            CGST ({Number(vendorInv.cgst_rate || 0)}%): ₹{Number(vendorInv.cgst_amount || 0).toLocaleString('en-IN')}
+                        </Text>
+                        <Text style={[styles.meta, { color: theme.textLight }]}>
+                            SGST ({Number(vendorInv.sgst_rate || 0)}%): ₹{Number(vendorInv.sgst_amount || 0).toLocaleString('en-IN')}
+                        </Text>
+                        <Text style={[styles.total, { color: theme.text, marginTop: 6 }]}>
+                            Total: ₹{Number(vendorInv.total_amount || 0).toLocaleString('en-IN')}
+                        </Text>
+                        {vendorInv.notes ? (
+                            <Text style={[styles.historyNote, { color: theme.textLight, marginTop: 8 }]}>{vendorInv.notes}</Text>
+                        ) : null}
+                        {(vendorInv.status || '').toLowerCase() === 'submitted' && (
+                            <TouchableOpacity
+                                style={[styles.payBalanceBtn, { backgroundColor: colors.primary, marginTop: 12 }]}
+                                onPress={handleAcceptVendorInvoice}
+                                disabled={acceptingInvoice}
+                            >
+                                {acceptingInvoice ? (
+                                    <ActivityIndicator color="#FFF" />
+                                ) : (
+                                    <Text style={styles.payBalanceBtnText}>Accept final invoice</Text>
+                                )}
+                            </TouchableOpacity>
+                        )}
+                        {(vendorInv.status || '').toLowerCase() === 'accepted' && (
+                            <Text style={[styles.meta, { color: colors.primary, marginTop: 8, fontWeight: '600' }]}>
+                                Accepted — total above applies to balance payment.
+                            </Text>
+                        )}
+                    </View>
+                )}
+
+                {items.length > 0 && (
+                    <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>
+                        <Text style={[styles.sectionTitle, { color: theme.text }]}>{tr('order_section_items')}</Text>
+                        {items.map((item, i) => (
+                            <OrderLineItemRows key={item.id || i} item={item} theme={theme} tr={tr} />
+                        ))}
                     </View>
                 )}
 
                 {history.length > 0 && (
                     <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>
-                        <Text style={[styles.sectionTitle, { color: theme.text }]}>Status history</Text>
+                        <Text style={[styles.sectionTitle, { color: theme.text }]}>{tr('order_status_history')}</Text>
                         {history.map((h, i) => (
                             <View
                                 key={h.id || `${h.status}-${h.created_at || ''}-${i}`}
@@ -393,9 +476,9 @@ export default function OrderDetail({ route, navigation }) {
                             <Ionicons name="pricetags" size={22} color={colors.primary} />
                         </View>
                         <View style={{ flex: 1 }}>
-                            <Text style={[styles.quotesBannerTitle, { color: theme.text }]}>Vendor quotes</Text>
+                            <Text style={[styles.quotesBannerTitle, { color: theme.text }]}>{tr('order_quotes_banner_title')}</Text>
                             <Text style={[styles.quotesBannerSub, { color: theme.textLight }]}>
-                                Compare offers and accept the one that fits your celebration
+                                {tr('order_quotes_banner_sub')}
                             </Text>
                         </View>
                     </LinearGradient>
@@ -422,7 +505,7 @@ export default function OrderDetail({ route, navigation }) {
                                 >
                                     <View style={styles.quoteHeader}>
                                         <Text style={[styles.quoteVendor, { color: theme.text }]}>
-                                            {q.vendor_name || 'Vendor'}
+                                            {q.vendor_name || tr('order_quote_vendor')}
                                         </Text>
                                         <Text style={[styles.quoteAmount, { color: colors.primary }]}>
                                             {quoteAmount > 0 ? `₹${quoteAmount.toLocaleString()}` : '—'}
@@ -433,18 +516,18 @@ export default function OrderDetail({ route, navigation }) {
                                     </Text>
                                     {q.quotation_submitted_at || q.created_at ? (
                                         <Text style={[styles.quoteMeta, { color: theme.textLight }]}>
-                                            Submitted:{' '}
+                                            {tr('order_quote_submitted')}:{' '}
                                             {formatFriendlyDateTime(q.quotation_submitted_at || q.created_at)}
                                         </Text>
                                     ) : null}
                                     {q.service_type ? (
                                         <Text style={[styles.quoteMeta, { color: theme.textLight }]}>
-                                            Service: {q.service_type}
+                                            {tr('order_quote_service')}: {q.service_type}
                                         </Text>
                                     ) : null}
                                     {q.venue_address ? (
                                         <Text style={[styles.quoteMeta, { color: theme.textLight }]} numberOfLines={3}>
-                                            Venue: {q.venue_address}
+                                            {tr('order_quote_venue')}: {q.venue_address}
                                         </Text>
                                     ) : null}
                                     {q.note ? (
@@ -455,7 +538,7 @@ export default function OrderDetail({ route, navigation }) {
                                     {attEntries.length > 0 && (
                                         <View style={styles.attachmentsSection}>
                                             <Text style={[styles.attachmentsLabel, { color: theme.textLight }]}>
-                                                Attachments
+                                                {tr('order_attachments')}
                                             </Text>
                                             <View style={styles.attachmentsRow}>
                                                 {attEntries.flatMap(([category, urls]) =>
@@ -492,23 +575,19 @@ export default function OrderDetail({ route, navigation }) {
                                             <TouchableOpacity
                                                 style={[styles.rejectBtn, { borderColor: theme.border }]}
                                                 onPress={() =>
-                                                    Alert.alert(
-                                                        'Reject quote?',
-                                                        'This quote will be marked as rejected.',
-                                                        [
-                                                            { text: 'Cancel', style: 'cancel' },
-                                                            {
-                                                                text: 'Reject',
-                                                                style: 'destructive',
-                                                                onPress: () => handleAcceptReject(q.id, 'reject'),
-                                                            },
-                                                        ]
-                                                    )
+                                                    showConfirm({
+                                                        title: tr('order_quote_reject_title'),
+                                                        message: tr('order_quote_reject_body'),
+                                                        cancelLabel: tr('button_cancel'),
+                                                        confirmLabel: tr('order_quote_reject'),
+                                                        destructive: true,
+                                                        onConfirm: () => handleAcceptReject(q.id, 'reject'),
+                                                    })
                                                 }
                                                 disabled={!!actioning}
                                             >
                                                 <Ionicons name="close-circle-outline" size={18} color="#c0392b" />
-                                                <Text style={styles.rejectBtnText}>Reject</Text>
+                                                <Text style={styles.rejectBtnText}>{tr('order_quote_reject')}</Text>
                                             </TouchableOpacity>
                                             <TouchableOpacity
                                                 style={[styles.acceptBtn, { backgroundColor: colors.primary }]}
@@ -520,7 +599,7 @@ export default function OrderDetail({ route, navigation }) {
                                                 ) : (
                                                     <>
                                                         <Ionicons name="checkmark-circle-outline" size={18} color="#FFF" />
-                                                        <Text style={styles.acceptBtnText}>Accept</Text>
+                                                        <Text style={styles.acceptBtnText}>{tr('order_quote_accept')}</Text>
                                                     </>
                                                 )}
                                             </TouchableOpacity>
@@ -532,10 +611,8 @@ export default function OrderDetail({ route, navigation }) {
                     ) : (
                         <View style={styles.quoteEmptyWrap}>
                             <Ionicons name="document-text-outline" size={40} color={theme.textLight} style={{ marginBottom: 8 }} />
-                            <Text style={[styles.quoteEmptyTitle, { color: theme.text }]}>No vendor quotes yet</Text>
-                            <Text style={[styles.quoteEmpty, { color: theme.textLight }]}>
-                                When an allocated vendor submits a quotation, it will appear here. Pull down to refresh.
-                            </Text>
+                            <Text style={[styles.quoteEmptyTitle, { color: theme.text }]}>{tr('order_quotes_empty_title')}</Text>
+                            <Text style={[styles.quoteEmpty, { color: theme.textLight }]}>{tr('order_quotes_empty_sub')}</Text>
                         </View>
                     )}
                     </View>

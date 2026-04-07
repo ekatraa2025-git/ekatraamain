@@ -1,29 +1,27 @@
 import React from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity, Switch, Alert } from 'react-native';
+import { View, Text, StyleSheet, Image, TouchableOpacity, Switch } from 'react-native';
 import { DrawerContentScrollView, DrawerItemList } from '@react-navigation/drawer';
 import { colors } from '../theme/colors';
+import { useToast } from '../context/ToastContext';
 
 export default function CustomDrawer(props) {
     const [isDarkMode, setIsDarkMode] = React.useState(false);
+    const { showConfirm } = useToast();
 
     const handleLogout = () => {
-        Alert.alert(
-            "Logout",
-            "Are you sure you want to logout?",
-            [
-                { text: "Cancel", style: "cancel" },
-                {
-                    text: "Logout",
-                    style: 'destructive',
-                    onPress: () => {
-                        props.navigation.reset({
-                            index: 0,
-                            routes: [{ name: 'Login' }],
-                        });
-                    }
-                }
-            ]
-        );
+        showConfirm({
+            title: 'Logout',
+            message: 'Are you sure you want to logout?',
+            cancelLabel: 'Cancel',
+            confirmLabel: 'Logout',
+            destructive: true,
+            onConfirm: () => {
+                props.navigation.reset({
+                    index: 0,
+                    routes: [{ name: 'Login' }],
+                });
+            },
+        });
     };
 
     return (
