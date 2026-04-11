@@ -25,6 +25,7 @@ import { getOrderEventContext, localizeEventRole } from '../../utils/orderDispla
 import { useLocale } from '../../context/LocaleContext';
 import { useToast } from '../../context/ToastContext';
 import OrderLineItemRows from '../../components/OrderLineItemRows';
+import { SkeletonBlock, SkeletonCard } from '../../components/SkeletonLoader';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -153,8 +154,21 @@ export default function OrderDetail({ route, navigation }) {
                     </TouchableOpacity>
                     <Text style={[styles.headerTitle, { color: theme.text }]}>{tr('order_details_title')}</Text>
                 </View>
-                <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="large" color={colors.primary} />
+                <View style={{ padding: 16 }}>
+                    <SkeletonCard theme={theme} style={{ backgroundColor: theme.card }}>
+                        <SkeletonBlock theme={theme} width="35%" height={18} />
+                        <View style={{ height: 10 }} />
+                        <SkeletonBlock theme={theme} width="90%" height={14} />
+                        <View style={{ height: 8 }} />
+                        <SkeletonBlock theme={theme} width="75%" height={14} />
+                    </SkeletonCard>
+                    <SkeletonCard theme={theme} style={{ backgroundColor: theme.card }}>
+                        <SkeletonBlock theme={theme} width="30%" height={16} />
+                        <View style={{ height: 10 }} />
+                        <SkeletonBlock theme={theme} width="100%" height={12} />
+                        <View style={{ height: 6 }} />
+                        <SkeletonBlock theme={theme} width="95%" height={12} />
+                    </SkeletonCard>
                 </View>
                 <BottomTabBar navigation={navigation} activeRoute="MyOrders" />
             </SafeAreaView>
@@ -634,7 +648,7 @@ const styles = StyleSheet.create({
         borderBottomWidth: 1,
     },
     backBtn: { padding: 8 },
-    headerTitle: { fontSize: 18, fontWeight: 'bold', flex: 1, textAlign: 'center' },
+    headerTitle: { fontSize: 17, fontWeight: 'bold', flex: 1, textAlign: 'left' },
     loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
     scrollView: { flex: 1 },
     scrollContent: { padding: 16, paddingBottom: 24, flexGrow: 1 },

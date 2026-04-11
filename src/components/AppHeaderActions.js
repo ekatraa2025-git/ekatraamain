@@ -13,6 +13,7 @@ import { colors } from '../theme/colors';
 import { useTheme } from '../context/ThemeContext';
 import { useLocale } from '../context/LocaleContext';
 import { useCart } from '../context/CartContext';
+import { useUserNotifications } from '../context/UserNotificationContext';
 
 /**
  * Language + cart controls shown app-wide (positioned by parent overlay).
@@ -22,6 +23,7 @@ export default function AppHeaderActions() {
     const { theme, isDarkMode } = useTheme();
     const { t: tr, language, setLanguage } = useLocale();
     const { cartItemCount } = useCart();
+    const { unreadCount } = useUserNotifications();
     const [langModalVisible, setLangModalVisible] = useState(false);
 
     const iconBg = isDarkMode ? '#1F2333' : '#F3F4F6';
@@ -36,6 +38,21 @@ export default function AppHeaderActions() {
                     accessibilityLabel={tr('select_language')}
                 >
                     <Ionicons name="language-outline" size={22} color={theme.text} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                    style={[styles.iconBtn, { backgroundColor: iconBg }]}
+                    onPress={() => navigation.navigate('Notifications')}
+                    activeOpacity={0.7}
+                    accessibilityLabel={tr('notifications_title')}
+                >
+                    <Ionicons name="notifications-outline" size={22} color={theme.text} />
+                    {unreadCount > 0 && (
+                        <View style={[styles.badge, { backgroundColor: colors.primary }]}>
+                            <Text style={styles.badgeText}>
+                                {unreadCount > 99 ? '99+' : unreadCount}
+                            </Text>
+                        </View>
+                    )}
                 </TouchableOpacity>
                 <TouchableOpacity
                     style={[styles.iconBtn, { backgroundColor: iconBg }]}

@@ -178,7 +178,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
-    headerTitle: { fontSize: 18, fontWeight: '800', flex: 1 },
+    headerTitle: { fontSize: 17, fontWeight: '800', flex: 1 },
     centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
     hint: { padding: 24, textAlign: 'center' },
     scroll: { padding: 16 },

@@ -406,7 +406,13 @@ export default function RecommendationBudgetModal({
                 variant: 'success',
                 title: 'Added to cart',
                 message: `${selected.size} item(s) added.`,
-                action: { label: 'OK', onPress: () => onClose('cart') },
+                action: {
+                    label: 'View cart',
+                    onPress: () => {
+                        onClose(false);
+                        navigation?.navigate?.('Cart');
+                    },
+                },
             });
         } catch (e) {
             showToast({ variant: 'error', title: 'Cart', message: e?.message || 'Could not add to cart.' });

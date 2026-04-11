@@ -18,6 +18,7 @@ import { useCart } from '../../context/CartContext';
 import { useToast } from '../../context/ToastContext';
 import BottomTabBar from '../../components/BottomTabBar';
 import { TIER_SUB_KEYS } from '../../utils/lineItemDisplay';
+import { SkeletonBlock, SkeletonCard } from '../../components/SkeletonLoader';
 
 
 const { width } = Dimensions.get('window');
@@ -91,6 +92,7 @@ export default function CategoryServices({ route, navigation }) {
     }, [user?.id, eventForm?.contact_name, eventForm?.contact_mobile]);
 
     const useApi = useBackendApi();
+    const tabBarOffset = 56 + Math.max(insets.bottom, 6);
 
     const fetchServicesForCategory = async (catId) => {
         if (useApi) {
@@ -348,10 +350,24 @@ export default function CategoryServices({ route, navigation }) {
 
             {loading ? (
                 <View style={styles.loadingWrap}>
-                    <View style={[styles.loadingSpinner, { borderColor: colors.primary + '30' }]}>
-                        <ActivityIndicator size="large" color={colors.primary} />
+                    <View style={styles.loadingList}>
+                        {[0, 1, 2].map((idx) => (
+                            <SkeletonCard key={idx} theme={theme} style={{ backgroundColor: theme.card }}>
+                                <View style={styles.loadingCardHeader}>
+                                    <SkeletonBlock theme={theme} width={86} height={86} radius={16} />
+                                    <View style={{ flex: 1 }}>
+                                        <SkeletonBlock theme={theme} width="65%" height={16} />
+                                        <View style={{ height: 8 }} />
+                                        <SkeletonBlock theme={theme} width="100%" height={12} />
+                                        <View style={{ height: 6 }} />
+                                        <SkeletonBlock theme={theme} width="80%" height={12} />
+                                    </View>
+                                </View>
+                                <View style={{ height: 12 }} />
+                                <SkeletonBlock theme={theme} width="40%" height={14} />
+                            </SkeletonCard>
+                        ))}
                     </View>
-                    <Text style={[styles.loadingText, { color: theme.textLight }]}>Loading services...</Text>
                 </View>
             ) : allServices.length === 0 ? (
                 <View style={styles.emptyWrap}>
@@ -445,30 +461,42 @@ export default function CategoryServices({ route, navigation }) {
                             return (
                                 <View key={catId} style={styles.categoryGroup}>
                                     <TouchableOpacity
-                                        style={styles.catSectionHeader}
+                                        style={[
+                                            styles.catSectionHeader,
+                                            {
+                                                backgroundColor: sectionColor + '18',
+                                                borderColor: sectionColor + '30',
+                                            },
+                                        ]}
                                         activeOpacity={0.75}
                                         onPress={() => {
                                             LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
                                             setExpandedCategoryIds((p) => ({ ...p, [catId]: !catExpanded }));
                                         }}
                                     >
-                                        <Ionicons
-                                            name={catExpanded ? 'chevron-down' : 'chevron-forward'}
-                                            size={22}
-                                            color={sectionColor}
-                                            style={{ marginRight: 6 }}
-                                        />
-                                        <View style={[styles.catSectionDot, { backgroundColor: sectionColor }]} />
-                                        <View style={styles.catSectionTitleWrap}>
-                                            <Text style={[styles.catSectionTitle, { color: theme.text }]}>
-                                                {catData.name}
-                                            </Text>
-                                            <Text style={[styles.catSectionCount, { color: theme.textLight }]}>
-                                                {catData.services.length} {catData.services.length === 1 ? 'service' : 'services'}
-                                                {!catExpanded ? ' · tap to expand' : ''}
-                                            </Text>
+                                        <View style={styles.catSectionLeft}>
+                                            <Ionicons
+                                                name={catExpanded ? 'chevron-down' : 'chevron-forward'}
+                                                size={20}
+                                                color={sectionColor}
+                                            />
+                                            <View style={styles.catSectionTitleWrap}>
+                                                <Text style={[styles.catSectionTitle, { color: theme.text }]}>
+                                                    {catData.name}
+                                                </Text>
+                                                <Text style={[styles.catSectionCount, { color: theme.textLight }]}>
+                                                    {catData.services.length} {catData.services.length === 1 ? 'service' : 'services'}
+                                                    {!catExpanded ? ' · tap to expand' : ''}
+                                                </Text>
+                                            </View>
                                         </View>
-                                        <View style={[styles.catSectionLine, { backgroundColor: sectionColor + '30' }]} />
+                                        <View style={[styles.catSectionThumbWrap, { borderColor: sectionColor + '40' }]}>
+                                            {catData.services?.[0]?.image_url ? (
+                                                <Image source={{ uri: catData.services[0].image_url }} style={styles.catSectionThumb} />
+                                            ) : (
+                                                <Ionicons name="images-outline" size={16} color={sectionColor} />
+                                            )}
+                                        </View>
                                     </TouchableOpacity>
 
                                     {catExpanded && catData.services.map(item => {
@@ -591,7 +619,7 @@ export default function CategoryServices({ route, navigation }) {
                             {
                                 backgroundColor: theme.card,
                                 borderColor: theme.border,
-                                bottom: 72 + Math.max(insets.bottom, 6),
+                                bottom: tabBarOffset + 8,
                             },
                         ]}
                     >
@@ -630,7 +658,7 @@ export default function CategoryServices({ route, navigation }) {
                     </View>
                 </>
             )}
-            <BottomTabBar navigation={navigation} activeRoute="Home" />
+            <BottomTabBar navigation={navigation} activeRoute="CategoryServices" />
             </KeyboardAvoidingView>
         </SafeAreaView>
     );
@@ -654,7 +682,7 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     headerCenter: { flex: 1 },
-    headerTitle: { fontSize: 20, fontWeight: '800', letterSpacing: -0.3 },
+    headerTitle: { fontSize: 18, fontWeight: '800', letterSpacing: -0.2 },
     headerTagRow: { flexDirection: 'row', marginTop: 3 },
     headerTag: {
         paddingHorizontal: 10,
@@ -673,6 +701,17 @@ const styles = StyleSheet.create({
     headerBadgeText: { color: '#FFF', fontSize: 13, fontWeight: '700' },
 
     loadingWrap: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+    loadingList: {
+        width: '100%',
+        paddingHorizontal: 16,
+        paddingTop: 12,
+        gap: 10,
+    },
+    loadingCardHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+    },
     loadingSpinner: {
         width: 80,
         height: 80,
@@ -875,21 +914,35 @@ const styles = StyleSheet.create({
     catSectionHeader: {
         flexDirection: 'row',
         alignItems: 'center',
+        justifyContent: 'space-between',
         marginBottom: 14,
-        gap: 10,
+        borderWidth: 1,
+        borderRadius: 16,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
     },
-    catSectionDot: {
-        width: 8,
-        height: 8,
-        borderRadius: 4,
+    catSectionLeft: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        flex: 1,
     },
     catSectionTitleWrap: { flexShrink: 1 },
     catSectionTitle: { fontSize: 17, fontWeight: '800', letterSpacing: -0.2 },
     catSectionCount: { fontSize: 12, marginTop: 2 },
-    catSectionLine: {
-        flex: 1,
-        height: 2,
-        borderRadius: 1,
+    catSectionThumbWrap: {
+        width: 56,
+        height: 56,
+        borderRadius: 28,
+        borderWidth: 1,
+        overflow: 'hidden',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#FFF',
+    },
+    catSectionThumb: {
+        width: '100%',
+        height: '100%',
     },
 
     // Service cards
@@ -909,12 +962,12 @@ const styles = StyleSheet.create({
     serviceCardHeader: {
         flexDirection: 'row',
         alignItems: 'center',
-        padding: 14,
+        padding: 12,
     },
-    serviceThumb: { width: 52, height: 52, borderRadius: 14, marginRight: 12 },
+    serviceThumb: { width: 78, height: 78, borderRadius: 14, marginRight: 12 },
     serviceThumbPlaceholder: {
-        width: 52,
-        height: 52,
+        width: 78,
+        height: 78,
         borderRadius: 14,
         alignItems: 'center',
         justifyContent: 'center',

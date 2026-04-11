@@ -7,8 +7,24 @@ import { colors } from '../../theme/colors';
 import { useTheme } from '../../context/ThemeContext';
 import { dbService, getVendorImageUrl } from '../../services/supabase';
 import BottomTabBar from '../../components/BottomTabBar';
+import VendorGallerySlider from '../../components/VendorGallerySlider';
+import { SkeletonBlock, SkeletonCard } from '../../components/SkeletonLoader';
 
 const { width } = Dimensions.get('window');
+
+function parseGallery(raw) {
+    if (!raw) return [];
+    if (Array.isArray(raw)) return raw.filter(Boolean);
+    if (typeof raw === 'string') {
+        try {
+            const parsed = JSON.parse(raw);
+            return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+        } catch {
+            return [];
+        }
+    }
+    return [];
+}
 
 export default function VendorsList({ route, navigation }) {
     const { theme, isDarkMode } = useTheme();
@@ -52,7 +68,13 @@ export default function VendorsList({ route, navigation }) {
         setRefreshing(false);
     }, [service, city, state]);
 
-    const renderVendor = ({ item, index }) => (
+    const renderVendor = ({ item }) => {
+        const galleryPaths = parseGallery(item.gallery_urls);
+        const sliderUris =
+            galleryPaths.length > 0
+                ? galleryPaths.map((uri) => getVendorImageUrl(uri, item.business_name))
+                : [getVendorImageUrl(item.logo_url, item.business_name)];
+        return (
         <TouchableOpacity
             style={[styles.vendorCard, { backgroundColor: theme.card }]}
             onPress={() => navigation.navigate('VendorDetail', { 
@@ -63,9 +85,11 @@ export default function VendorsList({ route, navigation }) {
         >
             {/* Vendor Image with Gradient Overlay */}
             <View style={styles.imageContainer}>
-                <Image 
-                    source={{ uri: getVendorImageUrl(item.logo_url, item.business_name) }} 
-                    style={styles.vendorImage} 
+                <VendorGallerySlider
+                    imageUris={sliderUris}
+                    height={styles.vendorImage.height}
+                    borderRadius={styles.vendorImage.borderRadius}
+                    showDots={sliderUris.length > 1}
                 />
                 {item.is_verified && (
                     <View style={styles.verifiedBadgeTop}>
@@ -155,7 +179,8 @@ export default function VendorsList({ route, navigation }) {
                 </View>
             </View>
         </TouchableOpacity>
-    );
+        );
+    };
 
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
@@ -181,10 +206,15 @@ export default function VendorsList({ route, navigation }) {
             {/* Content */}
             {loading ? (
                 <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="large" color={colors.primary} />
-                    <Text style={[styles.loadingText, { color: theme.textLight }]}>
-                        Finding vendors...
-                    </Text>
+                    {[0, 1, 2].map((idx) => (
+                        <SkeletonCard key={idx} theme={theme} style={{ width: width - 32, backgroundColor: theme.card }}>
+                            <SkeletonBlock theme={theme} width="100%" height={170} radius={16} />
+                            <View style={{ height: 10 }} />
+                            <SkeletonBlock theme={theme} width="68%" height={16} />
+                            <View style={{ height: 8 }} />
+                            <SkeletonBlock theme={theme} width="45%" height={12} />
+                        </SkeletonCard>
+                    ))}
                 </View>
             ) : vendors.length > 0 ? (
                 <FlatList

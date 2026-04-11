@@ -7,6 +7,10 @@ import { useLocale } from '../context/LocaleContext';
 import { useCart } from '../context/CartContext';
 import { colors } from '../theme/colors';
 
+const TAB_BAR_TOP_PADDING = 6;
+const TAB_BAR_BOTTOM_MIN = 6;
+const TAB_BAR_CONTENT_HEIGHT = 56;
+
 const TABS = [
     { key: 'Home', icon: 'home', iconOutline: 'home-outline', labelKey: 'tab_home' },
     { key: 'MyOrders', icon: 'receipt', iconOutline: 'receipt-outline', labelKey: 'tab_orders' },
@@ -21,6 +25,8 @@ export default function BottomTabBar({ navigation, activeRoute, cartItemCount: p
     const { cartItemCount: contextCount } = useCart();
     const cartItemCount = propCount ?? contextCount ?? 0;
     const insets = useSafeAreaInsets();
+    const tabBarBottomInset = Math.max(insets.bottom, TAB_BAR_BOTTOM_MIN);
+    const tabBarHeight = TAB_BAR_CONTENT_HEIGHT + tabBarBottomInset;
 
     const handlePress = (tab) => {
         if (tab.key === activeRoute) return;
@@ -32,53 +38,59 @@ export default function BottomTabBar({ navigation, activeRoute, cartItemCount: p
     };
 
     return (
-        <View style={[
-            styles.container,
-            {
-                backgroundColor: isDarkMode ? '#181B25' : '#FFFFFF',
-                borderTopColor: isDarkMode ? '#2D3142' : '#E5E7EB',
-                paddingBottom: Math.max(insets.bottom, 6),
-                ...Platform.select({
-                    ios: { shadowColor: '#000', shadowOffset: { width: 0, height: -3 }, shadowOpacity: 0.06, shadowRadius: 8 },
-                    android: { elevation: 8 },
-                }),
-            },
-        ]}>
-            {TABS.map((tab) => {
-                const isActive = tab.key === activeRoute || (tab.key === 'Home' && activeRoute === 'Home');
-                const iconName = isActive ? tab.icon : tab.iconOutline;
-                const iconColor = isActive ? colors.primary : (isDarkMode ? '#6B7280' : '#9CA3AF');
-                const showBadge = tab.key === 'Cart' && cartItemCount > 0;
+        <>
+            <View style={{ height: tabBarHeight }} pointerEvents="none" />
+            <View
+                style={[
+                    styles.container,
+                    {
+                        backgroundColor: isDarkMode ? '#181B25' : '#FFFFFF',
+                        borderTopColor: isDarkMode ? '#2D3142' : '#E5E7EB',
+                        paddingBottom: tabBarBottomInset,
+                        minHeight: tabBarHeight,
+                        ...Platform.select({
+                            ios: { shadowColor: '#000', shadowOffset: { width: 0, height: -3 }, shadowOpacity: 0.06, shadowRadius: 8 },
+                            android: { elevation: 8 },
+                        }),
+                    },
+                ]}
+            >
+                {TABS.map((tab) => {
+                    const isActive = tab.key === activeRoute || (tab.key === 'Home' && activeRoute === 'Home');
+                    const iconName = isActive ? tab.icon : tab.iconOutline;
+                    const iconColor = isActive ? colors.primary : (isDarkMode ? '#6B7280' : '#9CA3AF');
+                    const showBadge = tab.key === 'Cart' && cartItemCount > 0;
 
-                return (
-                    <TouchableOpacity
-                        key={tab.key}
-                        style={styles.tab}
-                        onPress={() => handlePress(tab)}
-                        activeOpacity={0.7}
-                    >
-                        <View style={[
-                            styles.iconWrap,
-                            isActive && { backgroundColor: colors.primary + '12', borderRadius: 14, paddingHorizontal: 14, paddingVertical: 4 },
-                        ]}>
-                            <Ionicons name={iconName} size={22} color={iconColor} />
-                            {showBadge && (
-                                <View style={[styles.badge, { backgroundColor: colors.primary }]}>
-                                    <Text style={styles.badgeText}>{cartItemCount > 99 ? '99+' : cartItemCount}</Text>
-                                </View>
-                            )}
-                        </View>
-                        <Text style={[
-                            styles.label,
-                            { color: iconColor },
-                            isActive && { color: colors.primary, fontWeight: '700' },
-                        ]}>
-                            {t(tab.labelKey)}
-                        </Text>
-                    </TouchableOpacity>
-                );
-            })}
-        </View>
+                    return (
+                        <TouchableOpacity
+                            key={tab.key}
+                            style={styles.tab}
+                            onPress={() => handlePress(tab)}
+                            activeOpacity={0.7}
+                        >
+                            <View style={[
+                                styles.iconWrap,
+                                isActive && { backgroundColor: colors.primary + '12', borderRadius: 14, paddingHorizontal: 14, paddingVertical: 4 },
+                            ]}>
+                                <Ionicons name={iconName} size={22} color={iconColor} />
+                                {showBadge && (
+                                    <View style={[styles.badge, { backgroundColor: colors.primary }]}>
+                                        <Text style={styles.badgeText}>{cartItemCount > 99 ? '99+' : cartItemCount}</Text>
+                                    </View>
+                                )}
+                            </View>
+                            <Text style={[
+                                styles.label,
+                                { color: iconColor },
+                                isActive && { color: colors.primary, fontWeight: '700' },
+                            ]}>
+                                {t(tab.labelKey)}
+                            </Text>
+                        </TouchableOpacity>
+                    );
+                })}
+            </View>
+        </>
     );
 }
 
@@ -86,7 +98,12 @@ const styles = StyleSheet.create({
     container: {
         flexDirection: 'row',
         borderTopWidth: 1,
-        paddingTop: 6,
+        paddingTop: TAB_BAR_TOP_PADDING,
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: 1100,
     },
     tab: {
         flex: 1,

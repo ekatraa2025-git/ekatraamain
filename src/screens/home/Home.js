@@ -5,7 +5,6 @@ import {
     ActivityIndicator, RefreshControl, Animated, TextInput,
     KeyboardAvoidingView, Platform,
 } from 'react-native';
-import { ScrollView as GHScrollView } from 'react-native-gesture-handler';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import * as Location from 'expo-location';
@@ -29,6 +28,8 @@ import BottomTabBar from '../../components/BottomTabBar';
 import Logo from '../../components/Logo';
 import RecommendationBudgetModal from '../../components/RecommendationBudgetModal';
 import LocationMapPickerModal from '../../components/LocationMapPickerModal';
+import { SkeletonBlock, SkeletonCard } from '../../components/SkeletonLoader';
+import VendorGallerySlider from '../../components/VendorGallerySlider';
 import Slider from '@react-native-community/slider';
 import { getOfferableTierRows } from '../../utils/lineItemDisplay';
 
@@ -73,8 +74,10 @@ const HOME_SPECIAL_GRID_GAP = 12;
 const HOME_SPECIAL_H_CARD_W = Math.round((width - 44 - HOME_SPECIAL_GRID_GAP * 2) / 2.25);
 /** Edge-to-edge within section padding (anonVendorsScroll paddingHorizontal 20 each side). */
 const ANON_PARTNER_CARD_W = width - 40;
-/** Uniform tiles inside each vendor card’s horizontal image strip */
-const ANON_STRIP_BOX = 92;
+
+function isAuthRequiredErrorMessage(message) {
+    return /authorization required|bearer token/i.test(String(message || ''));
+}
 
 function bannerDiscountLabel(item) {
     if (!item || typeof item !== 'object') return null;
@@ -131,12 +134,81 @@ export default function Home({ navigation }) {
     const [homeLatestVendors, setHomeLatestVendors] = useState([]);
     const [homeLatestVendorsLoading, setHomeLatestVendorsLoading] = useState(false);
     const [resolvedPartnerGalleries, setResolvedPartnerGalleries] = useState({});
+    const [partnerLightboxVisible, setPartnerLightboxVisible] = useState(false);
+    const [partnerLightboxImages, setPartnerLightboxImages] = useState([]);
+    const [partnerLightboxIndex, setPartnerLightboxIndex] = useState(0);
     const useApi = useBackendApi();
 
     const partnerGalleryResolveKey = useMemo(
         () => homeLatestVendors.map((v) => `${v.id}:${(v.gallery_urls || []).join('|')}`).join(';;'),
         [homeLatestVendors]
     );
+
+    const buildFallbackRecommendations = useCallback((budgetInr, categoryWeights) => {
+        const baseBudget = Math.max(MIN_PLANNED_BUDGET_INR, Math.round(Number(budgetInr) || plannedBudgetInr || MIN_PLANNED_BUDGET_INR));
+        const sourceCategories = (categories || []).slice(0, 6);
+        const categorySeed =
+            sourceCategories.length > 0
+                ? sourceCategories
+                : [
+                    { id: 'fallback-venue', name: 'Venue' },
+                    { id: 'fallback-catering', name: 'Catering' },
+                    { id: 'fallback-decor', name: 'Decor' },
+                ];
+
+        const ids = categorySeed.map((c) => c.id);
+        const fallbackWeights = {};
+        if (categoryWeights && typeof categoryWeights === 'object') {
+            ids.forEach((id) => {
+                const w = Number(categoryWeights[id]);
+                fallbackWeights[id] = Number.isFinite(w) && w > 0 ? w : 0;
+            });
+        } else {
+            const equal = 100 / ids.length;
+            ids.forEach((id) => {
+                fallbackWeights[id] = equal;
+            });
+        }
+
+        const weightSum = ids.reduce((sum, id) => sum + (fallbackWeights[id] || 0), 0) || 100;
+        const cats = categorySeed.map((cat) => {
+            const pct = ((fallbackWeights[cat.id] || 0) / weightSum) * 100;
+            const allocated = Math.round((baseBudget * pct) / 100);
+            return {
+                id: cat.id,
+                name: cat.name || 'Category',
+                percentage: pct,
+                allocated_budget: allocated,
+                services: [],
+            };
+        });
+
+        return {
+            total_budget: baseBudget,
+            categories: cats,
+            allocation_summary: cats.map((c) => ({
+                category_id: c.id,
+                name: c.name,
+                percentage: c.percentage,
+                allocated_inr: c.allocated_budget,
+            })),
+        };
+    }, [categories, plannedBudgetInr]);
+
+    const fetchRecommendationPage = useCallback(async (inr, weights) => {
+        if (!useApi || !isAuthenticated) {
+            return { data: buildFallbackRecommendations(inr, weights), error: null };
+        }
+        const response = await api.getRecommendations(selectedType, {
+            budget_inr: inr,
+            budget: formatBudgetInrLabel(inr),
+            category_weights: weights,
+        });
+        if (response?.error?.message && /authorization required/i.test(response.error.message)) {
+            return { data: buildFallbackRecommendations(inr, weights), error: null };
+        }
+        return response;
+    }, [buildFallbackRecommendations, isAuthenticated, selectedType, useApi]);
 
     const [form, setForm] = useState({
         role: '',
@@ -249,10 +321,10 @@ export default function Home({ navigation }) {
         (async () => {
             const { data, error } = await api.getVendorsPreview({
                 city: currentCity,
-                limit: 12,
+                limit: 10,
             });
             if (cancelled) return;
-            if (!error && Array.isArray(data)) setHomeLatestVendors(data);
+            if (!error && Array.isArray(data)) setHomeLatestVendors(data.slice(0, 10));
             else setHomeLatestVendors([]);
             setHomeLatestVendorsLoading(false);
         })();
@@ -486,7 +558,7 @@ export default function Home({ navigation }) {
         );
 
         try {
-            if (useApi) {
+            if (useApi && isAuthenticated) {
                 let cid = cartId;
                 const occasionDisplayName =
                     selectedType && Array.isArray(eventTypes)
@@ -511,23 +583,20 @@ export default function Home({ navigation }) {
                         user_id: isAuthenticated ? user?.id : null,
                         ...cartPayload,
                     });
-                    if (error) throw new Error(error.message);
+                    if (error && !isAuthRequiredErrorMessage(error.message)) throw new Error(error.message);
                     if (created?.id) {
                         cid = created.id;
                         await setCartId(cid);
                     }
                 } else {
                     const { error } = await api.updateCart(cid, cartPayload);
-                    if (error) throw new Error(error.message);
+                    if (error && !isAuthRequiredErrorMessage(error.message)) throw new Error(error.message);
                 }
                 if (cid) refreshGlobalCartCount(cid);
             }
 
-            if (useApi && budgetLabel) {
-                const { data: recData, error: recErr } = await api.getRecommendations(selectedType, {
-                    budget_inr: budgetInrClamped,
-                    budget: budgetLabel,
-                });
+            if (budgetLabel) {
+                const { data: recData, error: recErr } = await fetchRecommendationPage(budgetInrClamped);
                 if (!recErr && recData?.categories?.length) {
                     setRecommendationsData(recData);
                     setUserInfoModalVisible(false);
@@ -535,9 +604,29 @@ export default function Home({ navigation }) {
                     setFormSubmitting(false);
                     return;
                 }
+                const fallbackRec = buildFallbackRecommendations(budgetInrClamped);
+                if (fallbackRec?.categories?.length) {
+                    setRecommendationsData(fallbackRec);
+                    setUserInfoModalVisible(false);
+                    setRecommendationsModalVisible(true);
+                    setFormSubmitting(false);
+                    return;
+                }
             }
         } catch (e) {
-            console.warn('[Form submit]', e);
+            if (!isAuthRequiredErrorMessage(e?.message)) {
+                console.warn('[Form submit]', e);
+            }
+            if (budgetLabel) {
+                const fallbackRec = buildFallbackRecommendations(budgetInrClamped);
+                if (fallbackRec?.categories?.length) {
+                    setRecommendationsData(fallbackRec);
+                    setUserInfoModalVisible(false);
+                    setRecommendationsModalVisible(true);
+                    setFormSubmitting(false);
+                    return;
+                }
+            }
         }
         setUserInfoModalVisible(false);
         setFormSubmitted(true);
@@ -610,17 +699,32 @@ export default function Home({ navigation }) {
                     </View>
                     {homeLatestVendorsLoading ? (
                         <View style={styles.anonVendorsLoading}>
-                            <ActivityIndicator color={colors.primary} />
+                            <SkeletonCard theme={theme} style={{ backgroundColor: theme.background, width: ANON_PARTNER_CARD_W }}>
+                                <SkeletonBlock theme={theme} width="65%" height={16} />
+                                <View style={{ height: 10 }} />
+                                <SkeletonBlock theme={theme} width="100%" height={12} />
+                                <View style={{ height: 12 }} />
+                                <View style={{ flexDirection: 'row', gap: 8 }}>
+                                    <SkeletonBlock theme={theme} width={92} height={72} radius={10} />
+                                    <SkeletonBlock theme={theme} width={92} height={72} radius={10} />
+                                    <SkeletonBlock theme={theme} width={92} height={72} radius={10} />
+                                </View>
+                            </SkeletonCard>
                         </View>
                     ) : (
-                        <ScrollView
+                        <FlatList
+                            data={homeLatestVendors.slice(0, 10)}
+                            keyExtractor={(item, index) => String(item?.id || `partner-${index}`)}
                             horizontal
-                            nestedScrollEnabled
+                            pagingEnabled
+                            decelerationRate="fast"
+                            snapToInterval={ANON_PARTNER_CARD_W + 12}
+                            snapToAlignment="start"
+                            disableIntervalMomentum
                             showsHorizontalScrollIndicator={false}
                             style={styles.anonVendorsScrollView}
                             contentContainerStyle={styles.anonVendorsScroll}
-                        >
-                            {homeLatestVendors.map((item) => {
+                            renderItem={({ item }) => {
                                 const galleryUrls = (item.gallery_urls || []).filter(Boolean);
                                 const displayGalleryUrls =
                                     resolvedPartnerGalleries[item.id]?.length > 0
@@ -628,10 +732,13 @@ export default function Home({ navigation }) {
                                         : galleryUrls.map((u) => getVendorImageUrl(u, 'gallery'));
                                 const serviceNames = (item.services || []).filter(Boolean).slice(0, 12);
                                 const svcLine = (item.services || []).filter(Boolean).slice(0, 3).join(' · ');
+                                const gridUris =
+                                    displayGalleryUrls.length > 0
+                                        ? displayGalleryUrls
+                                        : [getVendorImageUrl(item.gallery_urls?.[0], item.display_label || 'Vendor')];
                                 const cityLine = item.city
                                     ? tr('home_featured_in_city').replace('{city}', String(item.city))
                                     : tr('home_partner_services_hint');
-                                const stripHasItems = displayGalleryUrls.length > 0 || serviceNames.length > 0;
                                 const goPartnerDetail = () =>
                                     navigation.navigate('VendorDetail', {
                                         vendor: {
@@ -646,7 +753,6 @@ export default function Home({ navigation }) {
                                     });
                                 return (
                                     <View
-                                        key={item.id}
                                         style={[
                                             styles.anonVendorCard,
                                             {
@@ -656,45 +762,26 @@ export default function Home({ navigation }) {
                                             },
                                         ]}
                                     >
-                                        <GHScrollView
-                                            horizontal
-                                            nestedScrollEnabled
-                                            showsHorizontalScrollIndicator={false}
-                                            bounces
-                                            keyboardShouldPersistTaps="handled"
-                                            style={styles.anonVendorStripScroll}
-                                            contentContainerStyle={styles.anonVendorStripContent}
-                                        >
-                                            {displayGalleryUrls.map((uri, idx) => (
-                                                <View key={`${item.id}-g-${idx}`} style={styles.anonVendorStripBox}>
-                                                    <Image
-                                                        source={{ uri }}
-                                                        style={styles.anonVendorStripImg}
-                                                        resizeMode="cover"
-                                                    />
-                                                </View>
-                                            ))}
-                                            {serviceNames.map((svcName, idx) => (
-                                                <View
-                                                    key={`${item.id}-s-${idx}`}
-                                                    style={[
-                                                        styles.anonVendorStripBox,
-                                                        styles.anonVendorServiceTile,
-                                                        { borderColor: colors.primary + '28', backgroundColor: isDarkMode ? '#1e2433' : '#FFF8F3' },
-                                                    ]}
-                                                >
-                                                    <Ionicons name="briefcase-outline" size={22} color={colors.primary} />
-                                                    <Text style={[styles.anonVendorServiceTileText, { color: theme.text }]} numberOfLines={2}>
-                                                        {svcName}
-                                                    </Text>
-                                                </View>
-                                            ))}
-                                            {!stripHasItems ? (
-                                                <View style={[styles.anonVendorStripBox, styles.anonVendorStripPlaceholder, { backgroundColor: isDarkMode ? '#334155' : '#E5E7EB' }]}>
-                                                    <Ionicons name="images-outline" size={26} color={theme.textLight} />
-                                                </View>
-                                            ) : null}
-                                        </GHScrollView>
+                                        <View style={styles.anonVendorGrid}>
+                                            <VendorGallerySlider
+                                                imageUris={gridUris}
+                                                height={220}
+                                                borderRadius={14}
+                                                showDots={gridUris.length > 1}
+                                                autoSlide={gridUris.length > 1}
+                                                autoSlideIntervalMs={2600}
+                                                containerStyle={styles.anonVendorHeroSlider}
+                                            />
+                                            <LinearGradient
+                                                colors={['transparent', 'rgba(0,0,0,0.62)']}
+                                                style={styles.anonVendorGridOverlay}
+                                                pointerEvents="none"
+                                            >
+                                                <Text style={styles.anonVendorGridOverlayText} numberOfLines={1}>
+                                                    {item.display_label || 'Partner'}
+                                                </Text>
+                                            </LinearGradient>
+                                        </View>
                                         <Pressable
                                             onPress={goPartnerDetail}
                                             style={({ pressed }) => [
@@ -712,6 +799,26 @@ export default function Home({ navigation }) {
                                                     {svcLine}
                                                 </Text>
                                             ) : null}
+                                            {serviceNames.length > 0 ? (
+                                                <View style={styles.anonVendorChipRow}>
+                                                    {serviceNames.slice(0, 3).map((svcName, idx) => (
+                                                        <View
+                                                            key={`${item.id}-chip-${idx}`}
+                                                            style={[
+                                                                styles.anonVendorChip,
+                                                                {
+                                                                    borderColor: colors.primary + '28',
+                                                                    backgroundColor: isDarkMode ? '#1e2433' : '#FFF8F3',
+                                                                },
+                                                            ]}
+                                                        >
+                                                            <Text style={[styles.anonVendorChipText, { color: theme.text }]} numberOfLines={1}>
+                                                                {svcName}
+                                                            </Text>
+                                                        </View>
+                                                    ))}
+                                                </View>
+                                            ) : null}
                                             <View style={styles.anonVendorFooterHint}>
                                                 <Text style={[styles.anonVendorFooterHintText, { color: colors.primary }]}>View partner</Text>
                                                 <Ionicons name="chevron-forward" size={16} color={colors.primary} />
@@ -719,8 +826,8 @@ export default function Home({ navigation }) {
                                         </Pressable>
                                     </View>
                                 );
-                            })}
-                        </ScrollView>
+                            }}
+                        />
                     )}
                 </View>
             </View>
@@ -730,14 +837,7 @@ export default function Home({ navigation }) {
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top', 'left', 'right']}>
             <AnimatedBackground>
-                <ScrollView
-                    contentContainerStyle={styles.scrollContent}
-                    showsVerticalScrollIndicator={false}
-                    refreshControl={
-                        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} colors={[colors.primary]} />
-                    }
-                >
-                    {/* Header */}
+                <View style={[styles.fixedHeaderWrap, { backgroundColor: theme.background, borderBottomColor: theme.border }]}>
                     <View style={styles.header}>
                         <View style={styles.headerLeft}>
                             <View style={styles.logoWrap}>
@@ -756,7 +856,15 @@ export default function Home({ navigation }) {
                         </View>
                         <View style={styles.headerRightSpacer} />
                     </View>
+                </View>
 
+                <ScrollView
+                    contentContainerStyle={styles.scrollContent}
+                    showsVerticalScrollIndicator={false}
+                    refreshControl={
+                        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} colors={[colors.primary]} />
+                    }
+                >
                     {/* Location Picker Modal */}
                     <Modal visible={locationPickerVisible} animationType="fade" transparent>
                         <TouchableOpacity style={styles.modalOverlay} onPress={() => setLocationPickerVisible(false)} activeOpacity={1}>
@@ -1005,7 +1113,17 @@ export default function Home({ navigation }) {
                             )
                         ) : !useApi ? null : homeSpecialLoading ? (
                             <View style={styles.homeSpecialCenter}>
-                                <ActivityIndicator color={colors.primary} />
+                                <View style={{ flexDirection: 'row', gap: 10 }}>
+                                    {[0, 1].map((idx) => (
+                                        <SkeletonCard key={idx} theme={theme} style={{ backgroundColor: theme.background, width: HOME_SPECIAL_H_CARD_W }}>
+                                            <SkeletonBlock theme={theme} width="60%" height={14} />
+                                            <View style={{ height: 8 }} />
+                                            <SkeletonBlock theme={theme} width="90%" height={12} />
+                                            <View style={{ height: 8 }} />
+                                            <SkeletonBlock theme={theme} width="45%" height={12} />
+                                        </SkeletonCard>
+                                    ))}
+                                </View>
                             </View>
                         ) : homeSpecialServices.length === 0 ? (
                             <Text style={[styles.homeSpecialEmpty, { color: theme.textLight, paddingHorizontal: 20 }]}>
@@ -1590,7 +1708,21 @@ export default function Home({ navigation }) {
                             <Text style={[styles.previewSub, { color: theme.textLight }]}>{tr('home_top_vendors_sub')}</Text>
                             {vendorsPreviewLoading ? (
                                 <View style={styles.previewLoading}>
-                                    <ActivityIndicator color={colors.primary} />
+                                    <View style={{ flexDirection: 'row', gap: 10 }}>
+                                        {[0, 1].map((idx) => (
+                                            <SkeletonCard key={idx} theme={theme} style={{ backgroundColor: theme.background, width: 220 }}>
+                                                <SkeletonBlock theme={theme} width="70%" height={14} />
+                                                <View style={{ height: 8 }} />
+                                                <SkeletonBlock theme={theme} width="100%" height={12} />
+                                                <View style={{ height: 12 }} />
+                                                <View style={{ flexDirection: 'row', gap: 6 }}>
+                                                    <SkeletonBlock theme={theme} width={48} height={48} radius={8} />
+                                                    <SkeletonBlock theme={theme} width={48} height={48} radius={8} />
+                                                    <SkeletonBlock theme={theme} width={48} height={48} radius={8} />
+                                                </View>
+                                            </SkeletonCard>
+                                        ))}
+                                    </View>
                                 </View>
                             ) : (
                                 <ScrollView
@@ -1599,7 +1731,11 @@ export default function Home({ navigation }) {
                                     contentContainerStyle={styles.previewScroll}
                                 >
                                     {vendorsPreview.map((item) => {
-                                        const thumbs = (item.gallery_urls || []).filter(Boolean).slice(0, 4);
+                                        const thumbs = (item.gallery_urls || []).filter(Boolean);
+                                        const sliderUris =
+                                            thumbs.length > 0
+                                                ? thumbs.map((uri) => getVendorImageUrl(uri, 'gallery'))
+                                                : [getVendorImageUrl(item.logo_url, item.display_label || 'Vendor')];
                                         const svcLine = (item.services || []).filter(Boolean).slice(0, 3).join(' · ');
                                         const cityLine = item.city
                                             ? tr('home_featured_in_city').replace('{city}', String(item.city))
@@ -1623,22 +1759,16 @@ export default function Home({ navigation }) {
                                                     })
                                                 }
                                             >
-                                                <View style={styles.previewCardGallery}>
-                                                    {thumbs.length > 0 ? (
-                                                        thumbs.map((uri, idx) => (
-                                                            <Image
-                                                                key={`${item.id}-pv-${idx}`}
-                                                                source={{ uri: getVendorImageUrl(uri, 'gallery') }}
-                                                                style={styles.previewCardThumb}
-                                                                resizeMode="cover"
-                                                            />
-                                                        ))
-                                                    ) : (
-                                                        <View style={[styles.previewCardThumbPh, { backgroundColor: isDarkMode ? '#334155' : '#E5E7EB' }]}>
-                                                            <Ionicons name="images-outline" size={20} color={theme.textLight} />
-                                                        </View>
-                                                    )}
-                                                </View>
+                                                <VendorGallerySlider
+                                                    imageUris={sliderUris}
+                                                    height={126}
+                                                    borderRadius={10}
+                                                    autoSlide={sliderUris.length > 1}
+                                                    containerStyle={styles.previewCardSlider}
+                                                    showDots={sliderUris.length > 1}
+                                                    placeholderColor={isDarkMode ? '#334155' : '#E5E7EB'}
+                                                    placeholderIconColor={theme.textLight}
+                                                />
                                                 <Text style={[styles.previewCardLabel, { color: theme.text }]} numberOfLines={2}>
                                                     {cityLine}
                                                 </Text>
@@ -1888,6 +2018,55 @@ export default function Home({ navigation }) {
                 }}
             />
 
+            <Modal visible={partnerLightboxVisible} transparent animationType="fade">
+                <View style={styles.partnerLightboxBackdrop}>
+                    <Pressable
+                        style={StyleSheet.absoluteFill}
+                        onPress={() => setPartnerLightboxVisible(false)}
+                    />
+                    <View style={styles.partnerLightboxInner}>
+                        <TouchableOpacity
+                            onPress={() => setPartnerLightboxVisible(false)}
+                            style={styles.partnerLightboxClose}
+                        >
+                            <Ionicons name="close" size={24} color="#FFF" />
+                        </TouchableOpacity>
+                        <Image
+                            source={{ uri: partnerLightboxImages[partnerLightboxIndex] }}
+                            style={styles.partnerLightboxImage}
+                            resizeMode="contain"
+                        />
+                        {partnerLightboxImages.length > 1 ? (
+                            <View style={styles.partnerLightboxPager}>
+                                <TouchableOpacity
+                                    style={styles.partnerLightboxNav}
+                                    onPress={() =>
+                                        setPartnerLightboxIndex((prev) =>
+                                            prev === 0 ? partnerLightboxImages.length - 1 : prev - 1
+                                        )
+                                    }
+                                >
+                                    <Ionicons name="chevron-back" size={20} color="#FFF" />
+                                </TouchableOpacity>
+                                <Text style={styles.partnerLightboxCount}>
+                                    {partnerLightboxIndex + 1}/{partnerLightboxImages.length}
+                                </Text>
+                                <TouchableOpacity
+                                    style={styles.partnerLightboxNav}
+                                    onPress={() =>
+                                        setPartnerLightboxIndex((prev) =>
+                                            prev === partnerLightboxImages.length - 1 ? 0 : prev + 1
+                                        )
+                                    }
+                                >
+                                    <Ionicons name="chevron-forward" size={20} color="#FFF" />
+                                </TouchableOpacity>
+                            </View>
+                        ) : null}
+                    </View>
+                </View>
+            </Modal>
+
             <RecommendationBudgetModal
                 visible={recommendationsModalVisible}
                 onClose={(result) => {
@@ -1913,13 +2092,7 @@ export default function Home({ navigation }) {
                 occasionName={selectedOccasionObj?.name}
                 data={recommendationsData}
                 setData={setRecommendationsData}
-                fetchRecommendationPage={(inr, weights) =>
-                    api.getRecommendations(selectedType, {
-                        budget_inr: inr,
-                        budget: formatBudgetInrLabel(inr),
-                        category_weights: weights,
-                    })
-                }
+                fetchRecommendationPage={fetchRecommendationPage}
                 cartId={cartId}
                 setCartId={setCartId}
                 isAuthenticated={isAuthenticated}
@@ -1941,13 +2114,18 @@ export default function Home({ navigation }) {
 const styles = StyleSheet.create({
     container: { flex: 1 },
     scrollContent: { paddingBottom: 40 },
+    fixedHeaderWrap: {
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        paddingTop: 6,
+        paddingBottom: 10,
+    },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
         paddingHorizontal: 20,
-        marginTop: 10,
-        marginBottom: 16,
+        marginTop: 0,
+        marginBottom: 0,
     },
     headerLeft: {
         flexDirection: 'row',
@@ -1971,7 +2149,7 @@ const styles = StyleSheet.create({
     locationValue: { fontSize: 15, fontWeight: '700' },
     /** Reserve space for global language + cart overlay */
     headerRightSpacer: {
-        width: 100,
+        width: 96,
         height: 42,
     },
     section: { marginBottom: 28 },
@@ -2138,12 +2316,8 @@ const styles = StyleSheet.create({
         flexGrow: 0,
     },
     anonVendorsScroll: {
-        flexDirection: 'row',
-        flexWrap: 'nowrap',
-        alignItems: 'stretch',
         paddingLeft: 20,
         paddingRight: 20,
-        gap: 12,
     },
     anonVendorCard: {
         width: ANON_PARTNER_CARD_W,
@@ -2151,47 +2325,68 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderLeftWidth: 4,
         overflow: 'hidden',
-        paddingBottom: 12,
-        marginRight: 0,
+        paddingBottom: 10,
+        marginRight: 12,
     },
-    anonVendorStripScroll: {
+    anonVendorGrid: {
+        marginHorizontal: 10,
+        marginTop: 10,
+        position: 'relative',
+    },
+    anonVendorHeroSlider: {
         width: '100%',
-        flexGrow: 0,
-        maxHeight: ANON_STRIP_BOX + 24,
     },
-    anonVendorStripContent: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingHorizontal: 10,
-        paddingVertical: 10,
-        gap: 10,
-    },
-    anonVendorStripBox: {
-        width: ANON_STRIP_BOX,
-        height: ANON_STRIP_BOX,
-        borderRadius: 14,
+    anonVendorGridCell: {
+        borderRadius: 12,
         overflow: 'hidden',
-        backgroundColor: '#E8EAEF',
+        backgroundColor: '#E5E7EB',
+        position: 'relative',
     },
-    anonVendorStripImg: {
+    anonVendorBentoTop: {
+        flexDirection: 'row',
+        minHeight: 176,
+    },
+    anonVendorBentoLead: {
+        flex: 1.2,
+        minHeight: 176,
+        marginRight: 6,
+    },
+    anonVendorBentoRight: {
+        flex: 0.8,
+    },
+    anonVendorBentoSmall: {
+        flex: 1,
+        minHeight: 85,
+    },
+    anonVendorBentoSmallTop: {
+        marginBottom: 6,
+    },
+    anonVendorBentoBottom: {
+        marginTop: 6,
+        flexDirection: 'row',
+        minHeight: 86,
+    },
+    anonVendorBentoBottomCell: {
+        flex: 1,
+        minHeight: 86,
+    },
+    anonVendorBentoBottomCellLeft: {
+        marginRight: 6,
+    },
+    anonVendorGridImage: {
         width: '100%',
         height: '100%',
     },
-    anonVendorServiceTile: {
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingHorizontal: 4,
+    anonVendorGridOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        justifyContent: 'flex-end',
+        paddingHorizontal: 8,
+        paddingBottom: 8,
     },
-    anonVendorServiceTileText: {
-        fontSize: 10,
+    anonVendorGridOverlayText: {
+        color: '#FFF',
+        fontSize: 11,
         fontWeight: '700',
-        marginTop: 4,
-        textAlign: 'center',
-        lineHeight: 13,
-    },
-    anonVendorStripPlaceholder: {
-        alignItems: 'center',
-        justifyContent: 'center',
     },
     anonVendorCardFooter: {
         paddingHorizontal: 12,
@@ -2207,6 +2402,23 @@ const styles = StyleSheet.create({
         marginTop: 4,
         lineHeight: 17,
     },
+    anonVendorChipRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 6,
+        marginTop: 8,
+    },
+    anonVendorChip: {
+        borderWidth: 1,
+        borderRadius: 999,
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        maxWidth: '100%',
+    },
+    anonVendorChipText: {
+        fontSize: 11,
+        fontWeight: '600',
+    },
     anonVendorFooterHint: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -2216,6 +2428,56 @@ const styles = StyleSheet.create({
     anonVendorFooterHintText: {
         fontSize: 12,
         fontWeight: '700',
+    },
+    partnerLightboxBackdrop: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.92)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingHorizontal: 16,
+    },
+    partnerLightboxInner: {
+        width: '100%',
+        alignItems: 'center',
+    },
+    partnerLightboxClose: {
+        position: 'absolute',
+        top: -46,
+        right: 2,
+        zIndex: 10,
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(255,255,255,0.12)',
+    },
+    partnerLightboxImage: {
+        width: '100%',
+        height: 380,
+        borderRadius: 14,
+        backgroundColor: 'rgba(255,255,255,0.06)',
+    },
+    partnerLightboxPager: {
+        marginTop: 14,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 14,
+    },
+    partnerLightboxNav: {
+        width: 34,
+        height: 34,
+        borderRadius: 17,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(255,255,255,0.15)',
+    },
+    partnerLightboxCount: {
+        color: '#FFF',
+        fontSize: 13,
+        fontWeight: '700',
+        minWidth: 56,
+        textAlign: 'center',
     },
     occasionRowSingle: {
         flexDirection: 'row',
@@ -2762,35 +3024,15 @@ const styles = StyleSheet.create({
         paddingRight: 8,
     },
     previewCard: {
-        width: 156,
+        width: 190,
         borderRadius: 14,
         borderWidth: 1,
         overflow: 'hidden',
         marginRight: 12,
     },
-    previewCardGallery: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        gap: 4,
-        padding: 8,
-    },
-    previewCardThumb: {
-        width: 66,
-        height: 66,
-        borderRadius: 10,
-        backgroundColor: '#E5E7EB',
-    },
-    previewCardThumbPh: {
-        width: '100%',
-        minHeight: 136,
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderRadius: 10,
-    },
-    previewCardImg: {
-        width: '100%',
-        height: 96,
-        backgroundColor: '#E5E7EB',
+    previewCardSlider: {
+        margin: 8,
+        marginBottom: 4,
     },
     previewCardLabel: {
         fontSize: 12,

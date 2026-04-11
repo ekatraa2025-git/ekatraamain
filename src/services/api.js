@@ -83,6 +83,7 @@ function getCacheTtlMsForPath(pathname) {
     if (pathname.includes('/api/public/config/maps')) return 30 * 60 * 1000;
     if (pathname.includes('/api/public/banners')) return 15 * 60 * 1000;
     if (pathname.includes('/api/public/testimonials')) return 15 * 60 * 1000;
+    if (pathname.includes('/api/public/e-invites/')) return 15 * 60 * 1000;
     if (pathname.includes('/api/public/occasions') || pathname.includes('/api/public/event-types')) return 10 * 60 * 1000;
     if (pathname.includes('/api/public/categories')) return 10 * 60 * 1000;
     if (pathname.includes('/api/public/special-services')) return 10 * 60 * 1000;
@@ -362,6 +363,17 @@ export const api = {
     async getTestimonials() {
         return get('/api/public/testimonials');
     },
+    async getEInviteTemplates(params = {}) {
+        const q = {};
+        if (params.section_key) q.section_key = params.section_key;
+        if (params.limit) q.limit = params.limit;
+        return get('/api/public/e-invites/templates', q);
+    },
+    async getEInviteFaqs(params = {}) {
+        const q = {};
+        if (params.limit) q.limit = params.limit;
+        return get('/api/public/e-invites/faqs', q);
+    },
     async getServices(params = {}) {
         const q = {};
         if (params.occasion_id) q.occasion_id = params.occasion_id;
@@ -496,6 +508,42 @@ export const api = {
             return { data: null, error: { message: 'Sign in to complete payment.' } };
         }
         return postWithAuth('/api/public/payment/verify-balance', body, accessToken);
+    },
+    async registerPushToken(expoPushToken, accessToken, platform) {
+        if (!accessToken) {
+            return { data: null, error: { message: 'Sign in required.' } };
+        }
+        return postWithAuth(
+            '/api/public/notifications/push-token',
+            {
+                expo_push_token: expoPushToken,
+                platform: platform || null,
+                app_id: 'ekatraa-user-app',
+            },
+            accessToken
+        );
+    },
+    async unregisterPushToken(expoPushToken, accessToken) {
+        if (!API_BASE) return { data: null, error: { message: 'API URL not configured. Set EXPO_PUBLIC_API_URL in .env' } };
+        if (!accessToken) {
+            return { data: null, error: { message: 'Sign in required.' } };
+        }
+        try {
+            const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` };
+            const res = await fetchWithTimeout(`${API_BASE}/api/public/notifications/push-token`, {
+                method: 'DELETE',
+                headers,
+                body: JSON.stringify({ expo_push_token: expoPushToken }),
+            });
+            const data = await res.json().catch(() => null);
+            if (!res.ok) {
+                const msg = stringifyApiError(data?.error) || res.statusText;
+                return { data: null, error: { message: msg } };
+            }
+            return { data, error: null };
+        } catch (e) {
+            return { data: null, error: { message: buildError(e) } };
+        }
     },
 
     // Guests (backend uses Bearer token; user_id from JWT)

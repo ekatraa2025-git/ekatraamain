@@ -11,8 +11,8 @@ import { useToast } from '../../context/ToastContext';
 
 export default function MyProfile({ navigation }) {
     const { theme, isDarkMode } = useTheme();
-    const { showToast } = useToast();
-    const { user, isAuthenticated } = useAuth();
+    const { showToast, showConfirm } = useToast();
+    const { user, isAuthenticated, signOut } = useAuth();
     
     const [loading, setLoading] = useState(false);
     const [saving, setSaving] = useState(false);
@@ -142,6 +142,23 @@ export default function MyProfile({ navigation }) {
         }
         const name = profile.full_name || 'User';
         return `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=FF4117&color=fff&size=200`;
+    };
+
+    const handleLogout = () => {
+        showConfirm({
+            title: 'Logout',
+            message: 'Are you sure you want to logout?',
+            cancelLabel: 'Cancel',
+            confirmLabel: 'Logout',
+            destructive: true,
+            onConfirm: async () => {
+                await signOut();
+                navigation.reset({
+                    index: 0,
+                    routes: [{ name: 'Home' }],
+                });
+            },
+        });
     };
 
     if (!isAuthenticated) {
@@ -333,6 +350,20 @@ export default function MyProfile({ navigation }) {
                         </Text>
                     </View>
                 </View>
+
+                <TouchableOpacity
+                    style={[
+                        styles.logoutBtn,
+                        {
+                            backgroundColor: isDarkMode ? '#2D1012' : '#FEF2F2',
+                            borderColor: isDarkMode ? '#4A1E22' : '#FECACA',
+                        },
+                    ]}
+                    onPress={handleLogout}
+                >
+                    <Ionicons name="log-out-outline" size={20} color={theme.error} style={{ marginRight: 8 }} />
+                    <Text style={[styles.logoutText, { color: theme.error }]}>Logout</Text>
+                </TouchableOpacity>
             </ScrollView>
             <BottomTabBar navigation={navigation} activeRoute="Menu" />
         </SafeAreaView>
@@ -359,6 +390,7 @@ const styles = StyleSheet.create({
     },
     scrollContent: {
         padding: 20,
+        paddingBottom: 120,
     },
     loadingContainer: {
         flex: 1,
@@ -474,5 +506,19 @@ const styles = StyleSheet.create({
     infoValue: {
         fontSize: 14,
         fontWeight: '500',
+    },
+    logoutBtn: {
+        marginTop: 20,
+        marginBottom: 8,
+        paddingVertical: 14,
+        borderRadius: 12,
+        borderWidth: 1,
+        flexDirection: 'row',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    logoutText: {
+        fontSize: 16,
+        fontWeight: '700',
     },
 });

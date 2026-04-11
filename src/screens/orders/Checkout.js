@@ -53,14 +53,19 @@ const LATER_BULLETS = [
 const LATER_FOOTER = 'High-demand vendors get booked quickly. Confirm now to avoid unavailability.';
 
 const POLICY_CONTENT = {
-    advance: ADVANCE_PAYMENT_POLICY,
-    cancellation: CANCELLATION_POLICY,
-    refund: REFUND_POLICY,
-    terms: TERMS_AND_CONDITIONS,
+    terms_combined: [
+        ADVANCE_PAYMENT_POLICY,
+        CANCELLATION_POLICY,
+        REFUND_POLICY,
+        TERMS_AND_CONDITIONS,
+    ].join('\n\n'),
     protection: PROTECTION_PLAN_DETAILS,
 };
 
-const POLICY_KEYS = ['advance', 'cancellation', 'refund', 'terms', 'protection'];
+const POLICY_KEYS = ['protection', 'terms_combined'];
+const POLICY_DISPLAY = {
+    terms_combined: 'Terms, Advance Payment, Cancellation & Refund Policy',
+};
 
 export default function Checkout({ route, navigation }) {
     const { openCheckout, closeCheckout, RazorpayUI } = useRazorpay();
@@ -78,20 +83,27 @@ export default function Checkout({ route, navigation }) {
     const [protectionSettings, setProtectionSettings] = useState(null);
     const [policyModal, setPolicyModal] = useState(null);
     const [agreements, setAgreements] = useState({
-        advance: false,
-        cancellation: false,
-        refund: false,
-        terms: false,
         protection: false,
+        terms_combined: false,
     });
+    const [termsScrolledToEnd, setTermsScrolledToEnd] = useState(false);
+    const [modalScrollViewportHeight, setModalScrollViewportHeight] = useState(0);
 
     const allPoliciesAgreed = POLICY_KEYS.every((k) => agreements[k]);
 
     const approvePolicyModal = () => {
+        if (policyModal === 'terms_combined' && !termsScrolledToEnd) return;
         if (policyModal && POLICY_KEYS.includes(policyModal)) {
             setAgreements((prev) => ({ ...prev, [policyModal]: true }));
         }
         setPolicyModal(null);
+    };
+
+    const openPolicyModal = (key) => {
+        if (key === 'terms_combined') {
+            setTermsScrolledToEnd(false);
+        }
+        setPolicyModal(key);
     };
 
     useEffect(() => {
@@ -135,7 +147,9 @@ export default function Checkout({ route, navigation }) {
         }
 
         if (!allPoliciesAgreed) {
-            const pending = POLICY_KEYS.filter((k) => !agreements[k]).map((k) => POLICY_MODAL_LABELS[k] || k);
+            const pending = POLICY_KEYS
+                .filter((k) => !agreements[k])
+                .map((k) => POLICY_DISPLAY[k] || POLICY_MODAL_LABELS[k] || k);
             showToast({
                 variant: 'info',
                 title: 'Review policies',
@@ -524,7 +538,7 @@ export default function Checkout({ route, navigation }) {
                             </Text>
                             <TouchableOpacity
                                 style={styles.policyLinkBtn}
-                                onPress={() => setPolicyModal('protection')}
+                                onPress={() => openPolicyModal('protection')}
                                 activeOpacity={0.7}
                             >
                                 <Ionicons
@@ -539,26 +553,23 @@ export default function Checkout({ route, navigation }) {
                             </TouchableOpacity>
 
                             <Text style={[styles.policyLinksIntro, { color: theme.textLight }]}>
-                                Policies — open each link and approve to continue:
+                                Policies — open and accept to continue:
                             </Text>
-                            {['advance', 'cancellation', 'refund', 'terms'].map((key) => (
-                                <TouchableOpacity
-                                    key={key}
-                                    style={styles.policyLinkBtn}
-                                    onPress={() => setPolicyModal(key)}
-                                    activeOpacity={0.7}
-                                >
-                                    <Ionicons
-                                        name={agreements[key] ? 'checkmark-circle' : 'ellipse-outline'}
-                                        size={18}
-                                        color={agreements[key] ? '#16A34A' : theme.textLight}
-                                    />
-                                    <Text style={[styles.policyLinkText, { color: colors.primary }]}>
-                                        {POLICY_MODAL_LABELS[key]}
-                                    </Text>
-                                    <Ionicons name="chevron-forward" size={16} color={theme.textLight} />
-                                </TouchableOpacity>
-                            ))}
+                            <TouchableOpacity
+                                style={styles.policyLinkBtn}
+                                onPress={() => openPolicyModal('terms_combined')}
+                                activeOpacity={0.7}
+                            >
+                                <Ionicons
+                                    name={agreements.terms_combined ? 'checkmark-circle' : 'ellipse-outline'}
+                                    size={18}
+                                    color={agreements.terms_combined ? '#16A34A' : theme.textLight}
+                                />
+                                <Text style={[styles.policyLinkText, { color: colors.primary }]}>
+                                    Terms, Advance Payment, Cancellation & Refund Policy
+                                </Text>
+                                <Ionicons name="chevron-forward" size={16} color={theme.textLight} />
+                            </TouchableOpacity>
                             {!allPoliciesAgreed ? (
                                 <Text style={[styles.policyWarning, { color: theme.textLight }]}>
                                     All policies above must be opened and accepted before payment.
@@ -571,7 +582,7 @@ export default function Checkout({ route, navigation }) {
                         <TouchableOpacity
                             style={[styles.placeOrderBtn, saving && styles.placeOrderBtnDisabled]}
                             onPress={handleSubmit}
-                            disabled={saving}
+                            disabled={saving || !allPoliciesAgreed}
                         >
                             {saving ? (
                                 <ActivityIndicator color="#FFF" />
@@ -592,7 +603,11 @@ export default function Checkout({ route, navigation }) {
                                 <Ionicons name="close" size={26} color={theme.text} />
                             </TouchableOpacity>
                             <Text style={[styles.modalTitle, { color: theme.text }]} numberOfLines={2}>
-                                {policyModal ? POLICY_MODAL_LABELS[policyModal] : ''}
+                                {policyModal === 'terms_combined'
+                                    ? 'Terms, Advance Payment, Cancellation & Refund Policy'
+                                    : policyModal
+                                        ? POLICY_MODAL_LABELS[policyModal]
+                                        : ''}
                             </Text>
                             <View style={{ width: 40 }} />
                         </View>
@@ -600,13 +615,38 @@ export default function Checkout({ route, navigation }) {
                             style={styles.modalScroll}
                             contentContainerStyle={styles.modalScrollContent}
                             showsVerticalScrollIndicator
+                            onLayout={(e) => {
+                                setModalScrollViewportHeight(e.nativeEvent.layout.height || 0);
+                            }}
+                            onContentSizeChange={(_, contentHeight) => {
+                                if (policyModal !== 'terms_combined') return;
+                                if (contentHeight <= modalScrollViewportHeight + 8) {
+                                    setTermsScrolledToEnd(true);
+                                }
+                            }}
+                            onScroll={(e) => {
+                                if (policyModal !== 'terms_combined') return;
+                                const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+                                const reachedEnd =
+                                    contentOffset.y + layoutMeasurement.height >= contentSize.height - 16;
+                                if (reachedEnd && !termsScrolledToEnd) setTermsScrolledToEnd(true);
+                            }}
+                            scrollEventThrottle={16}
                         >
                             <Text style={[styles.modalBody, { color: theme.text }]}>
                                 {policyModal ? POLICY_CONTENT[policyModal] : ''}
                             </Text>
                         </ScrollView>
                         <View style={[styles.modalFooter, { borderTopColor: theme.border, backgroundColor: theme.card }]}>
-                            <TouchableOpacity style={[styles.modalAgreeBtn, { backgroundColor: colors.primary }]} onPress={approvePolicyModal}>
+                            <TouchableOpacity
+                                style={[
+                                    styles.modalAgreeBtn,
+                                    { backgroundColor: colors.primary },
+                                    policyModal === 'terms_combined' && !termsScrolledToEnd && styles.modalAgreeBtnDisabled,
+                                ]}
+                                onPress={approvePolicyModal}
+                                disabled={policyModal === 'terms_combined' && !termsScrolledToEnd}
+                            >
                                 <Text style={styles.modalAgreeBtnText}>I have read and agree</Text>
                             </TouchableOpacity>
                         </View>
@@ -629,9 +669,9 @@ const styles = StyleSheet.create({
         borderBottomWidth: 1,
     },
     backBtn: { padding: 8 },
-    headerTitle: { fontSize: 18, fontWeight: 'bold', flex: 1, textAlign: 'center' },
+    headerTitle: { fontSize: 16, fontWeight: 'bold', flex: 1, textAlign: 'left' },
     loadingWrap: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-    scroll: { padding: 16, paddingBottom: 56 },
+    scroll: { padding: 16, paddingBottom: 24 },
     card: {
         borderRadius: 16,
         borderWidth: 1,
@@ -777,6 +817,9 @@ const styles = StyleSheet.create({
         paddingVertical: 14,
         borderRadius: 12,
         alignItems: 'center',
+    },
+    modalAgreeBtnDisabled: {
+        opacity: 0.45,
     },
     modalAgreeBtnText: { color: '#FFF', fontSize: 16, fontWeight: '700' },
 });

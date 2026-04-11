@@ -72,6 +72,49 @@ export function setupUserNotificationSubscription(userId, onInsert) {
 }
 
 /**
+ * @param {string} userId
+ * @param {(payload: { orderId: string, status: string, previousStatus: string | null }) => void} onStatusChange
+ * @returns {() => void}
+ */
+export function setupUserOrderStatusSubscription(userId, onStatusChange) {
+    if (!userId) {
+        return () => {};
+    }
+
+    const channel = supabase
+        .channel(`user-orders-${userId}`)
+        .on(
+            'postgres_changes',
+            {
+                event: 'UPDATE',
+                schema: 'public',
+                table: 'orders',
+                filter: `user_id=eq.${encodeURIComponent(String(userId))}`,
+            },
+            (payload) => {
+                const current = payload.new;
+                const previous = payload.old;
+                const orderId = current?.id;
+                const status = current?.status;
+                const previousStatus = previous?.status ?? null;
+                if (!orderId || !status || status === previousStatus) return;
+                if (typeof onStatusChange === 'function') {
+                    onStatusChange({ orderId, status, previousStatus });
+                }
+            }
+        )
+        .subscribe((status) => {
+            if (status === 'CHANNEL_ERROR') {
+                console.warn('[userNotifications] order channel error');
+            }
+        });
+
+    return () => {
+        supabase.removeChannel(channel);
+    };
+}
+
+/**
  * @param {string} notificationId
  */
 export async function markUserNotificationRead(notificationId) {

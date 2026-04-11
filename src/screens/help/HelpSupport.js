@@ -97,7 +97,7 @@ const styles = StyleSheet.create({
         borderBottomWidth: 1,
     },
     backBtn: { padding: 4 },
-    headerTitle: { fontSize: 18, fontWeight: '700' },
+    headerTitle: { fontSize: 17, fontWeight: '700' },
     scroll: { padding: 16, paddingBottom: 40 },
     card: {
         borderRadius: 16,

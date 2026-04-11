@@ -91,7 +91,7 @@ const styles = StyleSheet.create({
         borderBottomWidth: 1,
     },
     backBtn: { padding: 4 },
-    headerTitle: { fontSize: 18, fontWeight: '700' },
+    headerTitle: { fontSize: 17, fontWeight: '700' },
     scroll: { padding: 20 },
     heroCard: {
         borderRadius: 20,

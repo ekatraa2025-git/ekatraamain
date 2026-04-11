@@ -70,7 +70,7 @@ const LEGACY = {
 };
 
 export function tierIndexFromOptions(options) {
-    const tier = options?.tier;
+    const tier = options?.tier || options?.tier_key || options?.selected_tier || options?.pricing_tier;
     if (!tier) return -1;
     let idx = TIER_KEYS.indexOf(tier);
     if (idx >= 0) return idx;
@@ -80,7 +80,7 @@ export function tierIndexFromOptions(options) {
 }
 
 export function getTierLabel(options) {
-    const tier = options?.tier;
+    const tier = options?.tier || options?.tier_key || options?.selected_tier || options?.pricing_tier;
     if (!tier) return null;
     if (LEGACY[tier]) return LEGACY[tier];
     const idx = tierIndexFromOptions(options);
@@ -102,13 +102,23 @@ export function getLineItemParts(item) {
         null;
     const serviceName = svc.name || item.name || null;
     const idx = tierIndexFromOptions(opt);
-    const tierName = getTierLabel(opt);
+    const tierName =
+        getTierLabel(opt) ||
+        (typeof opt.tier_label === 'string' ? opt.tier_label : null) ||
+        (typeof opt.tierName === 'string' ? opt.tierName : null) ||
+        (typeof item.tier_label === 'string' ? item.tier_label : null) ||
+        (typeof item.tier_name === 'string' ? item.tier_name : null) ||
+        null;
     const qtyLabel =
         opt.qty_label ||
+        opt.qtyLabel ||
+        (typeof item.qty_label === 'string' ? item.qty_label : null) ||
         (idx >= 0 ? svc[TIER_QTY_KEYS[idx]] : null) ||
         null;
     const subVariety =
         opt.sub_variety ||
+        opt.subVariety ||
+        (typeof item.sub_variety === 'string' ? item.sub_variety : null) ||
         (idx >= 0 ? svc[TIER_SUB_KEYS[idx]] : null) ||
         null;
     const occasion =

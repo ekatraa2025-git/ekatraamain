@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { supabase, authService } from '../services/supabase';
+import { api } from '../services/api';
+import { getExpoPushToken } from '../lib/appNotifications';
 
 const AuthContext = createContext(undefined);
 
@@ -100,6 +102,17 @@ export function AuthProvider({ children }) {
 
     const signOut = async () => {
         try {
+            const accessToken = session?.access_token || null;
+            if (accessToken) {
+                try {
+                    const pushToken = await getExpoPushToken();
+                    if (pushToken) {
+                        await api.unregisterPushToken(pushToken, accessToken);
+                    }
+                } catch {
+                    /* non-fatal */
+                }
+            }
             const { error } = await authService.signOut();
             if (error) {
                 console.warn('[AUTH] Sign out:', error.message || error);

@@ -8,9 +8,9 @@ const { width, height } = Dimensions.get('window');
 
 // Taglines in multiple languages
 const TAGLINES = {
-    english: "Coming Together",
-    hindi: "एक साथ आना",
-    odia: "ଏକତ୍ର ଆସିବା",
+    english: 'Celebrating Togetherness with Trust and Care',
+    hindi: 'एक साथ आना',
+    odia: 'ଏକତ୍ରୀତ ହବା ପାଇଁ ଏକତ୍ର ହିଁ ଏକମାତ୍ର ଭରୋସା ଓ ସାହାରା',
 };
 
 export default function Splash({ navigation }) {

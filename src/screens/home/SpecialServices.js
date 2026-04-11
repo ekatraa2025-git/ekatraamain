@@ -25,8 +25,6 @@ import BottomTabBar from '../../components/BottomTabBar';
 import { getOfferableTierRows } from '../../utils/lineItemDisplay';
 
 const { width } = Dimensions.get('window');
-const GRID_GAP = 10;
-const CARD_W = (width - 16 * 2 - GRID_GAP) / 2;
 
 function numPrice(v) {
     if (v == null) return null;
@@ -181,9 +179,11 @@ export default function SpecialServices({ route, navigation }) {
                         <Ionicons name="arrow-back" size={20} color={theme.text} />
                     </View>
                 </TouchableOpacity>
-                <View style={{ flex: 1 }}>
+                <View style={styles.headerTextWrap}>
                     <Text style={[styles.headerTitle, { color: theme.text }]}>{tr('special_catalog_title')}</Text>
-                    <Text style={[styles.headerSub, { color: theme.textLight }]}>{tr('special_catalog_header_sub')}</Text>
+                    <Text style={[styles.headerSub, { color: theme.textLight }]} numberOfLines={1}>
+                        {tr('special_catalog_header_sub')}
+                    </Text>
                 </View>
             </View>
 
@@ -218,10 +218,8 @@ export default function SpecialServices({ route, navigation }) {
                     ) : (
                         <FlatList
                             data={services}
-                            numColumns={2}
                             scrollEnabled={false}
                             keyExtractor={(s) => s.id}
-                            columnWrapperStyle={{ gap: GRID_GAP, marginBottom: GRID_GAP }}
                             renderItem={({ item: svc }) => {
                                 const tiers = getOfferableTierRows(svc);
                                 const isOn = selected.has(svc.id);
@@ -231,7 +229,7 @@ export default function SpecialServices({ route, navigation }) {
                                         style={[
                                             styles.gridCard,
                                             {
-                                                width: CARD_W,
+                                                width: '100%',
                                                 backgroundColor: theme.card,
                                                 borderColor: isOn ? colors.primary : theme.border,
                                             },
@@ -272,13 +270,23 @@ export default function SpecialServices({ route, navigation }) {
                                             <View style={styles.cardBody}>
                                                 <Text style={[styles.svcName, { color: theme.text }]} numberOfLines={2}>
                                                     {svc.name}
+                                                    {svc.price_unit ? (
+                                                        <Text style={[styles.svcUnitInline, { color: theme.textLight }]}>
+                                                            {` (${svc.price_unit})`}
+                                                        </Text>
+                                                    ) : null}
                                                 </Text>
                                             </View>
                                         </TouchableOpacity>
                                         {tiers.length === 0 ? (
                                             <Text style={[styles.tierHint, { color: theme.textLight }]}>No tiers priced</Text>
                                         ) : (
-                                            <View style={styles.tierChips}>
+                                            <ScrollView
+                                                horizontal
+                                                showsHorizontalScrollIndicator={false}
+                                                style={styles.tierChips}
+                                                contentContainerStyle={styles.tierChipsRow}
+                                            >
                                                 {tiers.map((t) => {
                                                     const active = sel?.tierKey === t.key;
                                                     return (
@@ -307,11 +315,8 @@ export default function SpecialServices({ route, navigation }) {
                                                         </TouchableOpacity>
                                                     );
                                                 })}
-                                            </View>
+                                            </ScrollView>
                                         )}
-                                        {svc.price_unit ? (
-                                            <Text style={[styles.unitSmall, { color: theme.textLight }]}>Unit: {svc.price_unit}</Text>
-                                        ) : null}
                                     </View>
                                 );
                             }}
@@ -377,8 +382,9 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
+    headerTextWrap: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
     headerTitle: { fontSize: 20, fontWeight: '800' },
-    headerSub: { fontSize: 12, marginTop: 2 },
+    headerSub: { fontSize: 12, flexShrink: 1 },
     centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
     loadingText: { marginTop: 12, fontSize: 14 },
     scroll: { paddingHorizontal: 16, paddingTop: 12 },
@@ -407,6 +413,7 @@ const styles = StyleSheet.create({
         borderWidth: 1.5,
         padding: 0,
         overflow: 'hidden',
+        marginBottom: 12,
     },
     cardImageWrap: {
         width: '100%',
@@ -451,19 +458,20 @@ const styles = StyleSheet.create({
     },
     cardBody: { paddingHorizontal: 10, paddingTop: 10, paddingBottom: 2 },
     gridCardTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
-    tierChips: { marginTop: 4, paddingHorizontal: 10, paddingBottom: 10, gap: 6 },
+    tierChips: { marginTop: 4, paddingBottom: 10 },
+    tierChipsRow: { paddingHorizontal: 10, paddingRight: 14 },
     tierChip: {
         borderRadius: 10,
         borderWidth: 1,
         paddingHorizontal: 8,
         paddingVertical: 6,
-        marginBottom: 4,
+        marginRight: 8,
+        minWidth: 96,
     },
     tierChipLabel: { fontSize: 10, fontWeight: '700' },
     tierChipPrice: { fontSize: 13, fontWeight: '800', marginTop: 2 },
     tierSubVariety: { fontSize: 9, marginTop: 4, lineHeight: 12 },
     tierHint: { fontSize: 11, marginTop: 6 },
-    unitSmall: { fontSize: 10, marginTop: 4 },
     card: {
         flexDirection: 'row',
         borderRadius: 16,
@@ -483,6 +491,7 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     svcName: { fontSize: 17, fontWeight: '800' },
+    svcUnitInline: { fontSize: 12, fontWeight: '600' },
     svcDesc: { fontSize: 13, lineHeight: 19, marginTop: 4 },
     priceRow: { flexDirection: 'row', alignItems: 'baseline', marginTop: 10, flexWrap: 'wrap' },
     price: { fontSize: 18, fontWeight: '800' },

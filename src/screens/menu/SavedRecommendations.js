@@ -185,7 +185,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
-    headerTitle: { fontSize: 18, fontWeight: '800', flex: 1 },
+    headerTitle: { fontSize: 17, fontWeight: '800', flex: 1 },
     centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
     emptyWrap: { flex: 1, justifyContent: 'center', paddingHorizontal: 24 },
     hint: { textAlign: 'center', fontSize: 14, lineHeight: 21 },

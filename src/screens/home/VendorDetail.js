@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Linking, Modal, TextInput, Platform, ActivityIndicator, FlatList } from 'react-native';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Linking, Modal, TextInput, Platform, ActivityIndicator, Animated } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -13,6 +13,7 @@ import { EKATRAA_SUPPORT_TEL, EKATRAA_SUPPORT_WHATSAPP_URL } from '../../constan
 import { Button } from '../../components/Button';
 import BottomTabBar from '../../components/BottomTabBar';
 import { useToast } from '../../context/ToastContext';
+import VendorGallerySlider from '../../components/VendorGallerySlider';
 
 function normalizeGalleryUrls(raw) {
     if (raw == null) return [];
@@ -40,26 +41,31 @@ function mergeLogoIntoGalleryUrls(logoUrl, galleryArr) {
     });
 }
 
-/** Prefer legacy `image_url`; vendor app often stores `image_urls` (array). */
-function getServicePrimaryImagePath(svc) {
-    if (!svc) return null;
-    if (svc.image_url) return svc.image_url;
+function getServiceImagePaths(svc) {
+    if (!svc) return [];
+    const out = [];
+    if (svc.image_url) out.push(svc.image_url);
     const raw = svc.image_urls;
-    if (raw == null) return null;
-    let arr = raw;
-    if (typeof raw === 'string') {
-        try {
-            const p = JSON.parse(raw);
-            arr = Array.isArray(p) ? p : [];
-        } catch {
-            return raw.trim() || null;
+    if (raw != null) {
+        let arr = raw;
+        if (typeof raw === 'string') {
+            try {
+                const parsed = JSON.parse(raw);
+                arr = Array.isArray(parsed) ? parsed : raw.trim() ? [raw.trim()] : [];
+            } catch {
+                arr = raw.trim() ? [raw.trim()] : [];
+            }
+        }
+        if (Array.isArray(arr)) {
+            arr.filter(Boolean).forEach((u) => out.push(u));
         }
     }
-    if (Array.isArray(arr)) {
-        const first = arr.find(Boolean);
-        return first || null;
-    }
-    return null;
+    const seen = new Set();
+    return out.filter((u) => {
+        if (!u || seen.has(u)) return false;
+        seen.add(u);
+        return true;
+    });
 }
 
 function isServiceVisibleInCatalog(svc) {
@@ -69,13 +75,10 @@ function isServiceVisibleInCatalog(svc) {
     return true;
 }
 
-/** Must clear bottom tab bar so fixed “Send Enquiry” sits above it (see bottomBar style). */
-const BOTTOM_TAB_BAR_CONTENT_H = 56;
-
 export default function VendorDetail({ route, navigation }) {
     const { vendor: vendorParam, city, openEnquiry, contactLocked: contactLockedParam } = route.params || {};
     const insets = useSafeAreaInsets();
-    const tabBarOffset = BOTTOM_TAB_BAR_CONTENT_H + Math.max(insets.bottom, 6);
+    const ctaBottomInset = Math.max(insets.bottom, 8);
     const { theme, isDarkMode } = useTheme();
     const { t: tr } = useLocale();
     const { showToast, showConfirm } = useToast();
@@ -118,6 +121,8 @@ export default function VendorDetail({ route, navigation }) {
     const [resolvedLogoUri, setResolvedLogoUri] = useState(null);
     const [resolvedGalleryUris, setResolvedGalleryUris] = useState([]);
     const [resolvedServiceImages, setResolvedServiceImages] = useState({});
+    const [resolvedServiceImageSets, setResolvedServiceImageSets] = useState({});
+    const parallaxY = useRef(new Animated.Value(0)).current;
 
     useEffect(() => {
         if (!vendor) return;
@@ -135,15 +140,23 @@ export default function VendorDetail({ route, navigation }) {
                 : galleryResolved[0] || getVendorImageUrl(null, name);
 
             const svcMap = {};
+            const svcImageSets = {};
             await Promise.all(
                 visibleServices.map(async (svc) => {
-                    const primaryPath = getServicePrimaryImagePath(svc);
-                    if (!primaryPath) return;
-                    const r = await resolveStorageUrl(primaryPath);
-                    const uri = r || getServiceImageUrl(primaryPath);
                     const idKey = svc.id != null ? String(svc.id) : null;
-                    if (idKey) svcMap[idKey] = uri;
-                    if (primaryPath) svcMap[primaryPath] = uri;
+                    const imagePaths = getServiceImagePaths(svc);
+                    if (!imagePaths.length) return;
+                    const resolvedSet = (
+                        await Promise.all(
+                            imagePaths.map(async (p) => (await resolveStorageUrl(p)) || getServiceImageUrl(p))
+                        )
+                    ).filter(Boolean);
+                    if (idKey) {
+                        svcImageSets[idKey] = resolvedSet;
+                        if (resolvedSet[0]) svcMap[idKey] = resolvedSet[0];
+                    }
+                    const primaryPath = imagePaths[0];
+                    if (primaryPath && resolvedSet[0]) svcMap[primaryPath] = resolvedSet[0];
                 })
             );
 
@@ -151,6 +164,7 @@ export default function VendorDetail({ route, navigation }) {
             setResolvedLogoUri(logoResolved);
             setResolvedGalleryUris(galleryResolved.filter(Boolean));
             setResolvedServiceImages(svcMap);
+            setResolvedServiceImageSets(svcImageSets);
         })();
         return () => {
             cancelled = true;
@@ -166,6 +180,7 @@ export default function VendorDetail({ route, navigation }) {
 
     const heroLogoUri = resolvedLogoUri
         || (vendor ? getVendorImageUrl(vendor.logo_url, vendor.business_name || 'Vendor') : null);
+    const heroSliderUris = displayGalleryUris.length > 0 ? displayGalleryUris : [heroLogoUri];
 
     // Enquiry Modal State
     const [enquiryVisible, setEnquiryVisible] = useState(openEnquiry || false);
@@ -319,6 +334,12 @@ export default function VendorDetail({ route, navigation }) {
         }
     };
 
+    const heroCardTranslateY = parallaxY.interpolate({
+        inputRange: [0, 220],
+        outputRange: [-24, 0],
+        extrapolate: 'clamp',
+    });
+
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top', 'left', 'right']}>
             {/* Header */}
@@ -330,35 +351,55 @@ export default function VendorDetail({ route, navigation }) {
                 {fetchLoading ? <ActivityIndicator size="small" color={colors.primary} style={{ width: 40 }} /> : <View style={{ width: 40 }} />}
             </View>
 
-            <ScrollView
+            <Animated.ScrollView
                 contentContainerStyle={[
                     styles.scrollContent,
-                    { paddingBottom: tabBarOffset + 96 },
+                    { paddingBottom: ctaBottomInset + 132 },
                 ]}
                 showsVerticalScrollIndicator={false}
+                onScroll={Animated.event(
+                    [{ nativeEvent: { contentOffset: { y: parallaxY } } }],
+                    { useNativeDriver: true }
+                )}
+                scrollEventThrottle={16}
             >
                 {/* Vendor Header Card */}
-                <LinearGradient
-                    colors={['#FF7A00', '#FF9A33', '#FFA040']}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={styles.vendorHeader}
+                <View style={styles.vendorHeroCard}>
+                    <VendorGallerySlider
+                        imageUris={heroSliderUris}
+                        height={278}
+                        borderRadius={0}
+                        containerStyle={styles.vendorHeroSlider}
+                        placeholderColor={isDarkMode ? '#334155' : '#E5E7EB'}
+                        placeholderIconColor={theme.textLight}
+                    />
+                    <LinearGradient
+                        colors={['rgba(0,0,0,0.02)', 'rgba(0,0,0,0.58)']}
+                        style={styles.vendorHeroOverlay}
+                    />
+                    {vendor.is_verified && (
+                        <View style={styles.verifiedBadge}>
+                            <Ionicons name="checkmark-circle" size={20} color="#10B981" />
+                        </View>
+                    )}
+                </View>
+                <Animated.View
+                    style={[
+                        styles.vendorInfoFloatCard,
+                        {
+                            backgroundColor: theme.card,
+                            borderColor: theme.border,
+                            transform: [{ translateY: heroCardTranslateY }],
+                        },
+                    ]}
                 >
-                    <View style={styles.vendorLogoContainer}>
-                        <Image
-                            source={{ uri: heroLogoUri || getVendorImageUrl(vendor.logo_url, vendor.business_name) }}
-                            style={styles.vendorLogo}
-                            resizeMode="cover"
-                        />
-                        {vendor.is_verified && (
-                            <View style={styles.verifiedBadge}>
-                                <Ionicons name="checkmark-circle" size={20} color="#10B981" />
-                            </View>
-                        )}
-                    </View>
-                    <Text style={styles.vendorName}>{vendor.business_name || 'Vendor'}</Text>
-                    <Text style={styles.vendorCategory}>{vendor.category || 'Service Provider'}</Text>
-                </LinearGradient>
+                    <Text style={[styles.vendorInfoFloatName, { color: theme.text }]} numberOfLines={1}>
+                        {vendor.business_name || 'Vendor'}
+                    </Text>
+                    <Text style={[styles.vendorInfoFloatMeta, { color: theme.textLight }]} numberOfLines={1}>
+                        {vendor.category || 'Service Provider'}{vendor.city ? ` · ${vendor.city}` : ''}
+                    </Text>
+                </Animated.View>
 
                 {/* Quick Actions */}
                 <View style={[styles.actionsRow, { backgroundColor: theme.card }]}>
@@ -406,19 +447,13 @@ export default function VendorDetail({ route, navigation }) {
                 {displayGalleryUris.length > 0 && (
                     <View style={[styles.section, { backgroundColor: theme.card }]}>
                         <Text style={[styles.sectionTitle, { color: theme.text }]}>Gallery</Text>
-                        <FlatList
-                            horizontal
-                            data={displayGalleryUris}
-                            keyExtractor={(item, idx) => `${item}-${idx}`}
-                            showsHorizontalScrollIndicator={false}
-                            contentContainerStyle={styles.galleryListContent}
-                            renderItem={({ item }) => (
-                                <Image
-                                    source={{ uri: item }}
-                                    style={styles.galleryThumb}
-                                    resizeMode="cover"
-                                />
-                            )}
+                        <VendorGallerySlider
+                            imageUris={displayGalleryUris}
+                            height={220}
+                            borderRadius={14}
+                            containerStyle={styles.gallerySlider}
+                            placeholderColor={isDarkMode ? '#334155' : '#E5E7EB'}
+                            placeholderIconColor={theme.textLight}
                         />
                     </View>
                 )}
@@ -464,23 +499,29 @@ export default function VendorDetail({ route, navigation }) {
                 {visibleServices.length > 0 && (
                     <View style={[styles.section, { backgroundColor: theme.card }]}>
                         <Text style={[styles.sectionTitle, { color: theme.text }]}>Services Offered</Text>
+                        <View style={styles.servicesBentoGrid}>
                         {visibleServices.map((svc, idx) => {
-                            const primaryPath = getServicePrimaryImagePath(svc);
                             const idKey = svc.id != null ? String(svc.id) : null;
-                            const serviceImageUri =
-                                (idKey && resolvedServiceImages[idKey]) ||
-                                (primaryPath && resolvedServiceImages[primaryPath]) ||
-                                getServiceImageUrl(primaryPath);
+                            const imagePaths = getServiceImagePaths(svc);
+                            const serviceImageUris =
+                                (idKey && resolvedServiceImageSets[idKey]?.length > 0
+                                    ? resolvedServiceImageSets[idKey]
+                                    : imagePaths.map((p) => resolvedServiceImages[p] || getServiceImageUrl(p)).filter(Boolean));
+                            const firstServiceImage = serviceImageUris[0] || null;
                             return (
                                 <View
                                     key={svc.id || idx}
                                     style={[styles.serviceCard, { borderColor: theme.border, backgroundColor: isDarkMode ? theme.background : '#FAFAFA' }]}
                                 >
-                                    {serviceImageUri ? (
-                                        <Image
-                                            source={{ uri: serviceImageUri }}
-                                            style={styles.serviceImageHero}
-                                            resizeMode="cover"
+                                    {firstServiceImage ? (
+                                        <VendorGallerySlider
+                                            imageUris={serviceImageUris}
+                                            height={126}
+                                            borderRadius={12}
+                                            showDots={serviceImageUris.length > 1}
+                                            containerStyle={styles.serviceImageHero}
+                                            placeholderColor={isDarkMode ? '#334155' : '#E5E7EB'}
+                                            placeholderIconColor={theme.textLight}
                                         />
                                     ) : (
                                         <View style={[styles.serviceImagePlaceholderLarge, { backgroundColor: theme.border }]}>
@@ -504,9 +545,10 @@ export default function VendorDetail({ route, navigation }) {
                                 </View>
                             );
                         })}
+                        </View>
                     </View>
                 )}
-            </ScrollView>
+            </Animated.ScrollView>
 
             <BottomTabBar navigation={navigation} activeRoute="Home" />
 
@@ -517,7 +559,7 @@ export default function VendorDetail({ route, navigation }) {
                     {
                         backgroundColor: theme.card,
                         borderTopColor: theme.border,
-                        bottom: tabBarOffset,
+                        bottom: ctaBottomInset,
                         zIndex: 50,
                     },
                 ]}
@@ -655,46 +697,66 @@ const styles = StyleSheet.create({
         padding: 8,
     },
     headerTitle: {
-        fontSize: 18,
+        fontSize: 17,
         fontWeight: 'bold',
     },
     scrollContent: {
         paddingBottom: 8,
     },
-    vendorHeader: {
-        padding: 24,
-        alignItems: 'center',
+    vendorHeroCard: {
+        marginHorizontal: 0,
+        marginTop: 0,
+        borderRadius: 0,
+        overflow: 'hidden',
     },
-    vendorLogoContainer: {
-        position: 'relative',
-        marginBottom: 16,
+    vendorHeroSlider: {
+        width: '100%',
     },
-    vendorLogo: {
-        width: 100,
-        height: 100,
-        borderRadius: 50,
-        backgroundColor: '#FFF',
-        borderWidth: 4,
-        borderColor: 'rgba(255,255,255,0.3)',
+    vendorHeroOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        justifyContent: 'flex-end',
+        paddingHorizontal: 16,
+        paddingBottom: 14,
     },
     verifiedBadge: {
         position: 'absolute',
-        bottom: 0,
-        right: 0,
+        top: 12,
+        right: 12,
         backgroundColor: '#FFF',
         borderRadius: 12,
         padding: 2,
     },
     vendorName: {
-        fontSize: 24,
+        fontSize: 22,
         fontWeight: 'bold',
         color: '#FFF',
-        textAlign: 'center',
+    },
+    vendorInfoFloatCard: {
+        marginHorizontal: 16,
+        marginTop: -24,
+        borderRadius: 16,
+        borderWidth: 1,
+        paddingHorizontal: 14,
+        paddingVertical: 12,
+        zIndex: 5,
+        elevation: 4,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.08,
+        shadowRadius: 6,
+    },
+    vendorInfoFloatName: {
+        fontSize: 18,
+        fontWeight: '800',
+    },
+    vendorInfoFloatMeta: {
+        fontSize: 12,
+        marginTop: 4,
     },
     vendorCategory: {
         fontSize: 14,
         color: 'rgba(255,255,255,0.9)',
-        marginTop: 4,
+        marginTop: 2,
     },
     locationRow: {
         flexDirection: 'row',
@@ -711,7 +773,7 @@ const styles = StyleSheet.create({
         justifyContent: 'space-around',
         paddingVertical: 16,
         marginHorizontal: 16,
-        marginTop: -20,
+        marginTop: 10,
         borderRadius: 16,
         elevation: 4,
         shadowColor: '#000',
@@ -736,7 +798,7 @@ const styles = StyleSheet.create({
     },
     section: {
         margin: 16,
-        marginTop: 0,
+        marginTop: 2,
         padding: 16,
         borderRadius: 16,
     },
@@ -749,16 +811,8 @@ const styles = StyleSheet.create({
         fontSize: 14,
         lineHeight: 22,
     },
-    galleryListContent: {
-        paddingVertical: 4,
-        gap: 10,
-    },
-    galleryThumb: {
-        width: 160,
-        height: 120,
-        borderRadius: 12,
-        marginRight: 10,
-        backgroundColor: '#E5E7EB',
+    gallerySlider: {
+        marginTop: 2,
     },
     contactRow: {
         flexDirection: 'row',
@@ -770,40 +824,47 @@ const styles = StyleSheet.create({
         fontSize: 14,
         flex: 1,
     },
+    servicesBentoGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        justifyContent: 'space-between',
+        gap: 12,
+    },
     serviceCard: {
+        width: '48%',
         borderRadius: 16,
         borderWidth: 1,
         overflow: 'hidden',
-        marginBottom: 16,
+        marginBottom: 4,
     },
     serviceImageHero: {
         width: '100%',
-        height: 168,
+        height: 126,
         backgroundColor: '#E8E8E8',
     },
     serviceImagePlaceholderLarge: {
         width: '100%',
-        height: 168,
+        height: 126,
         alignItems: 'center',
         justifyContent: 'center',
     },
     serviceCardBody: {
-        padding: 16,
+        padding: 12,
     },
     serviceNameLarge: {
-        fontSize: 18,
+        fontSize: 15,
         fontWeight: '700',
         letterSpacing: -0.2,
     },
     serviceDescLarge: {
-        fontSize: 14,
-        marginTop: 8,
-        lineHeight: 21,
+        fontSize: 12,
+        marginTop: 6,
+        lineHeight: 17,
     },
     servicePriceLarge: {
-        fontSize: 17,
+        fontSize: 14,
         fontWeight: '700',
-        marginTop: 12,
+        marginTop: 8,
     },
     bottomBar: {
         position: 'absolute',

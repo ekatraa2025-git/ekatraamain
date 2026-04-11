@@ -6,7 +6,6 @@ import { colors } from '../../theme/colors';
 import { useTheme } from '../../context/ThemeContext';
 import { useLocale } from '../../context/LocaleContext';
 import { useAuth } from '../../context/AuthContext';
-import { useUserNotifications } from '../../context/UserNotificationContext';
 import { useBackendApi } from '../../services/api';
 import BottomTabBar from '../../components/BottomTabBar';
 import { useToast } from '../../context/ToastContext';
@@ -17,7 +16,6 @@ export default function Menu({ navigation }) {
     const { showConfirm } = useToast();
     const { user, isAuthenticated, signOut } = useAuth();
     const useApi = useBackendApi();
-    const { unreadCount: notificationUnread } = useUserNotifications();
 
     // Get user display info
     const getUserName = () => {
@@ -70,22 +68,6 @@ export default function Menu({ navigation }) {
             <View style={[styles.header, borderStyle]}>
                 <Text style={[styles.title, textStyle]}>{tr('menu_title')}</Text>
                 <View style={styles.headerActions}>
-                    {isAuthenticated ? (
-                        <TouchableOpacity
-                            onPress={() => navigation.navigate('Notifications')}
-                            style={styles.headerIconBtn}
-                            accessibilityLabel={tr('notifications_title')}
-                        >
-                            <Ionicons name="notifications-outline" size={26} color={theme.text} />
-                            {notificationUnread > 0 ? (
-                                <View style={[styles.notifBadge, { backgroundColor: colors.primary }]}>
-                                    <Text style={styles.notifBadgeText}>
-                                        {notificationUnread > 99 ? '99+' : notificationUnread}
-                                    </Text>
-                                </View>
-                            ) : null}
-                        </TouchableOpacity>
-                    ) : null}
                     <TouchableOpacity onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.replace('Home')} style={styles.closeBtn}>
                         <Ionicons name="close" size={28} color={theme.text} />
                     </TouchableOpacity>

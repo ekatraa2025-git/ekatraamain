@@ -20,6 +20,7 @@ import { api } from '../../services/api';
 import BottomTabBar from '../../components/BottomTabBar';
 import { formatFriendlyDate } from '../../utils/formatFriendlyDate';
 import { getOccasionAndApplicant } from '../../utils/orderDisplay';
+import { SkeletonBlock, SkeletonCard } from '../../components/SkeletonLoader';
 
 function applyDateFilter(orders, filterKey) {
     if (filterKey === 'all' || !Array.isArray(orders)) return orders || [];
@@ -96,12 +97,79 @@ export default function MyOrders({ navigation }) {
         );
     }
 
+    const renderOrderItem = useCallback(({ item, index }) => {
+        const { occasionLabel, applicantLabel } = getOccasionAndApplicant(item);
+        return (
+            <TouchableOpacity
+                style={[styles.orderCard, { backgroundColor: theme.card, borderColor: theme.border }]}
+                onPress={() => navigation.navigate('OrderDetail', { orderId: item.id })}
+                activeOpacity={0.85}
+            >
+                <View style={styles.orderTop}>
+                    <View style={[styles.numBadge, { backgroundColor: colors.primary + '18' }]}>
+                        <Text style={[styles.numText, { color: colors.primary }]}>#{index + 1}</Text>
+                    </View>
+                    <Text style={[styles.orderId, { color: theme.textLight }]} numberOfLines={1}>
+                        {item.id?.slice(0, 8)}…
+                    </Text>
+                    <View style={[styles.orderStatusBadge, { backgroundColor: colors.primary + '14' }]}>
+                        <Text style={[styles.orderStatus, { color: colors.primary }]}>{item.status}</Text>
+                    </View>
+                </View>
+                <Text style={[styles.metaLineLabel, { color: theme.textLight }]}>Occasion</Text>
+                {occasionLabel ? (
+                    <Text style={[styles.occasionName, { color: theme.text }]} numberOfLines={2}>
+                        {occasionLabel}
+                    </Text>
+                ) : (
+                    <Text style={[styles.occasionFallback, { color: theme.textLight }]}>Not set</Text>
+                )}
+                <Text style={[styles.metaLineLabel, { color: theme.textLight, marginTop: 6 }]}>Who applied</Text>
+                {applicantLabel ? (
+                    <Text style={[styles.applicantLine, { color: theme.text }]} numberOfLines={1}>
+                        {applicantLabel}
+                    </Text>
+                ) : (
+                    <Text style={[styles.occasionFallback, { color: theme.textLight }]}>Not set</Text>
+                )}
+                <Text style={[styles.orderTotal, { color: theme.text, marginTop: 8 }]}>
+                    ₹{Number(item.total_amount || 0).toLocaleString('en-IN')}
+                </Text>
+                <Text style={[styles.orderDate, { color: theme.textLight }]}>
+                    Placed {item.created_at ? formatFriendlyDate(item.created_at) : '—'}
+                </Text>
+            </TouchableOpacity>
+        );
+    }, [navigation, theme]);
+
+    const keyExtractor = useCallback((item) => item.id, []);
+
     if (listLoading) {
         return (
             <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
-                <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="large" color={colors.primary} />
+                <View style={[styles.header, { borderBottomColor: theme.border }]}>
+                    <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+                        <Ionicons name="arrow-back" size={24} color={theme.text} />
+                    </TouchableOpacity>
+                    <Text style={[styles.headerTitle, { color: theme.text }]}>{tr('orders_title')}</Text>
+                    <View style={{ width: 40 }} />
                 </View>
+                <View style={{ padding: 12 }}>
+                    {[0, 1, 2, 3].map((idx) => (
+                        <SkeletonCard key={idx} theme={theme} style={{ backgroundColor: theme.card }}>
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 }}>
+                                <SkeletonBlock theme={theme} width={50} height={18} radius={9} />
+                                <SkeletonBlock theme={theme} width={90} height={14} />
+                            </View>
+                            <SkeletonBlock theme={theme} width="72%" height={14} />
+                            <View style={{ height: 8 }} />
+                            <SkeletonBlock theme={theme} width="58%" height={14} />
+                            <View style={{ height: 10 }} />
+                            <SkeletonBlock theme={theme} width="40%" height={12} />
+                        </SkeletonCard>
+                    ))}
+                </View>
+                <BottomTabBar navigation={navigation} activeRoute="MyOrders" />
             </SafeAreaView>
         );
     }
@@ -167,55 +235,16 @@ export default function MyOrders({ navigation }) {
                     <FlatList
                         style={styles.orderList}
                         data={filteredOrders}
-                        keyExtractor={(item) => item.id}
+                        keyExtractor={keyExtractor}
                         contentContainerStyle={styles.listContent}
+                        initialNumToRender={8}
+                        maxToRenderPerBatch={10}
+                        windowSize={7}
+                        removeClippedSubviews
                         refreshControl={
                             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
                         }
-                        renderItem={({ item, index }) => {
-                            const { occasionLabel, applicantLabel } = getOccasionAndApplicant(item);
-                            return (
-                            <TouchableOpacity
-                                style={[styles.orderCard, { backgroundColor: theme.card, borderColor: theme.border }]}
-                                onPress={() => navigation.navigate('OrderDetail', { orderId: item.id })}
-                                activeOpacity={0.85}
-                            >
-                                <View style={styles.orderTop}>
-                                    <View style={[styles.numBadge, { backgroundColor: colors.primary + '18' }]}>
-                                        <Text style={[styles.numText, { color: colors.primary }]}>#{index + 1}</Text>
-                                    </View>
-                                    <Text style={[styles.orderId, { color: theme.textLight }]} numberOfLines={1}>
-                                        {item.id?.slice(0, 8)}…
-                                    </Text>
-                                    <View style={[styles.orderStatusBadge, { backgroundColor: colors.primary + '14' }]}>
-                                        <Text style={[styles.orderStatus, { color: colors.primary }]}>{item.status}</Text>
-                                    </View>
-                                </View>
-                                <Text style={[styles.metaLineLabel, { color: theme.textLight }]}>Occasion</Text>
-                                {occasionLabel ? (
-                                    <Text style={[styles.occasionName, { color: theme.text }]} numberOfLines={2}>
-                                        {occasionLabel}
-                                    </Text>
-                                ) : (
-                                    <Text style={[styles.occasionFallback, { color: theme.textLight }]}>Not set</Text>
-                                )}
-                                <Text style={[styles.metaLineLabel, { color: theme.textLight, marginTop: 6 }]}>Who applied</Text>
-                                {applicantLabel ? (
-                                    <Text style={[styles.applicantLine, { color: theme.text }]} numberOfLines={1}>
-                                        {applicantLabel}
-                                    </Text>
-                                ) : (
-                                    <Text style={[styles.occasionFallback, { color: theme.textLight }]}>Not set</Text>
-                                )}
-                                <Text style={[styles.orderTotal, { color: theme.text, marginTop: 8 }]}>
-                                    ₹{Number(item.total_amount || 0).toLocaleString('en-IN')}
-                                </Text>
-                                <Text style={[styles.orderDate, { color: theme.textLight }]}>
-                                    Placed {item.created_at ? formatFriendlyDate(item.created_at) : '—'}
-                                </Text>
-                            </TouchableOpacity>
-                            );
-                        }}
+                        renderItem={renderOrderItem}
                     />
                 </View>
             )}
@@ -236,7 +265,7 @@ const styles = StyleSheet.create({
         borderBottomWidth: 1,
     },
     backBtn: { padding: 8 },
-    headerTitle: { fontSize: 18, fontWeight: 'bold', flex: 1, textAlign: 'center' },
+    headerTitle: { fontSize: 17, fontWeight: 'bold', flex: 1, textAlign: 'left' },
     loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
     filterScroll: { maxHeight: 48, flexGrow: 0 },
     filterRow: { paddingHorizontal: 12, paddingVertical: 8, gap: 8, alignItems: 'center' },

@@ -150,7 +150,7 @@ const styles = StyleSheet.create({
         borderBottomWidth: 1,
     },
     backBtn: { padding: 8 },
-    headerTitle: { fontSize: 18, fontWeight: 'bold', flex: 1, textAlign: 'center' },
+    headerTitle: { fontSize: 17, fontWeight: 'bold', flex: 1, textAlign: 'left' },
     scroll: { padding: 16, paddingBottom: 52 },
     successCard: {
         padding: 24,

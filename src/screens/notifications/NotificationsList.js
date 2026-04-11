@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator } from 'react-native';
+import React, { useCallback } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
@@ -7,13 +7,14 @@ import { useTheme } from '../../context/ThemeContext';
 import { useLocale } from '../../context/LocaleContext';
 import { useUserNotifications } from '../../context/UserNotificationContext';
 import BottomTabBar from '../../components/BottomTabBar';
+import { SkeletonBlock, SkeletonCard } from '../../components/SkeletonLoader';
 
 export default function NotificationsList({ navigation }) {
     const { theme } = useTheme();
     const { t: tr } = useLocale();
     const { notifications, loading, markAsRead, markAllAsRead, unreadCount } = useUserNotifications();
 
-    const renderItem = ({ item }) => (
+    const renderItem = useCallback(({ item }) => (
         <TouchableOpacity
             style={[
                 styles.row,
@@ -46,7 +47,9 @@ export default function NotificationsList({ navigation }) {
                 ) : null}
             </View>
         </TouchableOpacity>
-    );
+    ), [theme, markAsRead]);
+
+    const keyExtractor = useCallback((item) => item.id, []);
 
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top', 'left', 'right']}>
@@ -67,15 +70,32 @@ export default function NotificationsList({ navigation }) {
             </View>
 
             {loading ? (
-                <View style={styles.centered}>
-                    <ActivityIndicator size="large" color={colors.primary} />
+                <View style={styles.list}>
+                    {[0, 1, 2, 3, 4].map((idx) => (
+                        <SkeletonCard key={idx} theme={theme} style={{ backgroundColor: theme.card }}>
+                            <View style={{ flexDirection: 'row' }}>
+                                <SkeletonBlock theme={theme} width={28} height={28} radius={14} />
+                                <View style={{ marginLeft: 12, flex: 1 }}>
+                                    <SkeletonBlock theme={theme} width="60%" height={14} />
+                                    <View style={{ height: 8 }} />
+                                    <SkeletonBlock theme={theme} width="95%" height={12} />
+                                    <View style={{ height: 6 }} />
+                                    <SkeletonBlock theme={theme} width="75%" height={12} />
+                                </View>
+                            </View>
+                        </SkeletonCard>
+                    ))}
                 </View>
             ) : (
                 <FlatList
                     data={notifications}
-                    keyExtractor={(item) => item.id}
+                    keyExtractor={keyExtractor}
                     renderItem={renderItem}
                     contentContainerStyle={styles.list}
+                    initialNumToRender={8}
+                    maxToRenderPerBatch={10}
+                    windowSize={7}
+                    removeClippedSubviews
                     ListEmptyComponent={
                         <View style={styles.empty}>
                             <Ionicons name="notifications-off-outline" size={48} color={theme.textLight} />

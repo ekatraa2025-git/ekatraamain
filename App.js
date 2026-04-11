@@ -18,24 +18,24 @@ export default function App() {
     <GestureHandlerRootView style={{ flex: 1 }}>
     <SafeAreaProvider>
       <AuthProvider>
-        <UserNotificationProvider>
         <LocaleProvider>
-        <CartProvider>
-          <AppDataProvider>
-            <EventFormProvider>
-            <ThemeProvider>
-              <ToastProvider>
-                <TermsAcceptanceGate>
-                  <AppNavigator />
-                </TermsAcceptanceGate>
-                <StatusBar style="auto" />
-              </ToastProvider>
-            </ThemeProvider>
-            </EventFormProvider>
-          </AppDataProvider>
-        </CartProvider>
+          <ThemeProvider>
+            <ToastProvider>
+              <UserNotificationProvider>
+                <CartProvider>
+                  <AppDataProvider>
+                    <EventFormProvider>
+                      <TermsAcceptanceGate>
+                        <AppNavigator />
+                      </TermsAcceptanceGate>
+                      <StatusBar style="auto" />
+                    </EventFormProvider>
+                  </AppDataProvider>
+                </CartProvider>
+              </UserNotificationProvider>
+            </ToastProvider>
+          </ThemeProvider>
         </LocaleProvider>
-        </UserNotificationProvider>
       </AuthProvider>
     </SafeAreaProvider>
     </GestureHandlerRootView>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
     View,
     Text,
@@ -67,21 +67,35 @@ export default function Cart({ route, navigation }) {
         })();
     }, []);
 
+    const normalizedItems = useMemo(
+        () =>
+            (Array.isArray(cart?.items) ? cart.items : [])
+                .map((item, idx) => {
+                    if (!item || typeof item !== 'object') return null;
+                    return {
+                        ...item,
+                        _safeId: item.id || `fallback-${idx}`,
+                    };
+                })
+                .filter(Boolean),
+        [cart?.items]
+    );
+    const MAX_QTY = 99;
+
     useEffect(() => {
-        if (!cart?.items?.length) return;
+        if (!normalizedItems.length) return;
         setQtyDraftById((prev) => {
             const next = { ...prev };
-            for (const i of cart.items) {
-                if (next[i.id] === undefined) next[i.id] = String(Number(i.quantity) || 1);
+            for (const i of normalizedItems) {
+                if (next[i._safeId] === undefined) next[i._safeId] = String(Number(i.quantity) || 1);
             }
             return next;
         });
-    }, [cart?.items]);
-
-    const MAX_QTY = 99;
+    }, [normalizedItems]);
 
     const getDisplayQty = (item) => {
-        const raw = qtyDraftById[item.id];
+        if (!item || !item._safeId) return 1;
+        const raw = qtyDraftById[item._safeId];
         if (raw === undefined) return Number(item.quantity) || 1;
         const n = parseInt(String(raw).replace(/\D/g, ''), 10);
         if (!Number.isFinite(n) || n < 1) return Number(item.quantity) || 1;
@@ -95,6 +109,7 @@ export default function Cart({ route, navigation }) {
     }, [loadCart]);
 
     const handleUpdateQty = async (itemId, quantity) => {
+        if (!itemId) return;
         if (quantity < 1) return;
         if (quantity > MAX_QTY) quantity = MAX_QTY;
         setQtyDraftById((prev) => ({ ...prev, [itemId]: String(quantity) }));
@@ -107,6 +122,7 @@ export default function Cart({ route, navigation }) {
     };
 
     const handleRemove = async (itemId) => {
+        if (!itemId) return;
         const { error } = await api.removeCartItem(itemId);
         if (error) showToast({ variant: 'error', title: 'Error', message: error.message });
         else { await loadCart(); refreshCartCount(); }
@@ -125,7 +141,7 @@ export default function Cart({ route, navigation }) {
     };
 
     const handleClearCart = () => {
-        const items = cart?.items || [];
+        const items = normalizedItems.filter((row) => !!row.id);
         if (!items.length) return;
         showConfirm({
             title: 'Clear cart?',
@@ -152,7 +168,7 @@ export default function Cart({ route, navigation }) {
         });
     };
 
-    // Footer sits inside mainCol, which already stops above BottomTabBar — do not add tab bar height again.
+    // BottomTabBar now reserves its own layout space; only account for safe inset here.
     const footerBottom = Math.max(insets.bottom, 10);
     const listBottomPad = footerBottom + 168;
 
@@ -189,7 +205,7 @@ export default function Cart({ route, navigation }) {
         );
     }
 
-    const items = cart?.items || [];
+    const items = normalizedItems;
     const servicesSubtotal = items.reduce((sum, i) => sum + getDisplayQty(i) * Number(i.unit_price || 0), 0);
     const protectionAmount = computeProtectionAmountInr(servicesSubtotal, protectionSettings, true);
     const cartOrderTotal = servicesSubtotal + protectionAmount;
@@ -235,13 +251,24 @@ export default function Cart({ route, navigation }) {
                     <View style={styles.listWrap}>
                     <FlatList
                         data={items}
-                        keyExtractor={(item) => item.id}
+                        keyExtractor={(item, index) => item?._safeId || `row-${index}`}
                         contentContainerStyle={[styles.listContent, { paddingBottom: listBottomPad }]}
                         refreshControl={
                             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
                         }
                         renderItem={({ item }) => {
-                            const parts = getLineItemParts(item);
+                            let parts;
+                            try {
+                                parts = getLineItemParts(item);
+                            } catch {
+                                parts = {
+                                    categoryName: '',
+                                    serviceName: item?.name || 'Service',
+                                    tierName: '',
+                                    qtyLabel: '',
+                                    subVariety: '',
+                                };
+                            }
                             const price = Number(item.unit_price || 0);
                             const qty = getDisplayQty(item);
                             const occ = cart?.event_name;
@@ -291,17 +318,17 @@ export default function Cart({ route, navigation }) {
                                             </TouchableOpacity>
                                             <TextInput
                                                 style={[styles.qtyInput, { color: theme.text, borderColor: theme.border }]}
-                                                value={qtyDraftById[item.id] ?? String(qty)}
+                                                value={qtyDraftById[item._safeId] ?? String(qty)}
                                                 onChangeText={(t) =>
-                                                    setQtyDraftById((prev) => ({ ...prev, [item.id]: t }))
+                                                    setQtyDraftById((prev) => ({ ...prev, [item._safeId]: t }))
                                                 }
                                                 onBlur={() => {
-                                                    const raw = qtyDraftById[item.id] ?? String(qty);
+                                                    const raw = qtyDraftById[item._safeId] ?? String(qty);
                                                     let n = parseInt(String(raw).replace(/\D/g, ''), 10);
                                                     if (!Number.isFinite(n) || n < 1) n = 1;
                                                     if (n > MAX_QTY) n = MAX_QTY;
-                                                    setQtyDraftById((prev) => ({ ...prev, [item.id]: String(n) }));
-                                                    if (n !== (Number(item.quantity) || 1)) handleUpdateQty(item.id, n);
+                                                    setQtyDraftById((prev) => ({ ...prev, [item._safeId]: String(n) }));
+                                                    if (n !== (Number(item.quantity) || 1) && item.id) handleUpdateQty(item.id, n);
                                                 }}
                                                 keyboardType="number-pad"
                                                 maxLength={4}
@@ -371,7 +398,7 @@ const styles = StyleSheet.create({
         borderBottomWidth: 1,
     },
     backBtn: { padding: 8 },
-    headerTitle: { fontSize: 18, fontWeight: 'bold', flex: 1, textAlign: 'center' },
+    headerTitle: { fontSize: 16, fontWeight: 'bold', flex: 1, textAlign: 'left' },
     loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
     summaryHeader: {
         flexDirection: 'row',

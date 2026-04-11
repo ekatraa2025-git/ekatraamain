@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
     View, Text, StyleSheet, ScrollView, TouchableOpacity,
     TextInput, FlatList, Modal, Share, ActivityIndicator,
-    Platform, Linking,
+    Platform, Linking, Image,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -48,6 +48,40 @@ const INVITE_THEMES = {
 };
 const COLOR_KEYS = ['rose', 'gold', 'navy', 'emerald', 'royal'];
 const VARIATION_KEYS = ['classic', 'modern', 'festive', 'minimal'];
+const INVITE_SECTION_ORDER = ['wedding_cards', 'video_invites', 'save_the_date'];
+const INVITE_SECTION_TITLES = {
+    wedding_cards: 'Wedding Cards',
+    video_invites: 'Video Invites',
+    save_the_date: 'Save The Date Cards',
+};
+const FALLBACK_EINVITE_TEMPLATES = [
+    { id: 'tmp-1', section_key: 'wedding_cards', title: 'Garden Soree', subtitle: 'Elegant floral frame', template_type: 'image', price: 1399, list_price: 2799 },
+    { id: 'tmp-2', section_key: 'wedding_cards', title: 'Hazel', subtitle: 'Minimal pastel wedding invite', template_type: 'image', price: 1499, list_price: 2999 },
+    { id: 'tmp-3', section_key: 'wedding_cards', title: 'Black Garden', subtitle: 'Classic regal layout', template_type: 'image', price: 1599, list_price: 3199 },
+    { id: 'tmp-4', section_key: 'video_invites', title: 'Me Before You', subtitle: 'Animated save-the-date', template_type: 'video', duration_seconds: 20, price: 1799, list_price: 2799 },
+    { id: 'tmp-5', section_key: 'video_invites', title: 'Floral Extravaganza', subtitle: 'Mehendi special edit', template_type: 'video', duration_seconds: 32, price: 1999, list_price: 3999 },
+    { id: 'tmp-6', section_key: 'video_invites', title: 'We Said Yes', subtitle: 'Premium cinematic invite', template_type: 'video', duration_seconds: 50, price: 1999, list_price: 3999 },
+    { id: 'tmp-7', section_key: 'save_the_date', title: 'Beyond Words', subtitle: 'Soft pastel card', template_type: 'image', price: 1299, list_price: 2299 },
+    { id: 'tmp-8', section_key: 'save_the_date', title: 'At Last', subtitle: 'Travel inspired card', template_type: 'image', price: 1399, list_price: 2499 },
+    { id: 'tmp-9', section_key: 'save_the_date', title: 'New Beginning', subtitle: 'Storybook portrait style', template_type: 'image', price: 1499, list_price: 2799 },
+];
+const FALLBACK_EINVITE_FAQS = [
+    {
+        id: 'faq-1',
+        question: 'How are the wedding cards delivered to recipients?',
+        answer: 'Static e-invites are available for download immediately after payment. We also share WhatsApp-ready and shareable links.',
+    },
+    {
+        id: 'faq-2',
+        question: 'Can I create a wedding card through my phone as well?',
+        answer: 'Yes. Choose a template, update event details, and share directly from your phone.',
+    },
+    {
+        id: 'faq-3',
+        question: 'Where can I reach out if I face trouble creating or accessing my wedding card?',
+        answer: 'Please contact help@ekatraa.in or use WhatsApp support from the app.',
+    },
+];
 
 export default function GuestManage({ navigation }) {
     const insets = useSafeAreaInsets();
@@ -103,6 +137,10 @@ export default function GuestManage({ navigation }) {
     const [inviteAiFinal, setInviteAiFinal] = useState('');
     const [inviteAiLoadingSamples, setInviteAiLoadingSamples] = useState(false);
     const [inviteAiLoadingFinal, setInviteAiLoadingFinal] = useState(false);
+    const [inviteTemplates, setInviteTemplates] = useState([]);
+    const [inviteFaqs, setInviteFaqs] = useState([]);
+    const [inviteCatalogLoading, setInviteCatalogLoading] = useState(false);
+    const [openFaqId, setOpenFaqId] = useState(null);
     const [waModalVisible, setWaModalVisible] = useState(false);
     const [waChunkIdx, setWaChunkIdx] = useState(0);
 
@@ -119,6 +157,45 @@ export default function GuestManage({ navigation }) {
         [guests]
     );
     const waChunks = useMemo(() => chunkArr(guestsWithPhoneList, 5), [guestsWithPhoneList]);
+    const inviteTemplatesBySection = useMemo(() => {
+        const grouped = {};
+        const source = inviteTemplates.length > 0 ? inviteTemplates : FALLBACK_EINVITE_TEMPLATES;
+        source.forEach((item) => {
+            const key = item.section_key || 'wedding_cards';
+            if (!grouped[key]) grouped[key] = [];
+            grouped[key].push(item);
+        });
+        return grouped;
+    }, [inviteTemplates]);
+    const visibleFaqs = useMemo(
+        () => (inviteFaqs.length > 0 ? inviteFaqs : FALLBACK_EINVITE_FAQS),
+        [inviteFaqs]
+    );
+
+    const loadInviteCatalog = useCallback(async () => {
+        setInviteCatalogLoading(true);
+        try {
+            const [templatesRes, faqsRes] = await Promise.all([
+                api.getEInviteTemplates({ limit: 60 }),
+                api.getEInviteFaqs({ limit: 30 }),
+            ]);
+            if (Array.isArray(templatesRes.data)) {
+                setInviteTemplates(templatesRes.data);
+            } else {
+                setInviteTemplates([]);
+            }
+            if (Array.isArray(faqsRes.data)) {
+                setInviteFaqs(faqsRes.data);
+            } else {
+                setInviteFaqs([]);
+            }
+        } catch {
+            setInviteTemplates([]);
+            setInviteFaqs([]);
+        } finally {
+            setInviteCatalogLoading(false);
+        }
+    }, []);
 
     const loadData = useCallback(async () => {
         if (!userId) {
@@ -148,7 +225,8 @@ export default function GuestManage({ navigation }) {
     useFocusEffect(
         useCallback(() => {
             loadData();
-        }, [loadData])
+            loadInviteCatalog();
+        }, [loadData, loadInviteCatalog])
     );
 
     const GUEST_LIMITS = { name: 100, phone: 20, relation: 50, group: 50, notes: 500 };
@@ -643,6 +721,140 @@ export default function GuestManage({ navigation }) {
 
     const renderInviteTab = () => (
         <ScrollView contentContainerStyle={styles.inviteScroll} showsVerticalScrollIndicator={false}>
+            <View style={[styles.eInviteShell, { backgroundColor: theme.card, borderColor: theme.border }]}>
+                <View style={styles.eInviteTopRow}>
+                    <Text style={[styles.eInviteTitle, { color: theme.text }]}>E-Invites</Text>
+                    <TouchableOpacity
+                        style={styles.eInviteYourCardsBtn}
+                        onPress={() => showToast({ variant: 'info', title: 'Your cards', message: 'Saved cards view will appear here.' })}
+                    >
+                        <Ionicons name="albums-outline" size={14} color={theme.textLight} />
+                        <Text style={[styles.eInviteYourCardsText, { color: theme.textLight }]}>Your cards</Text>
+                    </TouchableOpacity>
+                </View>
+
+                {inviteCatalogLoading ? (
+                    <View style={styles.inviteCatalogLoading}>
+                        <ActivityIndicator color={colors.primary} />
+                    </View>
+                ) : null}
+
+                {INVITE_SECTION_ORDER.map((sectionKey) => {
+                    const sectionItems = inviteTemplatesBySection[sectionKey] || [];
+                    if (!sectionItems.length) return null;
+                    return (
+                        <View key={sectionKey} style={styles.eInviteSectionBlock}>
+                            <View style={styles.eInviteSectionRow}>
+                                <Text style={[styles.eInviteSectionTitle, { color: theme.text }]}>
+                                    {INVITE_SECTION_TITLES[sectionKey] || sectionKey}
+                                </Text>
+                                <TouchableOpacity
+                                    onPress={() =>
+                                        showToast({
+                                            variant: 'info',
+                                            title: 'View all',
+                                            message: `${INVITE_SECTION_TITLES[sectionKey] || 'Templates'} section is ready for backend-managed expansion.`,
+                                        })
+                                    }
+                                >
+                                    <Text style={[styles.eInviteViewAll, { color: colors.primary }]}>View all</Text>
+                                </TouchableOpacity>
+                            </View>
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.eInviteCardsRow}>
+                                {sectionItems.map((tpl) => {
+                                    const hasDiscount =
+                                        Number.isFinite(Number(tpl.list_price)) &&
+                                        Number.isFinite(Number(tpl.price)) &&
+                                        Number(tpl.list_price) > Number(tpl.price);
+                                    return (
+                                        <TouchableOpacity
+                                            key={tpl.id}
+                                            style={[styles.eInviteCard, { backgroundColor: theme.background, borderColor: theme.border }]}
+                                            activeOpacity={0.9}
+                                            onPress={() =>
+                                                showToast({
+                                                    variant: 'info',
+                                                    title: tpl.title || 'Template',
+                                                    message: 'Template detail and customization step will open here.',
+                                                })
+                                            }
+                                        >
+                                            <View style={styles.eInviteThumbWrap}>
+                                                {tpl.thumbnail_url ? (
+                                                    <Image source={{ uri: tpl.thumbnail_url }} style={styles.eInviteThumb} resizeMode="cover" />
+                                                ) : (
+                                                    <LinearGradient
+                                                        colors={isDarkMode ? ['#334155', '#1f2937'] : ['#F8E8D9', '#FDEBD5']}
+                                                        style={styles.eInviteThumb}
+                                                    >
+                                                        <Ionicons name="image-outline" size={20} color={colors.primary} />
+                                                    </LinearGradient>
+                                                )}
+                                                {String(tpl.template_type || '').toLowerCase() === 'video' ? (
+                                                    <View style={styles.eInviteDuration}>
+                                                        <Ionicons name="play" size={10} color="#FFF" />
+                                                        <Text style={styles.eInviteDurationText}>
+                                                            {Number(tpl.duration_seconds || 0) > 0
+                                                                ? `00:${String(Math.max(0, Number(tpl.duration_seconds || 0))).padStart(2, '0')}`
+                                                                : '00:20'}
+                                                        </Text>
+                                                    </View>
+                                                ) : null}
+                                            </View>
+                                            <Text style={[styles.eInviteCardName, { color: theme.text }]} numberOfLines={2}>
+                                                {tpl.title || 'Template'}
+                                            </Text>
+                                            <View style={styles.eInvitePriceRow}>
+                                                <Text style={[styles.eInvitePrice, { color: theme.text }]}>
+                                                    ₹{Number(tpl.price || 0).toLocaleString('en-IN')}
+                                                </Text>
+                                                {hasDiscount ? (
+                                                    <Text style={[styles.eInviteListPrice, { color: theme.textLight }]}>
+                                                        ₹{Number(tpl.list_price || 0).toLocaleString('en-IN')}
+                                                    </Text>
+                                                ) : null}
+                                            </View>
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </ScrollView>
+                        </View>
+                    );
+                })}
+            </View>
+
+            <View style={[styles.eInviteFaqCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+                <Text style={[styles.eInviteFaqTitle, { color: theme.text }]}>Frequently asked question.</Text>
+                {visibleFaqs.map((faq, idx) => {
+                    const expanded = openFaqId === faq.id;
+                    return (
+                        <View
+                            key={faq.id || `faq-${idx}`}
+                            style={[
+                                styles.eInviteFaqItem,
+                                idx < visibleFaqs.length - 1 && { borderBottomColor: theme.border, borderBottomWidth: 1 },
+                            ]}
+                        >
+                            <TouchableOpacity
+                                style={styles.eInviteFaqQuestionRow}
+                                onPress={() => setOpenFaqId((prev) => (prev === faq.id ? null : faq.id))}
+                                activeOpacity={0.8}
+                            >
+                                <Text style={[styles.eInviteFaqQuestion, { color: theme.text }]}>{faq.question}</Text>
+                                <Ionicons
+                                    name={expanded ? 'chevron-up' : 'chevron-down'}
+                                    size={16}
+                                    color={theme.textLight}
+                                />
+                            </TouchableOpacity>
+                            {expanded ? (
+                                <Text style={[styles.eInviteFaqAnswer, { color: theme.textLight }]}>{faq.answer}</Text>
+                            ) : null}
+                        </View>
+                    );
+                })}
+            </View>
+
             <LinearGradient colors={inviteCardGradient} style={styles.inviteCard}>
                 <View style={styles.inviteHeaderRow}>
                     <View style={[styles.inviteLogoWrap, { backgroundColor: colors.primary }]}>
@@ -911,7 +1123,7 @@ export default function GuestManage({ navigation }) {
                     <Ionicons name="arrow-back" size={24} color={theme.text} />
                 </TouchableOpacity>
                 <Text style={[styles.headerTitle, { color: theme.text }]}>{t('guest_manager_title')}</Text>
-                <View style={{ width: 32 }} />
+                <View style={{ width: 96 }} />
             </View>
 
             <View style={styles.statsRow}>
@@ -1289,7 +1501,7 @@ export default function GuestManage({ navigation }) {
                         styles.fab,
                         {
                             bottom:
-                                50 +
+                                64 +
                                 Math.max(insets.bottom, 6) +
                                 12,
                             zIndex: 100,
@@ -1311,7 +1523,7 @@ const styles = StyleSheet.create({
     container: { flex: 1 },
     header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1 },
     backBtn: { padding: 4 },
-    headerTitle: { fontSize: 18, fontWeight: '700' },
+    headerTitle: { fontSize: 17, fontWeight: '700' },
     statsRow: { flexDirection: 'row', paddingHorizontal: 12, paddingVertical: 12, gap: 8 },
     statBox: { flex: 1, borderRadius: 12, padding: 10, alignItems: 'center' },
     statNum: { fontSize: 16, fontWeight: '800' },
@@ -1373,6 +1585,99 @@ const styles = StyleSheet.create({
     contactName: { fontSize: 14, fontWeight: '500' },
     contactPhone: { fontSize: 12, marginTop: 2 },
     inviteScroll: { padding: 16, paddingBottom: 40 },
+    eInviteShell: {
+        borderRadius: 16,
+        borderWidth: 1,
+        paddingVertical: 12,
+        marginBottom: 14,
+    },
+    eInviteTopRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 12,
+        marginBottom: 8,
+    },
+    eInviteTitle: { fontSize: 22, fontWeight: '800' },
+    eInviteYourCardsBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        paddingHorizontal: 8,
+        paddingVertical: 5,
+        borderRadius: 8,
+        backgroundColor: 'rgba(148,163,184,0.15)',
+    },
+    eInviteYourCardsText: { fontSize: 11, fontWeight: '600' },
+    inviteCatalogLoading: { paddingVertical: 8, alignItems: 'center' },
+    eInviteSectionBlock: { marginTop: 4, marginBottom: 10 },
+    eInviteSectionRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 12,
+        marginBottom: 8,
+    },
+    eInviteSectionTitle: { fontSize: 18, fontWeight: '700' },
+    eInviteViewAll: { fontSize: 13, fontWeight: '700' },
+    eInviteCardsRow: { paddingHorizontal: 12, paddingRight: 20 },
+    eInviteCard: {
+        width: 120,
+        borderRadius: 12,
+        borderWidth: 1,
+        padding: 7,
+        marginRight: 10,
+    },
+    eInviteThumbWrap: {
+        borderRadius: 8,
+        overflow: 'hidden',
+        marginBottom: 6,
+        position: 'relative',
+    },
+    eInviteThumb: {
+        width: '100%',
+        height: 112,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#E5E7EB',
+    },
+    eInviteDuration: {
+        position: 'absolute',
+        top: 6,
+        left: 6,
+        borderRadius: 10,
+        backgroundColor: 'rgba(15,23,42,0.8)',
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 3,
+    },
+    eInviteDurationText: { color: '#FFF', fontSize: 10, fontWeight: '700' },
+    eInviteCardName: { fontSize: 12, fontWeight: '600', minHeight: 30 },
+    eInvitePriceRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
+    eInvitePrice: { fontSize: 13, fontWeight: '800' },
+    eInviteListPrice: {
+        fontSize: 11,
+        textDecorationLine: 'line-through',
+    },
+    eInviteFaqCard: {
+        borderRadius: 14,
+        borderWidth: 1,
+        paddingHorizontal: 12,
+        paddingTop: 12,
+        marginBottom: 16,
+    },
+    eInviteFaqTitle: { fontSize: 18, fontWeight: '700', marginBottom: 4 },
+    eInviteFaqItem: { paddingVertical: 10 },
+    eInviteFaqQuestionRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 10,
+    },
+    eInviteFaqQuestion: { flex: 1, fontSize: 14, fontWeight: '600' },
+    eInviteFaqAnswer: { marginTop: 6, fontSize: 13, lineHeight: 19 },
     inviteCard: { borderRadius: 20, padding: 20, marginBottom: 16 },
     inviteHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 10 },
     inviteLogoWrap: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
