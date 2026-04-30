@@ -5,7 +5,7 @@ import {
     ActivityIndicator, RefreshControl, Animated, TextInput,
     KeyboardAvoidingView, Platform,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import * as Location from 'expo-location';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -43,6 +43,10 @@ const BUDGET_OPTIONS = [
     '6-10 Lakhs', '11-15 Lakhs', '16-20 Lakhs',
     '21-30 Lakhs', '30 Lakhs+', '50 Lakhs+',
 ];
+
+/** Bottom tab: keep in sync with BottomTabBar.js (TAB_BAR_CONTENT_HEIGHT + bottom inset) */
+const TAB_BAR_CONTENT_H = 56;
+const TAB_BAR_BOTTOM_PAD = 6;
 
 const MIN_PLANNED_BUDGET_INR = 100000;
 const MAX_PLANNED_BUDGET_INR = 20000000;
@@ -91,6 +95,7 @@ function bannerDiscountLabel(item) {
 }
 
 export default function Home({ navigation }) {
+    const insets = useSafeAreaInsets();
     const { theme, isDarkMode } = useTheme();
     const { t: tr } = useLocale();
     const { showToast } = useToast();
@@ -113,7 +118,6 @@ export default function Home({ navigation }) {
     const [eventTypes, setEventTypes] = useState(MOCK_EVENT_TYPES);
     const [loading, setLoading] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
-    const [othersExpanded, setOthersExpanded] = useState(false);
     const [formSubmitted, setFormSubmitted] = useState(false);
     const [skipForm, setSkipForm] = useState(false);
     const [userInfoModalVisible, setUserInfoModalVisible] = useState(false);
@@ -137,12 +141,24 @@ export default function Home({ navigation }) {
     const [partnerLightboxVisible, setPartnerLightboxVisible] = useState(false);
     const [partnerLightboxImages, setPartnerLightboxImages] = useState([]);
     const [partnerLightboxIndex, setPartnerLightboxIndex] = useState(0);
+    const latestPartnersRef = useRef(null);
+    const latestPartnerIndexRef = useRef(0);
     const useApi = useBackendApi();
 
     const partnerGalleryResolveKey = useMemo(
         () => homeLatestVendors.map((v) => `${v.id}:${(v.gallery_urls || []).join('|')}`).join(';;'),
         [homeLatestVendors]
     );
+    const validCategories = useMemo(
+        () => categories.filter((cat) => cat && cat.id != null),
+        [categories]
+    );
+    const allCategoriesSelected = validCategories.length > 0 && selectedCategories.size === validCategories.length;
+    const testimonialsTwoCol = useMemo(() => {
+        const rows = [];
+        for (let i = 0; i < testimonials.length; i += 2) rows.push(testimonials.slice(i, i + 2));
+        return rows;
+    }, [testimonials]);
 
     const buildFallbackRecommendations = useCallback((budgetInr, categoryWeights) => {
         const baseBudget = Math.max(MIN_PLANNED_BUDGET_INR, Math.round(Number(budgetInr) || plannedBudgetInr || MIN_PLANNED_BUDGET_INR));
@@ -196,7 +212,7 @@ export default function Home({ navigation }) {
     }, [categories, plannedBudgetInr]);
 
     const fetchRecommendationPage = useCallback(async (inr, weights) => {
-        if (!useApi || !isAuthenticated) {
+        if (!useApi) {
             return { data: buildFallbackRecommendations(inr, weights), error: null };
         }
         const response = await api.getRecommendations(selectedType, {
@@ -208,7 +224,7 @@ export default function Home({ navigation }) {
             return { data: buildFallbackRecommendations(inr, weights), error: null };
         }
         return response;
-    }, [buildFallbackRecommendations, isAuthenticated, selectedType, useApi]);
+    }, [buildFallbackRecommendations, selectedType, useApi]);
 
     const [form, setForm] = useState({
         role: '',
@@ -321,10 +337,10 @@ export default function Home({ navigation }) {
         (async () => {
             const { data, error } = await api.getVendorsPreview({
                 city: currentCity,
-                limit: 10,
+                limit: 16,
             });
             if (cancelled) return;
-            if (!error && Array.isArray(data)) setHomeLatestVendors(data.slice(0, 10));
+            if (!error && Array.isArray(data)) setHomeLatestVendors(data);
             else setHomeLatestVendors([]);
             setHomeLatestVendorsLoading(false);
         })();
@@ -332,6 +348,31 @@ export default function Home({ navigation }) {
             cancelled = true;
         };
     }, [useApi, currentCity]);
+
+    useEffect(() => {
+        latestPartnerIndexRef.current = 0;
+        if (!homeLatestVendors?.length) return;
+        latestPartnersRef.current?.scrollToOffset?.({ offset: 0, animated: false });
+    }, [homeLatestVendors]);
+
+    useEffect(() => {
+        if (homeLatestVendorsLoading || homeLatestVendors.length < 2) return undefined;
+        const id = setInterval(() => {
+            const next = (latestPartnerIndexRef.current + 1) % homeLatestVendors.length;
+            latestPartnerIndexRef.current = next;
+            latestPartnersRef.current?.scrollToOffset?.({
+                offset: next * (ANON_PARTNER_CARD_W + 12),
+                animated: true,
+            });
+        }, 3600);
+        return () => clearInterval(id);
+    }, [homeLatestVendorsLoading, homeLatestVendors.length]);
+
+    const handleLatestPartnersMomentumEnd = useCallback((event) => {
+        const x = event?.nativeEvent?.contentOffset?.x || 0;
+        const index = Math.round(x / (ANON_PARTNER_CARD_W + 12));
+        latestPartnerIndexRef.current = Math.max(0, index);
+    }, []);
 
     useEffect(() => {
         if (!useApi || !homeLatestVendors.length) {
@@ -359,6 +400,7 @@ export default function Home({ navigation }) {
 
     useEffect(() => {
         if (!useApi || planTab !== 'special') return;
+        if (homeSpecialServices.length > 0) return;
         let cancelled = false;
         setHomeSpecialLoading(true);
         (async () => {
@@ -380,7 +422,7 @@ export default function Home({ navigation }) {
         return () => {
             cancelled = true;
         };
-    }, [useApi, planTab]);
+    }, [useApi, planTab, homeSpecialServices.length]);
 
     useEffect(() => {
         if (!showCategoriesStep) {
@@ -394,10 +436,21 @@ export default function Home({ navigation }) {
             setCategoriesLoading(true);
             try {
                 const cats = await getCachedCategories(selectedType);
-                const resolved = await Promise.all((cats || []).map(async (cat) => ({
-                    ...cat,
-                    icon_url: await resolveStorageUrl(cat.icon_url),
-                })));
+                const safeCats = (cats || []).filter((c) => c && c.id != null && String(c.id).length > 0);
+                const resolved = await Promise.all(
+                    safeCats.map(async (cat) => {
+                        let iconUrl = null;
+                        try {
+                            iconUrl = await resolveStorageUrl(cat.icon_url);
+                        } catch (_) {
+                            iconUrl = cat.icon_url || null;
+                        }
+                        return {
+                            ...cat,
+                            icon_url: iconUrl,
+                        };
+                    })
+                );
                 setCategories(resolved);
                 setSelectedCategories(new Set());
                 if (resolved.length > 0) {
@@ -521,6 +574,26 @@ export default function Home({ navigation }) {
             });
             return;
         }
+        const mobileDigits = form.contact_mobile.replace(/\D/g, '');
+        if (mobileDigits.length < 10) {
+            showToast({
+                variant: 'info',
+                title: 'Invalid mobile',
+                message: 'Please enter a valid 10-digit mobile number.',
+            });
+            return;
+        }
+        if (form.contact_email?.trim()) {
+            const okEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.contact_email.trim());
+            if (!okEmail) {
+                showToast({
+                    variant: 'info',
+                    title: 'Invalid email',
+                    message: 'Please enter a valid email address.',
+                });
+                return;
+            }
+        }
         if (!form.planned_budget?.trim()) {
             showToast({
                 variant: 'info',
@@ -544,7 +617,7 @@ export default function Home({ navigation }) {
         const payload = {
             role: form.role || null,
             contact_name: form.contact_name.trim(),
-            contact_mobile: form.contact_mobile.trim(),
+            contact_mobile: mobileDigits,
             contact_email: form.contact_email?.trim() || null,
             event_date: form.event_date || null,
             guest_count: form.guest_count ? parseInt(form.guest_count, 10) : null,
@@ -640,9 +713,10 @@ export default function Home({ navigation }) {
     };
 
     const toggleCategory = (cat) => {
+        const id = typeof cat === 'object' ? cat?.id : cat;
+        if (id == null) return;
         setSelectedCategories(prev => {
             const next = new Set(prev);
-            const id = typeof cat === 'object' ? cat.id : cat;
             if (next.has(id)) {
                 next.delete(id);
             } else {
@@ -652,33 +726,54 @@ export default function Home({ navigation }) {
         });
     };
 
+    const toggleAllCategories = useCallback(() => {
+        if (!validCategories.length) return;
+        setSelectedCategories((prev) => {
+            if (prev.size === validCategories.length) return new Set();
+            return new Set(validCategories.map((cat) => cat.id));
+        });
+    }, [validCategories]);
+
+    useEffect(() => {
+        if (!validCategories.length && selectedCategories.size === 0) return;
+        const validSet = new Set(validCategories.map((cat) => cat.id));
+        setSelectedCategories((prev) => {
+            const next = new Set([...prev].filter((id) => validSet.has(id)));
+            return next.size === prev.size ? prev : next;
+        });
+    }, [validCategories, selectedCategories.size]);
+
     const handleExploreServices = () => {
-        const selCats = categories.filter(c => selectedCategories.has(c.id));
-        const catIds = selCats.map(c => c.id);
-        const catNames = selCats.map(c => c.name);
+        const selCats = categories.filter((c) => c && c.id != null && selectedCategories.has(c.id));
+        const catIds = selCats.map((c) => c.id);
+        const catNames = selCats.map((c) => (c.name != null ? String(c.name) : 'Category'));
+        const occasionName = eventTypes.find((t) => t.id === selectedType)?.name || '';
+        if (!selectedType || !String(occasionName).trim()) {
+            showToast({
+                variant: 'error',
+                title: 'Occasion required',
+                message: 'Select an occasion first, then choose categories.',
+            });
+            return;
+        }
+        if (!catIds.length) {
+            showToast({
+                variant: 'info',
+                title: 'Select categories',
+                message: 'Pick at least one category to explore services.',
+            });
+            return;
+        }
         navigation.navigate('CategoryServices', {
             categoryIds: catIds,
             categoryNames: catNames,
             occasionId: selectedType,
-            occasionName: eventTypes.find(t => t.id === selectedType)?.name,
+            occasionName: String(occasionName).trim(),
             cartId,
         });
     };
 
     const selectedOccasionObj = eventTypes.find(t => t.id === selectedType);
-    const weddingOccasion = eventTypes.find((t) => {
-        const id = String(t.id || '').toLowerCase();
-        const name = String(t.name || '').toLowerCase();
-        return id === 'wedding' || name.includes('wedding');
-    });
-    const janeyuOccasion = eventTypes.find((t) => {
-        if (t.id === weddingOccasion?.id) return false;
-        const id = String(t.id || '').toLowerCase();
-        const name = String(t.name || '').toLowerCase();
-        return name.includes('janeyu') || name.includes('janayu') || name.includes('thread') || id === 'janayu' || id === 'janeyu';
-    });
-    const otherOccasions = eventTypes.filter((t) => t.id !== weddingOccasion?.id && t.id !== janeyuOccasion?.id);
-    const selectedInOthers = !!selectedType && otherOccasions.some((t) => t.id === selectedType);
     const catColors = ['#FF7A00', '#1E3A8A', '#10B981', '#8B5CF6', '#F59E0B', '#EC4899', '#06B6D4', '#EF4444', '#14B8A6', '#6366F1'];
 
     const renderLatestPartnersSection = () => {
@@ -713,7 +808,8 @@ export default function Home({ navigation }) {
                         </View>
                     ) : (
                         <FlatList
-                            data={homeLatestVendors.slice(0, 10)}
+                            ref={latestPartnersRef}
+                            data={homeLatestVendors}
                             keyExtractor={(item, index) => String(item?.id || `partner-${index}`)}
                             horizontal
                             pagingEnabled
@@ -724,14 +820,17 @@ export default function Home({ navigation }) {
                             showsHorizontalScrollIndicator={false}
                             style={styles.anonVendorsScrollView}
                             contentContainerStyle={styles.anonVendorsScroll}
+                            onMomentumScrollEnd={handleLatestPartnersMomentumEnd}
+                            onScrollToIndexFailed={() => {}}
                             renderItem={({ item }) => {
                                 const galleryUrls = (item.gallery_urls || []).filter(Boolean);
                                 const displayGalleryUrls =
                                     resolvedPartnerGalleries[item.id]?.length > 0
                                         ? resolvedPartnerGalleries[item.id]
                                         : galleryUrls.map((u) => getVendorImageUrl(u, 'gallery'));
-                                const serviceNames = (item.services || []).filter(Boolean).slice(0, 12);
-                                const svcLine = (item.services || []).filter(Boolean).slice(0, 3).join(' · ');
+                                const serviceNames = (item.services || []).filter(Boolean);
+                                const visibleServiceChips = serviceNames.slice(0, 3);
+                                const remainingCount = Math.max(0, serviceNames.length - visibleServiceChips.length);
                                 const gridUris =
                                     displayGalleryUrls.length > 0
                                         ? displayGalleryUrls
@@ -752,15 +851,19 @@ export default function Home({ navigation }) {
                                         contactLocked: true,
                                     });
                                 return (
-                                    <View
-                                        style={[
+                                    <Pressable
+                                        onPress={goPartnerDetail}
+                                        style={({ pressed }) => [
                                             styles.anonVendorCard,
                                             {
                                                 backgroundColor: isDarkMode ? theme.card : '#FFFCF9',
                                                 borderColor: colors.primary + '35',
                                                 borderLeftColor: colors.primary,
                                             },
+                                            pressed && { opacity: 0.9 },
                                         ]}
+                                        accessibilityRole="button"
+                                        accessibilityLabel={`${item.display_label || 'Partner'}, ${cityLine}`}
                                     >
                                         <View style={styles.anonVendorGrid}>
                                             <VendorGallerySlider
@@ -782,26 +885,13 @@ export default function Home({ navigation }) {
                                                 </Text>
                                             </LinearGradient>
                                         </View>
-                                        <Pressable
-                                            onPress={goPartnerDetail}
-                                            style={({ pressed }) => [
-                                                styles.anonVendorCardFooter,
-                                                pressed && { opacity: 0.85 },
-                                            ]}
-                                            accessibilityRole="button"
-                                            accessibilityLabel={`${item.display_label || 'Partner'}, ${cityLine}`}
-                                        >
+                                        <View style={styles.anonVendorCardFooter}>
                                             <Text style={[styles.anonVendorCity, { color: theme.text }]} numberOfLines={1}>
                                                 {cityLine}
                                             </Text>
-                                            {svcLine ? (
-                                                <Text style={[styles.anonVendorSvc, { color: theme.textLight }]} numberOfLines={2}>
-                                                    {svcLine}
-                                                </Text>
-                                            ) : null}
                                             {serviceNames.length > 0 ? (
                                                 <View style={styles.anonVendorChipRow}>
-                                                    {serviceNames.slice(0, 3).map((svcName, idx) => (
+                                                    {visibleServiceChips.map((svcName, idx) => (
                                                         <View
                                                             key={`${item.id}-chip-${idx}`}
                                                             style={[
@@ -817,14 +907,27 @@ export default function Home({ navigation }) {
                                                             </Text>
                                                         </View>
                                                     ))}
+                                                    {remainingCount > 0 ? (
+                                                        <View
+                                                            style={[
+                                                                styles.anonVendorChip,
+                                                                {
+                                                                    borderColor: colors.primary + '28',
+                                                                    backgroundColor: isDarkMode ? '#1e2433' : '#FFF8F3',
+                                                                },
+                                                            ]}
+                                                        >
+                                                            <Text style={[styles.anonVendorChipText, { color: theme.text }]}>+{remainingCount} ...</Text>
+                                                        </View>
+                                                    ) : null}
                                                 </View>
                                             ) : null}
                                             <View style={styles.anonVendorFooterHint}>
                                                 <Text style={[styles.anonVendorFooterHintText, { color: colors.primary }]}>View partner</Text>
                                                 <Ionicons name="chevron-forward" size={16} color={colors.primary} />
                                             </View>
-                                        </Pressable>
-                                    </View>
+                                        </View>
+                                    </Pressable>
                                 );
                             }}
                         />
@@ -848,7 +951,13 @@ export default function Home({ navigation }) {
                                     <Text style={[styles.locationLabel, { color: theme.textLight }]}>{tr('home_your_location')}</Text>
                                     <View style={styles.locationRow}>
                                         <Ionicons name="location" size={14} color={colors.primary} />
-                                        <Text style={[styles.locationValue, { color: theme.text }]}>{locationName}</Text>
+                                        <Text
+                                            style={[styles.locationValue, { color: theme.text }]}
+                                            numberOfLines={1}
+                                            ellipsizeMode="tail"
+                                        >
+                                            {locationName}
+                                        </Text>
                                         <Ionicons name="chevron-down" size={14} color={theme.textLight} style={{ marginLeft: 2 }} />
                                     </View>
                                 </View>
@@ -952,164 +1061,59 @@ export default function Home({ navigation }) {
                                 ))}
                             </View>
                             ) : (
-                            <View>
-                                <View style={styles.occasionRowSingle}>
-                                    {weddingOccasion && (
+                            <ScrollView
+                                horizontal
+                                nestedScrollEnabled
+                                showsHorizontalScrollIndicator={false}
+                                style={styles.occasionRailScroll}
+                                contentContainerStyle={styles.occasionRailContent}
+                            >
+                                {eventTypes.map((type) => {
+                                    const typeColor = type.color || colors.primary;
+                                    const isSelected = selectedType === type.id;
+                                    return (
                                         <TouchableOpacity
+                                            key={type.id}
                                             style={[
-                                                styles.occasionCardSingle,
-                                                { backgroundColor: theme.card, borderColor: theme.border },
-                                                selectedType === weddingOccasion.id && { borderColor: (weddingOccasion.color || colors.primary), borderWidth: 2 },
+                                                styles.occasionImageCard,
+                                                {
+                                                    width: HOME_SPECIAL_H_CARD_W,
+                                                    backgroundColor: theme.card,
+                                                    borderColor: isSelected ? typeColor : (isDarkMode ? theme.border : colors.primary + '24'),
+                                                },
                                             ]}
-                                            onPress={() => handleEventTypePress(weddingOccasion)}
-                                            activeOpacity={0.8}
+                                            onPress={() => handleEventTypePress(type)}
+                                            activeOpacity={0.9}
                                         >
-                                            {selectedType === weddingOccasion.id && (
-                                                <LinearGradient
-                                                    colors={[(weddingOccasion.color || colors.primary) + '15', (weddingOccasion.color || colors.primary) + '08']}
-                                                    style={StyleSheet.absoluteFill}
-                                                    start={{ x: 0, y: 0 }}
-                                                    end={{ x: 1, y: 1 }}
-                                                />
-                                            )}
-                                            <View style={[
-                                                styles.occasionIconWrap,
-                                                { backgroundColor: selectedType === weddingOccasion.id ? (weddingOccasion.color || colors.primary) + '25' : (isDarkMode ? '#252840' : '#F3F4F6') },
-                                            ]}>
-                                                {weddingOccasion.image_url ? (
-                                                    <Image source={{ uri: weddingOccasion.image_url }} style={styles.occasionIconImg} resizeMode="cover" />
-                                                ) : (
-                                                    <Text style={styles.occasionEmoji}>{weddingOccasion.icon || '💒'}</Text>
-                                                )}
-                                            </View>
-                                            <Text style={[
-                                                styles.occasionLabel,
-                                                { color: theme.text },
-                                                selectedType === weddingOccasion.id && { color: weddingOccasion.color || colors.primary, fontWeight: '700' },
-                                            ]} numberOfLines={2}>Wedding</Text>
-                                            {selectedType === weddingOccasion.id && (
-                                                <View style={[styles.occasionCheck, { backgroundColor: weddingOccasion.color || colors.primary }]}>
-                                                    <Ionicons name="checkmark" size={12} color="#FFF" />
-                                                </View>
-                                            )}
-                                        </TouchableOpacity>
-                                    )}
-                                    {janeyuOccasion && (
-                                        <TouchableOpacity
-                                            style={[
-                                                styles.occasionCardSingle,
-                                                { backgroundColor: theme.card, borderColor: theme.border },
-                                                selectedType === janeyuOccasion.id && { borderColor: (janeyuOccasion.color || colors.primary), borderWidth: 2 },
-                                            ]}
-                                            onPress={() => handleEventTypePress(janeyuOccasion)}
-                                            activeOpacity={0.8}
-                                        >
-                                            {selectedType === janeyuOccasion.id && (
-                                                <LinearGradient
-                                                    colors={[(janeyuOccasion.color || colors.primary) + '15', (janeyuOccasion.color || colors.primary) + '08']}
-                                                    style={StyleSheet.absoluteFill}
-                                                    start={{ x: 0, y: 0 }}
-                                                    end={{ x: 1, y: 1 }}
-                                                />
-                                            )}
-                                            <View style={[
-                                                styles.occasionIconWrap,
-                                                { backgroundColor: selectedType === janeyuOccasion.id ? (janeyuOccasion.color || colors.primary) + '25' : (isDarkMode ? '#252840' : '#F3F4F6') },
-                                            ]}>
-                                                {janeyuOccasion.image_url ? (
-                                                    <Image source={{ uri: janeyuOccasion.image_url }} style={styles.occasionIconImg} resizeMode="cover" />
-                                                ) : (
-                                                    <Text style={styles.occasionEmoji}>{janeyuOccasion.icon || '🕉️'}</Text>
-                                                )}
-                                            </View>
-                                            <Text style={[
-                                                styles.occasionLabel,
-                                                { color: theme.text },
-                                                selectedType === janeyuOccasion.id && { color: janeyuOccasion.color || colors.primary, fontWeight: '700' },
-                                            ]} numberOfLines={2}>Janeyu</Text>
-                                            {selectedType === janeyuOccasion.id && (
-                                                <View style={[styles.occasionCheck, { backgroundColor: janeyuOccasion.color || colors.primary }]}>
-                                                    <Ionicons name="checkmark" size={12} color="#FFF" />
-                                                </View>
-                                            )}
-                                        </TouchableOpacity>
-                                    )}
-                                    <TouchableOpacity
-                                        style={[
-                                            styles.occasionCardSingle,
-                                            styles.othersCard,
-                                            { backgroundColor: theme.card, borderColor: theme.border },
-                                            (othersExpanded || selectedInOthers) && { borderColor: colors.primary, borderWidth: 2 },
-                                        ]}
-                                        onPress={() => setOthersExpanded((prev) => !prev)}
-                                        activeOpacity={0.8}
-                                    >
-                                        <View style={[
-                                            styles.occasionIconWrap,
-                                            { backgroundColor: colors.primary + '15' },
-                                        ]}>
-                                            <Ionicons name={othersExpanded ? 'chevron-up' : 'grid-outline'} size={24} color={colors.primary} />
-                                        </View>
-                                        <Text style={[
-                                            styles.occasionLabel,
-                                            { color: theme.text },
-                                            (othersExpanded || selectedInOthers) && { color: colors.primary, fontWeight: '700' },
-                                        ]} numberOfLines={2}>
-                                            Others
-                                        </Text>
-                                    </TouchableOpacity>
-                                </View>
-                                {othersExpanded && otherOccasions.length > 0 && (
-                                    <View style={styles.occasionGridExpanded}>
-                                        {otherOccasions.map((type) => {
-                                            const typeColor = type.color || colors.primary;
-                                            const isSelected = selectedType === type.id;
-                                            return (
-                                                <TouchableOpacity
-                                                    key={type.id}
-                                                    style={[
-                                                        styles.occasionCard,
-                                                        styles.occasionCardCompact3Col,
-                                                        { backgroundColor: theme.card, borderColor: theme.border },
-                                                        isSelected && { borderColor: typeColor, borderWidth: 2 },
-                                                    ]}
-                                                    onPress={() => handleEventTypePress(type)}
-                                                    activeOpacity={0.8}
-                                                >
-                                                    {isSelected && (
-                                                        <LinearGradient
-                                                            colors={[typeColor + '15', typeColor + '08']}
-                                                            style={StyleSheet.absoluteFill}
-                                                            start={{ x: 0, y: 0 }}
-                                                            end={{ x: 1, y: 1 }}
-                                                        />
-                                                    )}
-                                                    <View style={[
-                                                        styles.occasionIconWrap,
-                                                        { backgroundColor: isSelected ? typeColor + '25' : (isDarkMode ? '#252840' : '#F3F4F6') },
-                                                    ]}>
-                                                        {type.image_url ? (
-                                                            <Image source={{ uri: type.image_url }} style={styles.occasionIconImg} resizeMode="cover" />
-                                                        ) : (
-                                                            <Text style={styles.occasionEmoji}>{type.icon || '🎉'}</Text>
-                                                        )}
-                                                    </View>
-                                                    <Text style={[
-                                                        styles.occasionLabel,
-                                                        { color: theme.text },
-                                                        isSelected && { color: typeColor, fontWeight: '700' },
-                                                    ]} numberOfLines={2}>{type.name}</Text>
-                                                    {isSelected && (
-                                                        <View style={[styles.occasionCheck, { backgroundColor: typeColor }]}>
-                                                            <Ionicons name="checkmark" size={12} color="#FFF" />
+                                            <View style={styles.occasionImageWrap}>
+                                                <View style={[styles.occasionImageFrame, { backgroundColor: isDarkMode ? '#0F172A' : '#FFFFFF' }]}>
+                                                    {type.image_url ? (
+                                                        <Image source={{ uri: type.image_url }} style={styles.occasionImage} resizeMode="cover" />
+                                                    ) : (
+                                                        <View style={[styles.occasionImagePlaceholder, { backgroundColor: isDarkMode ? '#334155' : '#E2E8F0' }]}>
+                                                            <Ionicons name="image-outline" size={24} color={colors.primary} />
                                                         </View>
                                                     )}
-                                                </TouchableOpacity>
-                                            );
-                                        })}
-                                    </View>
-                                )}
-                            </View>
+                                                </View>
+                                                {isSelected ? (
+                                                    <View style={[styles.occasionImageCheck, { backgroundColor: typeColor }]}>
+                                                        <Ionicons name="checkmark" size={13} color="#FFF" />
+                                                    </View>
+                                                ) : null}
+                                            </View>
+                                            <Text
+                                                style={[
+                                                    styles.occasionImageName,
+                                                    { color: isSelected ? typeColor : theme.text },
+                                                ]}
+                                                numberOfLines={2}
+                                            >
+                                                {type.name}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </ScrollView>
                             )
                         ) : !useApi ? null : homeSpecialLoading ? (
                             <View style={styles.homeSpecialCenter}>
@@ -1131,6 +1135,26 @@ export default function Home({ navigation }) {
                             </Text>
                         ) : (
                             <View style={styles.homeSpecialBody}>
+                                <View style={styles.homeSpecialActionRow}>
+                                    <Text style={[styles.homeSpecialActionHint, { color: theme.textLight }]}>
+                                        Tap any add-on to view only its details
+                                    </Text>
+                                    <TouchableOpacity
+                                        style={[styles.homeSpecialSelectAllBtn, { borderColor: colors.primary + '55', backgroundColor: colors.primary + '12' }]}
+                                        onPress={() =>
+                                            navigation.navigate('SpecialServices', {
+                                                occasionId: null,
+                                                occasionName: null,
+                                                city: currentCity,
+                                                showAll: true,
+                                            })
+                                        }
+                                        activeOpacity={0.9}
+                                    >
+                                        <Ionicons name="checkmark-done" size={14} color={colors.primary} />
+                                        <Text style={[styles.homeSpecialSelectAllText, { color: colors.primary }]}>Select all</Text>
+                                    </TouchableOpacity>
+                                </View>
                                 <ScrollView
                                     horizontal
                                     nestedScrollEnabled
@@ -1143,32 +1167,29 @@ export default function Home({ navigation }) {
                                         const prices = tiers.map((t) => t.value).filter((n) => n > 0);
                                         const low = prices.length ? Math.min(...prices) : null;
                                         return (
-                                            <LinearGradient
+                                            <TouchableOpacity
                                                 key={svc.id}
-                                                colors={[colors.primary + '55', colors.secondary + '40', colors.primary + '28']}
-                                                start={{ x: 0, y: 0 }}
-                                                end={{ x: 1, y: 1 }}
-                                                style={styles.homeSpecialCardRing}
+                                                style={[
+                                                    styles.homeSpecialCardInner,
+                                                    {
+                                                        width: HOME_SPECIAL_H_CARD_W,
+                                                        backgroundColor: theme.card,
+                                                        borderColor: isDarkMode ? theme.border : colors.primary + '24',
+                                                    },
+                                                ]}
+                                                onPress={() =>
+                                                    navigation.navigate('SpecialServices', {
+                                                        occasionId: null,
+                                                        occasionName: null,
+                                                        city: currentCity,
+                                                        selectedServiceId: svc.id,
+                                                        showAll: false,
+                                                    })
+                                                }
+                                                activeOpacity={0.9}
                                             >
-                                                <TouchableOpacity
-                                                    style={[
-                                                        styles.homeSpecialCardInner,
-                                                        {
-                                                            width: HOME_SPECIAL_H_CARD_W,
-                                                            backgroundColor: theme.card,
-                                                            borderColor: isDarkMode ? theme.border : colors.primary + '22',
-                                                        },
-                                                    ]}
-                                                    onPress={() =>
-                                                        navigation.navigate('SpecialServices', {
-                                                            occasionId: null,
-                                                            occasionName: null,
-                                                            city: currentCity,
-                                                        })
-                                                    }
-                                                    activeOpacity={0.9}
-                                                >
-                                                    <View style={styles.homeSpecialCardImgWrap}>
+                                                <View style={styles.homeSpecialCardImgWrap}>
+                                                    <View style={[styles.homeSpecialCardImgFrame, { backgroundColor: isDarkMode ? '#0F172A' : '#FFFFFF' }]}>
                                                         {svc.image_url ? (
                                                             <Image source={{ uri: svc.image_url }} style={styles.homeSpecialCardImg} resizeMode="cover" />
                                                         ) : (
@@ -1177,16 +1198,16 @@ export default function Home({ navigation }) {
                                                             </View>
                                                         )}
                                                     </View>
-                                                    <Text style={[styles.homeSpecialCardName, { color: theme.text }]} numberOfLines={2}>
-                                                        {svc.name}
+                                                </View>
+                                                <Text style={[styles.homeSpecialCardName, { color: theme.text }]} numberOfLines={2}>
+                                                    {svc.name}
+                                                </Text>
+                                                {low != null ? (
+                                                    <Text style={[styles.homeSpecialCardFrom, { color: colors.primary }]}>
+                                                        from ₹{low.toLocaleString('en-IN')}
                                                     </Text>
-                                                    {low != null ? (
-                                                        <Text style={[styles.homeSpecialCardFrom, { color: colors.primary }]}>
-                                                            from ₹{low.toLocaleString('en-IN')}
-                                                        </Text>
-                                                    ) : null}
-                                                </TouchableOpacity>
-                                            </LinearGradient>
+                                                ) : null}
+                                            </TouchableOpacity>
                                         );
                                     })}
                                 </ScrollView>
@@ -1197,6 +1218,7 @@ export default function Home({ navigation }) {
                                             occasionId: null,
                                             occasionName: null,
                                             city: currentCity,
+                                            showAll: true,
                                         })
                                     }
                                     activeOpacity={0.9}
@@ -1626,11 +1648,30 @@ export default function Home({ navigation }) {
                                             {tr('home_pick_categories')} {selectedOccasionObj?.name || tr('home_your_event')}
                                         </Text>
                                     </View>
-                                    {selectedCategories.size > 0 && (
-                                        <View style={[styles.selectedCountBadge, { backgroundColor: colors.primary }]}>
-                                            <Text style={styles.selectedCountText}>{selectedCategories.size}</Text>
-                                        </View>
-                                    )}
+                                    <View style={styles.categoryHeaderActions}>
+                                        <TouchableOpacity
+                                            style={[
+                                                styles.categorySelectAllBtn,
+                                                { borderColor: colors.primary + '4D', backgroundColor: colors.primary + '10' },
+                                            ]}
+                                            onPress={toggleAllCategories}
+                                            activeOpacity={0.85}
+                                        >
+                                            <Ionicons
+                                                name={allCategoriesSelected ? 'close-circle' : 'checkmark-circle'}
+                                                size={14}
+                                                color={colors.primary}
+                                            />
+                                            <Text style={[styles.categorySelectAllText, { color: colors.primary }]}>
+                                                {allCategoriesSelected ? 'Clear all' : 'Select all'}
+                                            </Text>
+                                        </TouchableOpacity>
+                                        {selectedCategories.size > 0 && (
+                                            <View style={[styles.selectedCountBadge, { backgroundColor: colors.primary }]}>
+                                                <Text style={styles.selectedCountText}>{selectedCategories.size}</Text>
+                                            </View>
+                                        )}
+                                    </View>
                                 </View>
 
                                 <ScrollView
@@ -1638,12 +1679,12 @@ export default function Home({ navigation }) {
                                     showsHorizontalScrollIndicator={false}
                                     contentContainerStyle={styles.categoryScrollContent}
                                 >
-                                    {categories.map((cat, idx) => {
+                                    {validCategories.map((cat, idx) => {
                                         const catColor = catColors[idx % catColors.length];
                                         const isSelected = selectedCategories.has(cat.id);
                                         return (
                                             <TouchableOpacity
-                                                key={cat.id}
+                                                key={String(cat.id)}
                                                 style={[
                                                     styles.categoryBox,
                                                     { backgroundColor: isDarkMode ? '#1A1D27' : '#FFFFFF', borderColor: isDarkMode ? '#2D3142' : '#E5E7EB' },
@@ -1922,76 +1963,72 @@ export default function Home({ navigation }) {
                                 showsHorizontalScrollIndicator={false}
                                 contentContainerStyle={styles.testimonialsScroll}
                                 decelerationRate="fast"
-                                snapToInterval={width * 0.86}
+                                snapToInterval={width - 32}
                             >
-                                {testimonials.map((item) => (
-                                    <LinearGradient
-                                        key={item.id}
-                                        colors={isDarkMode ? ['#1e293b', '#0f172a'] : ['#FFFFFF', '#FFF8F0']}
-                                        start={{ x: 0, y: 0 }}
-                                        end={{ x: 1, y: 1 }}
-                                        style={[
-                                            styles.testimonialCard,
-                                            { borderColor: isDarkMode ? '#334155' : colors.primary + '35' },
-                                        ]}
-                                    >
-                                        <View style={styles.testimonialTop}>
-                                            {item.image_url ? (
-                                                <Image source={{ uri: item.image_url }} style={styles.testimonialImg} />
-                                            ) : (
-                                                <LinearGradient
-                                                    colors={[colors.primary, colors.secondary]}
-                                                    style={styles.testimonialAvatar}
-                                                >
-                                                    <Text style={styles.testimonialAvatarText}>
-                                                        {(item.display_name || '?').charAt(0).toUpperCase()}
+                                {testimonialsTwoCol.map((row, rowIndex) => (
+                                    <View key={`t-row-${rowIndex}`} style={styles.testimonialsGridPage}>
+                                        {row.map((item) => (
+                                            <LinearGradient
+                                                key={item.id}
+                                                colors={isDarkMode ? ['#1e293b', '#0f172a'] : ['#FFFFFF', '#FFF8F0']}
+                                                start={{ x: 0, y: 0 }}
+                                                end={{ x: 1, y: 1 }}
+                                                style={[
+                                                    styles.testimonialCard,
+                                                    { borderColor: isDarkMode ? '#334155' : colors.primary + '35' },
+                                                ]}
+                                            >
+                                                {item.image_url ? (
+                                                    <Image source={{ uri: item.image_url }} style={styles.testimonialHeroImg} />
+                                                ) : (
+                                                    <LinearGradient colors={[colors.primary, colors.secondary]} style={styles.testimonialHeroImgPh}>
+                                                        <Text style={styles.testimonialAvatarText}>
+                                                            {(item.display_name || '?').charAt(0).toUpperCase()}
+                                                        </Text>
+                                                    </LinearGradient>
+                                                )}
+                                                <View style={styles.testimonialTop}>
+                                                    <Text style={[styles.testimonialName, { color: theme.text }]} numberOfLines={1}>
+                                                        {item.display_name}
                                                     </Text>
-                                                </LinearGradient>
-                                            )}
-                                            <View style={{ flex: 1 }}>
-                                                <Text style={[styles.testimonialName, { color: theme.text }]} numberOfLines={1}>
-                                                    {item.display_name}
-                                                </Text>
-                                                <View style={styles.testimonialActions}>
-                                                    {item.video_url ? (
-                                                        <TouchableOpacity
-                                                            style={styles.tMiniBtn}
-                                                            onPress={() => Linking.openURL(item.video_url)}
-                                                        >
-                                                            <Ionicons name="logo-youtube" size={16} color="#EF4444" />
-                                                            <Text
-                                                                style={[
-                                                                    styles.tMiniBtnText,
-                                                                    { color: isDarkMode ? '#FECACA' : '#5B21B6' },
-                                                                ]}
-                                                            >
-                                                                {tr('home_video')}
-                                                            </Text>
-                                                        </TouchableOpacity>
-                                                    ) : null}
-                                                    {item.voice_recording_url ? (
-                                                        <TouchableOpacity
-                                                            style={styles.tMiniBtn}
-                                                            onPress={() => Linking.openURL(item.voice_recording_url)}
-                                                        >
-                                                            <Ionicons name="mic" size={16} color={colors.primary} />
-                                                            <Text
-                                                                style={[
-                                                                    styles.tMiniBtnText,
-                                                                    { color: isDarkMode ? '#C4B5FD' : '#5B21B6' },
-                                                                ]}
-                                                            >
-                                                                {tr('home_voice')}
-                                                            </Text>
-                                                        </TouchableOpacity>
-                                                    ) : null}
+                                                    <View style={styles.testimonialActions}>
+                                                        {item.video_url ? (
+                                                            <TouchableOpacity style={styles.tMiniBtn} onPress={() => Linking.openURL(item.video_url)}>
+                                                                <Ionicons name="logo-youtube" size={14} color="#EF4444" />
+                                                                <Text
+                                                                    style={[
+                                                                        styles.tMiniBtnText,
+                                                                        { color: isDarkMode ? '#FECACA' : '#5B21B6' },
+                                                                    ]}
+                                                                >
+                                                                    {tr('home_video')}
+                                                                </Text>
+                                                            </TouchableOpacity>
+                                                        ) : null}
+                                                        {item.voice_recording_url ? (
+                                                            <TouchableOpacity style={styles.tMiniBtn} onPress={() => Linking.openURL(item.voice_recording_url)}>
+                                                                <Ionicons name="mic" size={14} color={colors.primary} />
+                                                                <Text
+                                                                    style={[
+                                                                        styles.tMiniBtnText,
+                                                                        { color: isDarkMode ? '#C4B5FD' : '#5B21B6' },
+                                                                    ]}
+                                                                >
+                                                                    {tr('home_voice')}
+                                                                </Text>
+                                                            </TouchableOpacity>
+                                                        ) : null}
+                                                    </View>
                                                 </View>
-                                            </View>
-                                        </View>
-                                        {item.testimonial_text ? (
-                                            <Text style={[styles.testimonialQuote, { color: theme.text }]}>"{item.testimonial_text}"</Text>
-                                        ) : null}
-                                    </LinearGradient>
+                                                {item.testimonial_text ? (
+                                                    <Text style={[styles.testimonialQuote, { color: theme.text }]} numberOfLines={5}>
+                                                        "{item.testimonial_text}"
+                                                    </Text>
+                                                ) : null}
+                                            </LinearGradient>
+                                        ))}
+                                        {row.length === 1 ? <View style={styles.testimonialCardGhost} /> : null}
+                                    </View>
                                 ))}
                             </ScrollView>
                         </View>
@@ -2008,6 +2045,7 @@ export default function Home({ navigation }) {
                 occasionId={selectedType}
                 occasionName={selectedOccasionObj?.name}
                 plannedBudgetInr={plannedBudgetInr}
+                navigation={navigation}
             />
 
             <LocationMapPickerModal
@@ -2073,14 +2111,20 @@ export default function Home({ navigation }) {
                     setRecommendationsModalVisible(false);
                     setFormSubmitted(true);
                     if (result === 'explore') {
-                        const cats = recommendationsData?.categories || [];
-                        navigation.navigate('CategoryServices', {
-                            categoryIds: cats.map((c) => c.id),
-                            categoryNames: cats.map((c) => c.name),
-                            occasionId: selectedType,
-                            occasionName: selectedOccasionObj?.name,
-                            cartId,
-                        });
+                        const cats = (recommendationsData?.categories || []).filter((c) => c && c.id != null);
+                        const occName =
+                            selectedOccasionObj?.name ||
+                            eventTypes.find((t) => t.id === selectedType)?.name ||
+                            '';
+                        if (cats.length && selectedType && String(occName).trim()) {
+                            navigation.navigate('CategoryServices', {
+                                categoryIds: cats.map((c) => c.id),
+                                categoryNames: cats.map((c) => c.name ?? 'Category'),
+                                occasionId: selectedType,
+                                occasionName: String(occName).trim(),
+                                cartId,
+                            });
+                        }
                     } else if (result === 'cart') {
                         navigation.navigate('Cart');
                     }
@@ -2102,6 +2146,28 @@ export default function Home({ navigation }) {
                 formSnapshot={recommendationFormSnapshot}
             />
 
+            <TouchableOpacity
+                style={[
+                    styles.aiChatFab,
+                    {
+                        bottom: TAB_BAR_CONTENT_H + Math.max(insets.bottom, TAB_BAR_BOTTOM_PAD) + 8,
+                    },
+                ]}
+                onPress={() => setChatModalVisible(true)}
+                activeOpacity={0.88}
+                accessibilityRole="button"
+                accessibilityLabel="Open Ekatraa AI"
+            >
+                <LinearGradient
+                    colors={[colors.primary, colors.primaryGradientEnd || colors.gradientEnd || '#FFA040']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.aiChatFabGrad}
+                >
+                    <Ionicons name="chatbubbles" size={26} color="#FFF" />
+                </LinearGradient>
+            </TouchableOpacity>
+
             <BottomTabBar
                 navigation={navigation}
                 activeRoute="Home"
@@ -2113,11 +2179,33 @@ export default function Home({ navigation }) {
 
 const styles = StyleSheet.create({
     container: { flex: 1 },
+    aiChatFab: {
+        position: 'absolute',
+        right: 18,
+        zIndex: 40,
+        ...Platform.select({
+            ios: {
+                shadowColor: '#000',
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.22,
+                shadowRadius: 8,
+            },
+            android: { elevation: 10 },
+        }),
+    },
+    aiChatFabGrad: {
+        width: 58,
+        height: 58,
+        borderRadius: 29,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
     scrollContent: { paddingBottom: 40 },
     fixedHeaderWrap: {
         borderBottomWidth: StyleSheet.hairlineWidth,
         paddingTop: 6,
         paddingBottom: 10,
+        zIndex: 30,
     },
     header: {
         flexDirection: 'row',
@@ -2145,12 +2233,12 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     locationLabel: { fontSize: 11, letterSpacing: 0.5, textTransform: 'uppercase', fontWeight: '600' },
-    locationRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
-    locationValue: { fontSize: 15, fontWeight: '700' },
+    locationRow: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+    locationValue: { fontSize: 15, fontWeight: '700', flexShrink: 1, maxWidth: '92%' },
     /** Reserve space for global language + cart overlay */
     headerRightSpacer: {
-        width: 96,
-        height: 42,
+        width: 84,
+        height: 38,
     },
     section: { marginBottom: 28 },
     sectionTitleRow: {
@@ -2196,6 +2284,31 @@ const styles = StyleSheet.create({
     homeSpecialBody: {
         paddingBottom: 4,
     },
+    homeSpecialActionRow: {
+        paddingHorizontal: 20,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 8,
+        gap: 10,
+    },
+    homeSpecialActionHint: {
+        fontSize: 12,
+        flex: 1,
+    },
+    homeSpecialSelectAllBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 5,
+        borderWidth: 1,
+        borderRadius: 999,
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+    },
+    homeSpecialSelectAllText: {
+        fontSize: 12,
+        fontWeight: '700',
+    },
     homeSpecialHScroll: {
         flexGrow: 0,
     },
@@ -2207,28 +2320,29 @@ const styles = StyleSheet.create({
         paddingVertical: 10,
         gap: 14,
     },
-    homeSpecialCardRing: {
-        borderRadius: 22,
-        padding: 2,
-        overflow: 'hidden',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.14,
-        shadowRadius: 12,
-        elevation: 6,
-    },
     homeSpecialCardInner: {
-        borderRadius: 19,
+        borderRadius: 14,
         borderWidth: 1.5,
         overflow: 'hidden',
         paddingBottom: 10,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.12,
+        shadowRadius: 10,
+        elevation: 5,
     },
     homeSpecialCardImgWrap: {
         width: '100%',
-        aspectRatio: 1,
-        backgroundColor: '#E5E7EB',
-        borderTopLeftRadius: 17,
-        borderTopRightRadius: 17,
+        aspectRatio: 1.08,
+        backgroundColor: 'transparent',
+        padding: 8,
+    },
+    homeSpecialCardImgFrame: {
+        width: '100%',
+        height: '100%',
+        borderRadius: 11,
+        borderWidth: 1,
+        borderColor: 'rgba(124,58,237,0.22)',
         overflow: 'hidden',
     },
     homeSpecialCardImg: {
@@ -2555,6 +2669,69 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
+    occasionRailScroll: {
+        flexGrow: 0,
+    },
+    occasionRailContent: {
+        flexDirection: 'row',
+        alignItems: 'stretch',
+        paddingLeft: 20,
+        paddingRight: 22,
+        paddingVertical: 8,
+        gap: 14,
+    },
+    occasionImageCard: {
+        borderRadius: 14,
+        borderWidth: 1.5,
+        overflow: 'hidden',
+        paddingBottom: 10,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.12,
+        shadowRadius: 10,
+        elevation: 5,
+    },
+    occasionImageWrap: {
+        width: '100%',
+        aspectRatio: 1.08,
+        backgroundColor: 'transparent',
+        padding: 8,
+        position: 'relative',
+    },
+    occasionImageFrame: {
+        width: '100%',
+        height: '100%',
+        borderRadius: 11,
+        borderWidth: 1,
+        borderColor: 'rgba(124,58,237,0.22)',
+        overflow: 'hidden',
+    },
+    occasionImage: {
+        width: '100%',
+        height: '100%',
+    },
+    occasionImagePlaceholder: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    occasionImageName: {
+        fontSize: 13,
+        fontWeight: '700',
+        paddingHorizontal: 8,
+        marginTop: 8,
+        minHeight: 34,
+    },
+    occasionImageCheck: {
+        position: 'absolute',
+        top: 14,
+        right: 14,
+        width: 24,
+        height: 24,
+        borderRadius: 8,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
 
     // Category multi-select section
     categorySection: {
@@ -2577,6 +2754,23 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
         alignItems: 'flex-start',
         marginBottom: 18,
+    },
+    categoryHeaderActions: {
+        alignItems: 'flex-end',
+        gap: 8,
+    },
+    categorySelectAllBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 5,
+        borderWidth: 1,
+        borderRadius: 999,
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+    },
+    categorySelectAllText: {
+        fontSize: 12,
+        fontWeight: '700',
     },
     categoryTitle: {
         fontSize: 19,
@@ -2617,15 +2811,15 @@ const styles = StyleSheet.create({
         elevation: 2,
     },
     categoryIconBox: {
-        width: 44,
-        height: 44,
-        borderRadius: 14,
+        width: 56,
+        height: 56,
+        borderRadius: 16,
         alignItems: 'center',
         justifyContent: 'center',
         marginBottom: 8,
     },
-    categoryBoxImg: { width: 28, height: 28, borderRadius: 8 },
-    categoryBoxEmoji: { fontSize: 22 },
+    categoryBoxImg: { width: 38, height: 38, borderRadius: 10 },
+    categoryBoxEmoji: { fontSize: 28 },
     categoryBoxLabel: {
         fontSize: 12,
         fontWeight: '600',
@@ -3181,30 +3375,37 @@ const styles = StyleSheet.create({
         paddingBottom: 8,
         gap: 12,
     },
-    testimonialCard: {
-        width: width * 0.82,
-        borderRadius: 20,
-        borderWidth: 1,
-        padding: 18,
-        marginRight: 12,
-    },
-    testimonialTop: {
+    testimonialsGridPage: {
+        width: width - 32,
+        paddingHorizontal: 14,
         flexDirection: 'row',
-        alignItems: 'flex-start',
-        gap: 12,
-        marginBottom: 12,
+        gap: 10,
     },
-    testimonialImg: {
-        width: 56,
-        height: 56,
-        borderRadius: 16,
+    testimonialCard: {
+        flex: 1,
+        borderRadius: 14,
+        borderWidth: 1,
+        padding: 10,
     },
-    testimonialAvatar: {
-        width: 56,
-        height: 56,
-        borderRadius: 16,
+    testimonialCardGhost: {
+        flex: 1,
+    },
+    testimonialHeroImg: {
+        width: '100%',
+        height: 138,
+        borderRadius: 11,
+        marginBottom: 10,
+    },
+    testimonialHeroImgPh: {
+        width: '100%',
+        height: 138,
+        borderRadius: 11,
+        marginBottom: 10,
         alignItems: 'center',
         justifyContent: 'center',
+    },
+    testimonialTop: {
+        marginBottom: 8,
     },
     testimonialAvatarText: {
         color: '#FFF',
@@ -3212,14 +3413,14 @@ const styles = StyleSheet.create({
         fontWeight: '800',
     },
     testimonialName: {
-        fontSize: 16,
+        fontSize: 14,
         fontWeight: '700',
     },
     testimonialActions: {
         flexDirection: 'row',
         flexWrap: 'wrap',
         gap: 8,
-        marginTop: 6,
+        marginTop: 5,
     },
     tMiniBtn: {
         flexDirection: 'row',
@@ -3227,7 +3428,7 @@ const styles = StyleSheet.create({
         gap: 4,
         backgroundColor: 'rgba(124,58,237,0.12)',
         paddingHorizontal: 10,
-        paddingVertical: 5,
+        paddingVertical: 4,
         borderRadius: 999,
     },
     tMiniBtnText: {
@@ -3237,7 +3438,7 @@ const styles = StyleSheet.create({
     },
     testimonialQuote: {
         fontSize: 14,
-        lineHeight: 22,
+        lineHeight: 20,
         fontStyle: 'italic',
         opacity: 0.95,
     },

@@ -31,6 +31,45 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 
 const MIN_BUDGET_INR = 100000;
 const MAX_BUDGET_INR = 20000000;
+const USE_AGENTIC_PLANNING_BRAIN = String(process.env.EXPO_PUBLIC_AI_PLANNING || '') === '1';
+
+function parseMastraBudgetNarrative(replyText) {
+    const raw = String(replyText || '').trim();
+    if (!raw) return null;
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+        try {
+            const parsed = JSON.parse(jsonMatch[0]);
+            if (parsed && typeof parsed === 'object') {
+                return {
+                    intro: String(parsed.intro || '').trim() || raw,
+                    tips: Array.isArray(parsed.tips) ? parsed.tips.map((x) => String(x)).slice(0, 6) : [],
+                    planning_reminders: Array.isArray(parsed.planning_reminders)
+                        ? parsed.planning_reminders.map((x) => String(x)).slice(0, 6)
+                        : [],
+                    disclaimer: String(parsed.disclaimer || 'AI suggestions are guidance, not final quotations.').trim(),
+                };
+            }
+        } catch (_) {
+            // fall through to line parsing
+        }
+    }
+    const lines = raw
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean);
+    const intro = lines[0] || raw;
+    const bullets = lines
+        .slice(1)
+        .map((l) => l.replace(/^[-*•]\s*/, '').trim())
+        .filter(Boolean);
+    return {
+        intro,
+        tips: bullets.slice(0, 4),
+        planning_reminders: bullets.slice(4, 8),
+        disclaimer: 'AI suggestions are guidance, not final quotations.',
+    };
+}
 
 /** API may send DECIMAL as string; always normalize for display and cart. */
 function numPrice(v) {
@@ -200,6 +239,40 @@ export default function RecommendationBudgetModal({
         (async () => {
             setNarrativeLoading(true);
             setNarrativeError(null);
+            if (USE_AGENTIC_PLANNING_BRAIN) {
+                const compactAlloc = data.allocation_summary
+                    .map(
+                        (a) =>
+                            `${a.name}: ${Math.round(Number(a.percentage) || 0)}% (~₹${Math.round(Number(a.allocated_inr) || 0).toLocaleString('en-IN')})`
+                    )
+                    .join('; ');
+                const prompt = [
+                    `Prepare a concise event budget guidance for "${occasionName}".`,
+                    `Total budget: ₹${Math.round(Number(data.total_budget) || 0).toLocaleString('en-IN')}.`,
+                    city ? `City: ${city}.` : null,
+                    formSnapshot?.guest_count ? `Guests: ${String(formSnapshot.guest_count)}.` : null,
+                    `Category splits: ${compactAlloc}.`,
+                    'Return strict JSON with keys: intro (string), tips (string[]), planning_reminders (string[]), disclaimer (string). Keep it practical and vendor-neutral.',
+                ]
+                    .filter(Boolean)
+                    .join('\n');
+                const { data: aiData, error: aiErr } = await api.postAiPlanningMessage({
+                    message: prompt,
+                    city: city || undefined,
+                    occasion_id: occasionId || undefined,
+                    occasion_name: occasionName || undefined,
+                    planned_budget_inr: Number(data.total_budget) || undefined,
+                });
+                if (!cancelled && !aiErr && aiData?.reply) {
+                    const parsedAi = parseMastraBudgetNarrative(aiData.reply);
+                    if (parsedAi) {
+                        setNarrative(parsedAi);
+                        setNarrativeAiMeta({ source: 'mastra-agentic-ai' });
+                        setNarrativeLoading(false);
+                        return;
+                    }
+                }
+            }
             const { data: nd, error } = await api.postRecommendationNarrative({
                 occasion_name: occasionName,
                 budget_inr: Number(data.total_budget),

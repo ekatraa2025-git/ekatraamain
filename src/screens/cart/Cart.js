@@ -46,12 +46,17 @@ export default function Cart({ route, navigation }) {
             setLoading(false);
             return;
         }
-        const { data, error } = await api.getCart(cartId);
-        if (error) {
-            showToast({ variant: 'error', title: 'Error', message: error.message });
+        try {
+            const { data, error } = await api.getCart(cartId);
+            if (error) {
+                showToast({ variant: 'error', title: 'Error', message: error.message });
+                setCart(null);
+            } else {
+                setCart(data);
+            }
+        } catch (e) {
+            console.warn('[Cart] loadCart', e?.message || e);
             setCart(null);
-        } else {
-            setCart(data);
         }
         setLoading(false);
     }, [cartId, showToast]);
@@ -354,8 +359,8 @@ export default function Cart({ route, navigation }) {
                         style={[
                             styles.footer,
                             {
-                                borderTopColor: theme.border,
-                                backgroundColor: theme.card,
+                                borderTopColor: 'rgba(255,255,255,0.12)',
+                                backgroundColor: '#1B2235',
                                 bottom: footerBottom,
                             },
                         ]}
@@ -363,18 +368,18 @@ export default function Cart({ route, navigation }) {
                         {protectionAmount > 0 ? (
                             <>
                                 <View style={styles.cartTotalRow}>
-                                    <Text style={[styles.cartTotalMuted, { color: theme.textLight }]}>Services</Text>
-                                    <Text style={[styles.cartTotalMuted, { color: theme.text }]}>₹{servicesSubtotal.toLocaleString()}</Text>
+                                    <Text style={[styles.cartTotalMuted, { color: 'rgba(255,255,255,0.78)' }]}>Services</Text>
+                                    <Text style={[styles.cartTotalMuted, { color: '#FFFFFF' }]}>₹{servicesSubtotal.toLocaleString()}</Text>
                                 </View>
                                 <View style={styles.cartTotalRow}>
-                                    <Text style={[styles.cartTotalMuted, { color: theme.textLight }]}>Booking protection</Text>
-                                    <Text style={[styles.cartTotalMuted, { color: theme.text }]}>₹{protectionAmount.toLocaleString()}</Text>
+                                    <Text style={[styles.cartTotalMuted, { color: 'rgba(255,255,255,0.78)' }]}>Booking protection</Text>
+                                    <Text style={[styles.cartTotalMuted, { color: '#FFFFFF' }]}>₹{protectionAmount.toLocaleString()}</Text>
                                 </View>
                             </>
                         ) : null}
                         <View style={styles.cartTotalRow}>
-                            <Text style={[styles.totalLabel, { color: theme.text }]}>Order total</Text>
-                            <Text style={[styles.totalValue, { color: theme.text }]}>₹{cartOrderTotal.toLocaleString()}</Text>
+                            <Text style={[styles.totalLabel, { color: '#FFFFFF' }]}>Order total</Text>
+                            <Text style={[styles.totalValue, { color: '#FFFFFF' }]}>₹{cartOrderTotal.toLocaleString()}</Text>
                         </View>
                         <TouchableOpacity style={styles.checkoutBtn} onPress={handleCheckout}>
                             <Text style={styles.checkoutBtnText}>Proceed to Checkout</Text>
@@ -468,10 +473,12 @@ const styles = StyleSheet.create({
     totalLabel: { fontSize: 15, fontWeight: '700' },
     totalValue: { fontSize: 20, fontWeight: 'bold', marginVertical: 8 },
     checkoutBtn: {
-        backgroundColor: colors.primary,
+        backgroundColor: '#0F172A',
         paddingVertical: 14,
         borderRadius: 12,
         alignItems: 'center',
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.2)',
     },
     checkoutBtnText: { color: '#FFF', fontSize: 16, fontWeight: '600' },
     emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },

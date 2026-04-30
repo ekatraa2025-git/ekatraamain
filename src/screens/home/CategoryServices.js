@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
     View, Text, StyleSheet, ScrollView, Image,
     TouchableOpacity, TextInput, ActivityIndicator,
     Dimensions, Animated, LayoutAnimation, Platform,
-    Modal, Linking, KeyboardAvoidingView, UIManager,
+    Modal, Linking, KeyboardAvoidingView,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -33,8 +33,14 @@ const BUDGET_OPTIONS = [
 ];
 const SECTION_COLORS = ['#FF7A00', '#1E3A8A', '#10B981', '#8B5CF6', '#F59E0B', '#EC4899', '#06B6D4', '#14B8A6'];
 
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-    UIManager.setLayoutAnimationEnabledExperimental(true);
+/** LayoutAnimation is unreliable on Android (Fabric / new arch) and can native-crash; keep for iOS only. */
+function runLayoutAnimation() {
+    if (Platform.OS !== 'ios') return;
+    try {
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    } catch (_) {
+        /* ignore */
+    }
 }
 
 /** At least 10 digits (handles spaces / +91). */
@@ -59,12 +65,15 @@ export default function CategoryServices({ route, navigation }) {
         occasionId, occasionName,
     } = route.params || {};
 
-    const resolvedCategoryIds = categoryIds.length > 0
-        ? categoryIds
-        : singleCategoryId ? [singleCategoryId] : [];
-    const resolvedCategoryNames = categoryNames.length > 0
-        ? categoryNames
-        : singleCategoryName ? [singleCategoryName] : [];
+    const rawIds = categoryIds.length > 0 ? categoryIds : (singleCategoryId != null ? [singleCategoryId] : []);
+    const resolvedCategoryIds = rawIds
+        .map((id) => (id != null ? String(id).trim() : ''))
+        .filter((id) => id.length > 0);
+    const rawNames = categoryNames.length > 0 ? categoryNames : (singleCategoryName != null ? [singleCategoryName] : []);
+    const resolvedCategoryNames = resolvedCategoryIds.map((_, i) => {
+        const n = rawNames[i];
+        return n != null && String(n).trim() ? String(n).trim() : `Category ${i + 1}`;
+    });
 
     const [servicesByCategory, setServicesByCategory] = useState({});
     const [loading, setLoading] = useState(true);
@@ -95,6 +104,7 @@ export default function CategoryServices({ route, navigation }) {
     const tabBarOffset = 56 + Math.max(insets.bottom, 6);
 
     const fetchServicesForCategory = async (catId) => {
+        if (catId == null || String(catId).trim() === '') return [];
         if (useApi) {
             const { data } = await api.getServices({ occasion_id: occasionId, category_id: catId });
             if (Array.isArray(data) && data.length > 0) return data;
@@ -118,51 +128,79 @@ export default function CategoryServices({ route, navigation }) {
 
     const fetchAllServices = async () => {
         setLoading(true);
-        const results = {};
-        const fetches = resolvedCategoryIds.map(async (catId, i) => {
-            const catName = resolvedCategoryNames[i] || `Category ${i + 1}`;
-            const rawServices = await fetchServicesForCategory(catId);
-            const services = await Promise.all(rawServices.map(async (svc) => ({
-                ...svc,
-                image_url: await resolveStorageUrl(svc.image_url),
-            })));
-            return { catId, catName, services };
-        });
-        const allResults = await Promise.all(fetches);
-        for (const { catId, catName, services } of allResults) {
-            results[catId] = { name: catName, services };
+        if (!resolvedCategoryIds.length) {
+            setServicesByCategory({});
+            setLoading(false);
+            return;
         }
-        setServicesByCategory(results);
+        try {
+            const results = {};
+            const fetches = resolvedCategoryIds.map(async (catId, i) => {
+                const catName = resolvedCategoryNames[i] || `Category ${i + 1}`;
+                const rawServices = await fetchServicesForCategory(catId);
+                const services = await Promise.all(
+                    (rawServices || []).map(async (svc) => {
+                        if (!svc || typeof svc !== 'object') return null;
+                        let imageUrl = null;
+                        try {
+                            imageUrl = await resolveStorageUrl(svc.image_url);
+                        } catch (_) {
+                            imageUrl = svc.image_url || null;
+                        }
+                        return { ...svc, image_url: imageUrl };
+                    })
+                );
+                return { catId, catName, services: services.filter(Boolean) };
+            });
+            const allResults = await Promise.all(fetches);
+            for (const { catId, catName, services } of allResults) {
+                results[String(catId)] = { name: catName, services };
+            }
+            setServicesByCategory(results);
+        } catch (e) {
+            console.warn('[CategoryServices] fetchAllServices', e?.message || e);
+            setServicesByCategory({});
+        }
         setLoading(false);
     };
 
     const getServiceTierPrices = (item) => {
         const out = [];
+        if (!item || typeof item !== 'object') return out;
         TIER_KEYS.forEach((key, i) => {
             const v = item[key];
             if (v != null && v !== '') {
                 const qtyLabel = item[TIER_QTY_KEYS[i]] || TIER_GUESTS_DEFAULT[i];
-                out.push({ label: TIER_LABELS[i], value: Number(v), key, guests: qtyLabel, color: TIER_COLORS[i] });
+                out.push({
+                    label: TIER_LABELS[i],
+                    value: Number(v),
+                    key,
+                    guests: qtyLabel,
+                    subVariety: item[TIER_SUB_KEYS[i]] || null,
+                    color: TIER_COLORS[i],
+                });
             }
         });
         return out;
     };
 
     const toggleService = (service) => {
-        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+        if (!service || service.id == null) return;
+        const sid = service.id;
+        runLayoutAnimation();
         setSelectedServices(prev => {
             const next = new Map(prev);
-            if (next.has(service.id)) {
-                next.delete(service.id);
-                if (expandedServiceId === service.id) setExpandedServiceId(null);
+            if (next.has(sid)) {
+                next.delete(sid);
+                if (expandedServiceId === sid) setExpandedServiceId(null);
             } else {
                 const tiers = getServiceTierPrices(service);
-                next.set(service.id, {
+                next.set(sid, {
                     service,
                     selectedTier: tiers.length > 0 ? tiers[0].key : null,
                     price: tiers.length > 0 ? tiers[0].value : 0,
                 });
-                setExpandedServiceId(service.id);
+                setExpandedServiceId(sid);
             }
             return next;
         });
@@ -180,10 +218,10 @@ export default function CategoryServices({ route, navigation }) {
     };
 
     const getEffectiveForm = () => {
-        const fromContext = eventForm || {};
+        const fromContext = eventForm && typeof eventForm === 'object' ? eventForm : {};
         return {
-            contact_name: fromContext.contact_name || contactModalForm.contact_name || '',
-            contact_mobile: fromContext.contact_mobile || contactModalForm.contact_mobile || '',
+            contact_name: String(fromContext.contact_name ?? contactModalForm.contact_name ?? '').trim() || '',
+            contact_mobile: String(fromContext.contact_mobile ?? contactModalForm.contact_mobile ?? '').trim() || '',
             contact_email: fromContext.contact_email || null,
             event_date: fromContext.event_date || null,
             guest_count: fromContext.guest_count || null,
@@ -252,6 +290,7 @@ export default function CategoryServices({ route, navigation }) {
         await api.updateCart(cid, cartPayload);
 
         for (const [, entry] of selectedServices) {
+            if (!entry?.service || entry.service.id == null) continue;
             const ti = TIER_KEYS.indexOf(entry.selectedTier);
             const qtyLabel = ti >= 0 ? entry.service[TIER_QTY_KEYS[ti]] : null;
             const subVariety = ti >= 0 ? entry.service[TIER_SUB_KEYS[ti]] : null;
@@ -418,7 +457,7 @@ export default function CategoryServices({ route, navigation }) {
                                             style={[styles.contactModalInput, { color: theme.text }]}
                                             placeholder="Your name"
                                             placeholderTextColor={theme.textLight}
-                                            value={contactModalForm.contact_name}
+                                            value={contactModalForm.contact_name ?? ''}
                                             onChangeText={t => setContactModalForm(p => ({ ...p, contact_name: t }))}
                                         />
                                     </View>
@@ -428,7 +467,7 @@ export default function CategoryServices({ route, navigation }) {
                                             style={[styles.contactModalInput, { color: theme.text }]}
                                             placeholder="Mobile number"
                                             placeholderTextColor={theme.textLight}
-                                            value={contactModalForm.contact_mobile}
+                                            value={contactModalForm.contact_mobile ?? ''}
                                             onChangeText={t => setContactModalForm(p => ({ ...p, contact_mobile: t }))}
                                             keyboardType="phone-pad"
                                         />
@@ -456,7 +495,8 @@ export default function CategoryServices({ route, navigation }) {
                         {/* Services grouped by category */}
                         {Object.entries(servicesByCategory).map(([catId, catData], catIdx) => {
                             const sectionColor = SECTION_COLORS[catIdx % SECTION_COLORS.length];
-                            if (catData.services.length === 0) return null;
+                            const svcs = Array.isArray(catData?.services) ? catData.services : [];
+                            if (!catData || svcs.length === 0) return null;
                             const catExpanded = expandedCategoryIds[catId] === true;
                             return (
                                 <View key={catId} style={styles.categoryGroup}>
@@ -470,7 +510,7 @@ export default function CategoryServices({ route, navigation }) {
                                         ]}
                                         activeOpacity={0.75}
                                         onPress={() => {
-                                            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                                            runLayoutAnimation();
                                             setExpandedCategoryIds((p) => ({ ...p, [catId]: !catExpanded }));
                                         }}
                                     >
@@ -482,24 +522,24 @@ export default function CategoryServices({ route, navigation }) {
                                             />
                                             <View style={styles.catSectionTitleWrap}>
                                                 <Text style={[styles.catSectionTitle, { color: theme.text }]}>
-                                                    {catData.name}
+                                                    {catData?.name || 'Category'}
                                                 </Text>
                                                 <Text style={[styles.catSectionCount, { color: theme.textLight }]}>
-                                                    {catData.services.length} {catData.services.length === 1 ? 'service' : 'services'}
+                                                    {svcs.length} {svcs.length === 1 ? 'service' : 'services'}
                                                     {!catExpanded ? ' · tap to expand' : ''}
                                                 </Text>
                                             </View>
                                         </View>
                                         <View style={[styles.catSectionThumbWrap, { borderColor: sectionColor + '40' }]}>
-                                            {catData.services?.[0]?.image_url ? (
-                                                <Image source={{ uri: catData.services[0].image_url }} style={styles.catSectionThumb} />
+                                            {svcs[0]?.image_url ? (
+                                                <Image source={{ uri: svcs[0].image_url }} style={styles.catSectionThumb} />
                                             ) : (
                                                 <Ionicons name="images-outline" size={16} color={sectionColor} />
                                             )}
                                         </View>
                                     </TouchableOpacity>
 
-                                    {catExpanded && catData.services.map(item => {
+                                    {catExpanded && svcs.filter((s) => s && s.id != null).map((item) => {
                                         const tierPrices = getServiceTierPrices(item);
                                         const isSelected = selectedServices.has(item.id);
                                         const selected = selectedServices.get(item.id);
@@ -507,7 +547,7 @@ export default function CategoryServices({ route, navigation }) {
 
                                         return (
                                             <View
-                                                key={item.id}
+                                                key={String(item.id)}
                                                 style={[
                                                     styles.serviceCard,
                                                     { backgroundColor: theme.card, borderColor: isSelected ? colors.primary : theme.border },
@@ -540,7 +580,7 @@ export default function CategoryServices({ route, navigation }) {
                                                         ) : null}
                                                         {tierPrices.length > 0 && !isSelected && (
                                                             <Text style={[styles.serviceStartPrice, { color: colors.primary }]}>
-                                                                From ₹{tierPrices[0].value.toLocaleString()}
+                                                                From ₹{(Number(tierPrices[0]?.value) || 0).toLocaleString()}
                                                             </Text>
                                                         )}
                                                     </View>
@@ -579,17 +619,24 @@ export default function CategoryServices({ route, navigation }) {
                                                                         {isTierSelected && <View style={[styles.tierRadioInner, { backgroundColor: colors.primary }]} />}
                                                                     </View>
                                                                     <View style={styles.tierContent}>
-                                                                        <View style={styles.tierTopRow}>
-                                                                            <Text style={[
-                                                                                styles.tierLabel,
-                                                                                { color: theme.text },
-                                                                                isTierSelected && { color: colors.primary, fontWeight: '700' },
-                                                                            ]}>{tier.label}</Text>
+                                                                        <Text style={[
+                                                                            styles.tierLabel,
+                                                                            { color: theme.text },
+                                                                            isTierSelected && { color: colors.primary, fontWeight: '700' },
+                                                                        ]}>
+                                                                            {tier.label}
+                                                                        </Text>
+                                                                        {tier.guests ? (
                                                                             <View style={[styles.tierGuestBadge, { backgroundColor: tier.color + '18' }]}>
                                                                                 <Ionicons name="people-outline" size={11} color={tier.color} />
                                                                                 <Text style={[styles.tierGuestText, { color: tier.color }]}>{tier.guests}</Text>
                                                                             </View>
-                                                                        </View>
+                                                                        ) : null}
+                                                                        {tier.subVariety ? (
+                                                                            <Text style={[styles.tierSubText, { color: theme.textLight }]} numberOfLines={3}>
+                                                                                {tier.subVariety}
+                                                                            </Text>
+                                                                        ) : null}
                                                                     </View>
                                                                     <Text style={[
                                                                         styles.tierPrice,
@@ -1012,8 +1059,7 @@ const styles = StyleSheet.create({
         marginRight: 12,
     },
     tierRadioInner: { width: 10, height: 10, borderRadius: 5 },
-    tierContent: { flex: 1 },
-    tierTopRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    tierContent: { flex: 1, minWidth: 0 },
     tierLabel: { fontSize: 14, fontWeight: '600' },
     tierGuestBadge: {
         flexDirection: 'row',
@@ -1022,9 +1068,13 @@ const styles = StyleSheet.create({
         paddingVertical: 3,
         borderRadius: 8,
         gap: 4,
+        marginTop: 5,
+        alignSelf: 'flex-start',
+        maxWidth: '100%',
     },
-    tierGuestText: { fontSize: 11, fontWeight: '600' },
-    tierPrice: { fontSize: 16, fontWeight: '800' },
+    tierGuestText: { flexShrink: 1, fontSize: 11, fontWeight: '600' },
+    tierSubText: { marginTop: 6, fontSize: 11, lineHeight: 16, fontWeight: '500' },
+    tierPrice: { marginLeft: 10, flexShrink: 0, fontSize: 16, fontWeight: '800' },
 
     // Bottom bar - prominent above footer
     bottomBar: {

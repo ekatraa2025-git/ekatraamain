@@ -37,7 +37,7 @@ export default function AppHeaderActions() {
                     activeOpacity={0.7}
                     accessibilityLabel={tr('select_language')}
                 >
-                    <Ionicons name="language-outline" size={22} color={theme.text} />
+                    <Ionicons name="language-outline" size={19} color={theme.text} />
                 </TouchableOpacity>
                 <TouchableOpacity
                     style={[styles.iconBtn, { backgroundColor: iconBg }]}
@@ -45,7 +45,7 @@ export default function AppHeaderActions() {
                     activeOpacity={0.7}
                     accessibilityLabel={tr('notifications_title')}
                 >
-                    <Ionicons name="notifications-outline" size={22} color={theme.text} />
+                    <Ionicons name="notifications-outline" size={19} color={theme.text} />
                     {unreadCount > 0 && (
                         <View style={[styles.badge, { backgroundColor: colors.primary }]}>
                             <Text style={styles.badgeText}>
@@ -60,7 +60,7 @@ export default function AppHeaderActions() {
                     activeOpacity={0.7}
                     accessibilityLabel={tr('tab_cart')}
                 >
-                    <Ionicons name="cart-outline" size={22} color={theme.text} />
+                    <Ionicons name="cart-outline" size={19} color={theme.text} />
                     {cartItemCount > 0 && (
                         <View style={[styles.badge, { backgroundColor: colors.primary }]}>
                             <Text style={styles.badgeText}>
@@ -140,30 +140,30 @@ const styles = StyleSheet.create({
     row: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 10,
+        gap: 7,
     },
     iconBtn: {
-        width: 42,
-        height: 42,
-        borderRadius: 14,
+        width: 38,
+        height: 38,
+        borderRadius: 12,
         alignItems: 'center',
         justifyContent: 'center',
         position: 'relative',
     },
     badge: {
         position: 'absolute',
-        top: -3,
-        right: -3,
-        minWidth: 18,
-        height: 18,
-        borderRadius: 9,
+        top: -2,
+        right: -2,
+        minWidth: 16,
+        height: 16,
+        borderRadius: 8,
         alignItems: 'center',
         justifyContent: 'center',
-        paddingHorizontal: 4,
+        paddingHorizontal: 3,
     },
     badgeText: {
         color: '#FFF',
-        fontSize: 10,
+        fontSize: 9,
         fontWeight: '800',
     },
     modalOverlay: {

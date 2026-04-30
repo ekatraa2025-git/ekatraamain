@@ -9,7 +9,7 @@ const { width, height } = Dimensions.get('window');
 // Taglines in multiple languages
 const TAGLINES = {
     english: 'Celebrating Togetherness with Trust and Care',
-    hindi: 'एक साथ आना',
+    hindi: 'अगर एकत्रित होना है, तो एकत्रा ही एकमात्र भरोसा है',
     odia: 'ଏକତ୍ରୀତ ହବା ପାଇଁ ଏକତ୍ର ହିଁ ଏକମାତ୍ର ଭରୋସା ଓ ସାହାରା',
 };
 

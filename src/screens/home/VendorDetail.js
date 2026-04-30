@@ -8,12 +8,15 @@ import { colors } from '../../theme/colors';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { useLocale } from '../../context/LocaleContext';
-import { dbService, getVendorImageUrl, getServiceImageUrl, resolveStorageUrl } from '../../services/supabase';
+import { dbService, getVendorImageUrl, resolveStorageUrl } from '../../services/supabase';
+import { api } from '../../services/api';
 import { EKATRAA_SUPPORT_TEL, EKATRAA_SUPPORT_WHATSAPP_URL } from '../../constants/support';
 import { Button } from '../../components/Button';
 import BottomTabBar from '../../components/BottomTabBar';
 import { useToast } from '../../context/ToastContext';
 import VendorGallerySlider from '../../components/VendorGallerySlider';
+import { useCart } from '../../context/CartContext';
+import { getOfferableTierRows } from '../../utils/lineItemDisplay';
 
 function normalizeGalleryUrls(raw) {
     if (raw == null) return [];
@@ -41,33 +44,6 @@ function mergeLogoIntoGalleryUrls(logoUrl, galleryArr) {
     });
 }
 
-function getServiceImagePaths(svc) {
-    if (!svc) return [];
-    const out = [];
-    if (svc.image_url) out.push(svc.image_url);
-    const raw = svc.image_urls;
-    if (raw != null) {
-        let arr = raw;
-        if (typeof raw === 'string') {
-            try {
-                const parsed = JSON.parse(raw);
-                arr = Array.isArray(parsed) ? parsed : raw.trim() ? [raw.trim()] : [];
-            } catch {
-                arr = raw.trim() ? [raw.trim()] : [];
-            }
-        }
-        if (Array.isArray(arr)) {
-            arr.filter(Boolean).forEach((u) => out.push(u));
-        }
-    }
-    const seen = new Set();
-    return out.filter((u) => {
-        if (!u || seen.has(u)) return false;
-        seen.add(u);
-        return true;
-    });
-}
-
 function isServiceVisibleInCatalog(svc) {
     if (!svc) return false;
     if (svc.archived === true) return false;
@@ -82,7 +58,8 @@ export default function VendorDetail({ route, navigation }) {
     const { theme, isDarkMode } = useTheme();
     const { t: tr } = useLocale();
     const { showToast, showConfirm } = useToast();
-    const { user, isAuthenticated } = useAuth();
+    const { user, isAuthenticated, session } = useAuth();
+    const { cartId, setCartId, refreshCartCount } = useCart();
     const contactLocked = contactLockedParam === true;
 
     // Full vendor data (fetched by id); fallback to params
@@ -117,11 +94,19 @@ export default function VendorDetail({ route, navigation }) {
         const list = vendor?.services || [];
         return list.filter(isServiceVisibleInCatalog);
     }, [vendor?.services]);
+    const eventContextLabel = useMemo(() => {
+        const fromRoute = route?.params?.occasionName || route?.params?.occasion || null;
+        if (typeof fromRoute === 'string' && fromRoute.trim()) return fromRoute.trim();
+        const fromVendor = vendor?.occasion_name || vendor?.occasion || vendor?.event_type || null;
+        if (typeof fromVendor === 'string' && fromVendor.trim()) return fromVendor.trim();
+        return null;
+    }, [route?.params?.occasion, route?.params?.occasionName, vendor?.event_type, vendor?.occasion, vendor?.occasion_name]);
 
     const [resolvedLogoUri, setResolvedLogoUri] = useState(null);
     const [resolvedGalleryUris, setResolvedGalleryUris] = useState([]);
-    const [resolvedServiceImages, setResolvedServiceImages] = useState({});
-    const [resolvedServiceImageSets, setResolvedServiceImageSets] = useState({});
+    const [expandedServiceId, setExpandedServiceId] = useState(null);
+    const [selectedTierByService, setSelectedTierByService] = useState({});
+    const [addingServiceId, setAddingServiceId] = useState(null);
     const parallaxY = useRef(new Animated.Value(0)).current;
 
     useEffect(() => {
@@ -139,37 +124,14 @@ export default function VendorDetail({ route, navigation }) {
                 ? (await resolveStorageUrl(vendor.logo_url)) || getVendorImageUrl(vendor.logo_url, name)
                 : galleryResolved[0] || getVendorImageUrl(null, name);
 
-            const svcMap = {};
-            const svcImageSets = {};
-            await Promise.all(
-                visibleServices.map(async (svc) => {
-                    const idKey = svc.id != null ? String(svc.id) : null;
-                    const imagePaths = getServiceImagePaths(svc);
-                    if (!imagePaths.length) return;
-                    const resolvedSet = (
-                        await Promise.all(
-                            imagePaths.map(async (p) => (await resolveStorageUrl(p)) || getServiceImageUrl(p))
-                        )
-                    ).filter(Boolean);
-                    if (idKey) {
-                        svcImageSets[idKey] = resolvedSet;
-                        if (resolvedSet[0]) svcMap[idKey] = resolvedSet[0];
-                    }
-                    const primaryPath = imagePaths[0];
-                    if (primaryPath && resolvedSet[0]) svcMap[primaryPath] = resolvedSet[0];
-                })
-            );
-
             if (cancelled) return;
             setResolvedLogoUri(logoResolved);
             setResolvedGalleryUris(galleryResolved.filter(Boolean));
-            setResolvedServiceImages(svcMap);
-            setResolvedServiceImageSets(svcImageSets);
         })();
         return () => {
             cancelled = true;
         };
-    }, [vendor, galleryListMerged, visibleServices]);
+    }, [vendor, galleryListMerged]);
 
     const displayGalleryUris = useMemo(() => {
         if (!vendor) return [];
@@ -340,6 +302,59 @@ export default function VendorDetail({ route, navigation }) {
         extrapolate: 'clamp',
     });
 
+    const ensureCart = async () => {
+        if (cartId) return cartId;
+        const accessToken = session?.access_token || null;
+        const { data, error } = await api.createCartWithAuth({
+            session_id: 'vendor-' + Date.now(),
+            user_id: isAuthenticated && user?.id ? user.id : null,
+            event_name: 'Vendor services',
+        }, accessToken);
+        if (error) throw new Error(error.message || 'Could not create cart');
+        if (!data?.id) throw new Error('Could not create cart');
+        await setCartId(data.id);
+        return data.id;
+    };
+
+    const handleSelectTier = (svc, tier) => {
+        setSelectedTierByService((prev) => ({ ...prev, [String(svc.id)]: tier }));
+    };
+
+    const handleAddServiceTierToCart = async (svc) => {
+        const svcId = String(svc.id);
+        const tiers = getOfferableTierRows(svc);
+        const picked = selectedTierByService[svcId] || tiers[0];
+        if (!picked || !picked.value || picked.value <= 0) {
+            showToast({ variant: 'info', title: 'Select tier', message: 'Please select a valid tier first.' });
+            return;
+        }
+        try {
+            setAddingServiceId(svcId);
+            const cid = await ensureCart();
+            const accessToken = session?.access_token || null;
+            const { error } = await api.addCartItemWithAuth({
+                cart_id: cid,
+                service_id: svc.id,
+                quantity: 1,
+                unit_price: Number(picked.value),
+                options: {
+                    tier: picked.key,
+                    occasion: eventContextLabel || 'Vendor services',
+                    category: vendor?.category || 'Vendor services',
+                    ...(picked.qtyLabel ? { qty_label: picked.qtyLabel } : {}),
+                    ...(picked.subVariety ? { sub_variety: picked.subVariety } : {}),
+                },
+            }, accessToken);
+            if (error) throw new Error(error.message || 'Could not add service');
+            await refreshCartCount?.(cid);
+            showToast({ variant: 'success', title: 'Added to cart', message: `${svc.name} added.` });
+        } catch (e) {
+            showToast({ variant: 'error', title: 'Cart', message: e?.message || 'Could not add service.' });
+        } finally {
+            setAddingServiceId(null);
+        }
+    };
+
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top', 'left', 'right']}>
             {/* Header */}
@@ -495,53 +510,102 @@ export default function VendorDetail({ route, navigation }) {
                     )}
                 </View>
 
-                {/* Services — larger cards with prominent images */}
+                {/* Services — stacked list, expandable tiers */}
                 {visibleServices.length > 0 && (
                     <View style={[styles.section, { backgroundColor: theme.card }]}>
                         <Text style={[styles.sectionTitle, { color: theme.text }]}>Services Offered</Text>
-                        <View style={styles.servicesBentoGrid}>
+                        <View style={styles.servicesStack}>
                         {visibleServices.map((svc, idx) => {
-                            const idKey = svc.id != null ? String(svc.id) : null;
-                            const imagePaths = getServiceImagePaths(svc);
-                            const serviceImageUris =
-                                (idKey && resolvedServiceImageSets[idKey]?.length > 0
-                                    ? resolvedServiceImageSets[idKey]
-                                    : imagePaths.map((p) => resolvedServiceImages[p] || getServiceImageUrl(p)).filter(Boolean));
-                            const firstServiceImage = serviceImageUris[0] || null;
+                            const idKey = svc.id != null ? String(svc.id) : `${idx}`;
+                            const tiers = getOfferableTierRows(svc);
+                            const selectedTier = selectedTierByService[idKey] || tiers[0] || null;
+                            const expanded = expandedServiceId === idKey;
                             return (
                                 <View
                                     key={svc.id || idx}
-                                    style={[styles.serviceCard, { borderColor: theme.border, backgroundColor: isDarkMode ? theme.background : '#FAFAFA' }]}
+                                    style={[styles.serviceStackCard, { borderColor: theme.border, backgroundColor: isDarkMode ? theme.background : '#FAFAFA' }]}
                                 >
-                                    {firstServiceImage ? (
-                                        <VendorGallerySlider
-                                            imageUris={serviceImageUris}
-                                            height={126}
-                                            borderRadius={12}
-                                            showDots={serviceImageUris.length > 1}
-                                            containerStyle={styles.serviceImageHero}
-                                            placeholderColor={isDarkMode ? '#334155' : '#E5E7EB'}
-                                            placeholderIconColor={theme.textLight}
-                                        />
-                                    ) : (
-                                        <View style={[styles.serviceImagePlaceholderLarge, { backgroundColor: theme.border }]}>
-                                            <Ionicons name="briefcase-outline" size={36} color={theme.textLight} />
+                                    <TouchableOpacity
+                                        onPress={() => setExpandedServiceId((prev) => (prev === idKey ? null : idKey))}
+                                        activeOpacity={0.86}
+                                        style={styles.serviceStackHead}
+                                    >
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={[styles.serviceNameLarge, { color: theme.text }]}>{svc.name}</Text>
+                                            {svc.description ? (
+                                                <Text style={[styles.serviceDescLarge, { color: theme.textLight }]} numberOfLines={2}>
+                                                    {svc.description}
+                                                </Text>
+                                            ) : null}
+                                            <View style={styles.serviceMetaWrap}>
+                                                {eventContextLabel ? (
+                                                    <View style={[styles.serviceMetaChip, { borderColor: theme.border, backgroundColor: isDarkMode ? '#1F2333' : '#FFF' }]}>
+                                                        <Ionicons name="sparkles-outline" size={11} color={colors.primary} />
+                                                        <Text style={[styles.serviceMetaText, { color: theme.textLight }]} numberOfLines={1}>
+                                                            Occasion: {eventContextLabel}
+                                                        </Text>
+                                                    </View>
+                                                ) : null}
+                                                {svc.city ? (
+                                                    <View style={[styles.serviceMetaChip, { borderColor: theme.border, backgroundColor: isDarkMode ? '#1F2333' : '#FFF' }]}>
+                                                        <Ionicons name="location-outline" size={11} color={colors.primary} />
+                                                        <Text style={[styles.serviceMetaText, { color: theme.textLight }]} numberOfLines={1}>
+                                                            {svc.city}
+                                                        </Text>
+                                                    </View>
+                                                ) : null}
+                                            </View>
                                         </View>
-                                    )}
-                                    <View style={styles.serviceCardBody}>
-                                        <Text style={[styles.serviceNameLarge, { color: theme.text }]}>{svc.name}</Text>
-                                        {svc.description ? (
-                                            <Text style={[styles.serviceDescLarge, { color: theme.textLight }]} numberOfLines={4}>
-                                                {svc.description}
-                                            </Text>
-                                        ) : null}
-                                        {(svc.price_amount != null || svc.base_price != null) && (
-                                            <Text style={[styles.servicePriceLarge, { color: colors.primary }]}>
-                                                ₹{Number(svc.price_amount ?? svc.base_price).toLocaleString('en-IN')}
-                                                {svc.price_unit ? ` / ${svc.price_unit}` : ''}
-                                            </Text>
-                                        )}
-                                    </View>
+                                        <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={18} color={theme.textLight} />
+                                    </TouchableOpacity>
+                                    {expanded ? (
+                                        <View style={[styles.serviceExpanded, { borderTopColor: theme.border }]}>
+                                            {tiers.map((tier) => {
+                                                const active = selectedTier?.key === tier.key;
+                                                return (
+                                                    <TouchableOpacity
+                                                        key={tier.key}
+                                                        style={[
+                                                            styles.vendorTierRow,
+                                                            {
+                                                                borderColor: active ? colors.primary : theme.border,
+                                                                backgroundColor: active ? colors.primary + '12' : theme.background,
+                                                            },
+                                                        ]}
+                                                        onPress={() => handleSelectTier(svc, tier)}
+                                                    >
+                                                        <View style={styles.vendorTierTextWrap}>
+                                                            <Text style={[styles.vendorTierLabel, { color: theme.text }]}>{tier.label}</Text>
+                                                            {tier.qtyLabel ? (
+                                                                <Text style={[styles.vendorTierQty, { color: theme.textLight }]}>
+                                                                    {tier.qtyLabel}
+                                                                </Text>
+                                                            ) : null}
+                                                            {tier.subVariety ? (
+                                                                <Text style={[styles.vendorTierMeta, { color: theme.textLight }]}>
+                                                                    {tier.subVariety}
+                                                                </Text>
+                                                            ) : null}
+                                                        </View>
+                                                        <Text style={[styles.vendorTierPrice, { color: colors.primary }]}>
+                                                            ₹{Number(tier.value).toLocaleString('en-IN')}
+                                                        </Text>
+                                                    </TouchableOpacity>
+                                                );
+                                            })}
+                                            <TouchableOpacity
+                                                style={[styles.vendorAddBtn, { backgroundColor: colors.primary }]}
+                                                onPress={() => handleAddServiceTierToCart(svc)}
+                                                disabled={addingServiceId === idKey}
+                                            >
+                                                {addingServiceId === idKey ? (
+                                                    <ActivityIndicator color="#FFF" />
+                                                ) : (
+                                                    <Text style={styles.vendorAddBtnText}>Add selected tier to cart</Text>
+                                                )}
+                                            </TouchableOpacity>
+                                        </View>
+                                    ) : null}
                                 </View>
                             );
                         })}
@@ -824,47 +888,104 @@ const styles = StyleSheet.create({
         fontSize: 14,
         flex: 1,
     },
-    servicesBentoGrid: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        justifyContent: 'space-between',
-        gap: 12,
+    servicesStack: {
+        gap: 10,
     },
-    serviceCard: {
-        width: '48%',
-        borderRadius: 16,
+    serviceStackCard: {
+        borderRadius: 14,
         borderWidth: 1,
         overflow: 'hidden',
-        marginBottom: 4,
     },
-    serviceImageHero: {
-        width: '100%',
-        height: 126,
-        backgroundColor: '#E8E8E8',
-    },
-    serviceImagePlaceholderLarge: {
-        width: '100%',
-        height: 126,
+    serviceStackHead: {
+        paddingHorizontal: 12,
+        paddingVertical: 12,
+        flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'center',
+        gap: 8,
     },
-    serviceCardBody: {
-        padding: 12,
+    serviceExpanded: {
+        borderTopWidth: 1,
+        paddingHorizontal: 12,
+        paddingTop: 10,
+        paddingBottom: 12,
+        gap: 8,
     },
     serviceNameLarge: {
-        fontSize: 15,
+        fontSize: 16,
         fontWeight: '700',
         letterSpacing: -0.2,
     },
     serviceDescLarge: {
-        fontSize: 12,
+        fontSize: 13,
         marginTop: 6,
-        lineHeight: 17,
+        lineHeight: 18,
     },
-    servicePriceLarge: {
+    serviceMetaWrap: {
+        marginTop: 8,
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 6,
+    },
+    serviceMetaChip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 5,
+        borderWidth: 1,
+        borderRadius: 999,
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        maxWidth: '100%',
+    },
+    serviceMetaText: {
+        fontSize: 11,
+        fontWeight: '600',
+        flexShrink: 1,
+    },
+    vendorTierRow: {
+        borderWidth: 1,
+        borderRadius: 10,
+        paddingHorizontal: 10,
+        paddingVertical: 10,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    vendorTierLabel: {
         fontSize: 14,
         fontWeight: '700',
-        marginTop: 8,
+    },
+    vendorTierTextWrap: {
+        flex: 1,
+        minWidth: 0,
+    },
+    vendorTierQty: {
+        fontSize: 11,
+        marginTop: 4,
+        fontWeight: '600',
+    },
+    vendorTierMeta: {
+        fontSize: 12,
+        marginTop: 4,
+        lineHeight: 17,
+    },
+    vendorTierPrice: {
+        marginLeft: 10,
+        flexShrink: 0,
+        fontSize: 15,
+        fontWeight: '800',
+    },
+    vendorAddBtn: {
+        marginTop: 4,
+        borderRadius: 10,
+        minHeight: 42,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 12,
+    },
+    vendorAddBtnText: {
+        color: '#FFF',
+        fontSize: 14,
+        fontWeight: '800',
     },
     bottomBar: {
         position: 'absolute',

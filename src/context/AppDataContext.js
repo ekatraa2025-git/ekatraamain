@@ -1,10 +1,33 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
 import { api, useBackendApi } from '../services/api';
-import { dbService } from '../services/supabase';
+import { dbService, resolveStorageUrl } from '../services/supabase';
 
 const CACHE_TTL_MS = 7 * 60 * 1000; // 7 minutes — fewer repeat fetches when moving between screens
 
 const AppDataContext = createContext(undefined);
+
+async function normalizeOccasions(raw = []) {
+    return Promise.all(
+        raw.map(async (t) => {
+            const imagePath = t?.image_url || t?.icon_url || null;
+            const resolvedImage = imagePath ? await resolveStorageUrl(imagePath) : null;
+            return {
+                ...t,
+                image_url: resolvedImage || imagePath,
+            };
+        })
+    );
+}
+
+function hasUnresolvedOccasionImage(occasion) {
+    const image = occasion?.image_url;
+    return !!image && typeof image === 'string' && !/^https?:\/\//i.test(image);
+}
+
+function hasUsableOccasionImage(occasion) {
+    const image = occasion?.image_url;
+    return typeof image === 'string' && image.trim().length > 0;
+}
 
 export function AppDataProvider({ children }) {
     const [occasions, setOccasions] = useState([]);
@@ -18,7 +41,14 @@ export function AppDataProvider({ children }) {
 
     const getOccasions = useCallback(async (forceRefresh = false) => {
         if (!forceRefresh && occasions.length > 0 && !isStale(occasionsLoadedAt)) {
-            return occasions;
+            if (occasions.some(hasUnresolvedOccasionImage)) {
+                const normalizedCached = await normalizeOccasions(occasions);
+                setOccasions(normalizedCached);
+                return normalizedCached;
+            }
+            if (occasions.some(hasUsableOccasionImage)) {
+                return occasions;
+            }
         }
         try {
             if (useApi) {
@@ -30,7 +60,8 @@ export function AppDataProvider({ children }) {
                 }
                 if (Array.isArray(occData) && occData.length > 0) {
                     const filtered = occData.filter(t => t.id !== 'all' && t.id !== 'others');
-                    const final = filtered.length ? filtered : occData;
+                    const finalRaw = filtered.length ? filtered : occData;
+                    const final = await normalizeOccasions(finalRaw);
                     setOccasions(final);
                     setOccasionsLoadedAt(Date.now());
                     return final;
@@ -40,7 +71,8 @@ export function AppDataProvider({ children }) {
             const data = res?.data;
             if (Array.isArray(data) && data.length > 0) {
                 const filtered = data.filter(t => t.id !== 'all' && t.id !== 'others');
-                const final = filtered.length ? filtered : data;
+                const finalRaw = filtered.length ? filtered : data;
+                const final = await normalizeOccasions(finalRaw);
                 setOccasions(final);
                 setOccasionsLoadedAt(Date.now());
                 return final;

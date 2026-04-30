@@ -17,7 +17,7 @@ export default function Login({ navigation, route }) {
     const { theme } = useTheme();
     const { t: tr } = useLocale();
     const { showToast } = useToast();
-    const { sendOtp, signInWithGoogle } = useAuth();
+    const { sendOtp, signInWithGoogle, isAuthenticated, user, session, loading: authLoading } = useAuth();
     const [phone, setPhone] = useState('');
     const [loading, setLoading] = useState(false);
     const [googleLoading, setGoogleLoading] = useState(false);
@@ -84,6 +84,29 @@ export default function Login({ navigation, route }) {
             navigation.replace('Home');
         }
     };
+
+    const isLoggedIn = !!isAuthenticated || !!user || !!session;
+
+    if (!authLoading && isLoggedIn) {
+        return (
+            <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
+                <View style={styles.alreadyLoggedInWrap}>
+                    <View style={styles.logoContainer}>
+                        <Logo width={74} height={74} />
+                    </View>
+                    <Text style={[styles.alreadyLoggedInTitle, { color: theme.text }]}>User already logged in</Text>
+                    <Text style={[styles.alreadyLoggedInSub, { color: theme.textLight }]}>
+                        You are already authenticated on this device.
+                    </Text>
+                    <Button
+                        title="Continue to Home"
+                        onPress={() => navigation.replace('Home')}
+                        style={styles.alreadyLoggedInBtn}
+                    />
+                </View>
+            </SafeAreaView>
+        );
+    }
 
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
@@ -183,6 +206,28 @@ const styles = StyleSheet.create({
     keyboardView: {
         flex: 1,
         padding: 20,
+    },
+    alreadyLoggedInWrap: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 24,
+    },
+    alreadyLoggedInTitle: {
+        fontSize: 24,
+        fontWeight: '700',
+        textAlign: 'center',
+        marginTop: 8,
+    },
+    alreadyLoggedInSub: {
+        fontSize: 14,
+        textAlign: 'center',
+        marginTop: 8,
+        lineHeight: 21,
+    },
+    alreadyLoggedInBtn: {
+        marginTop: 22,
+        alignSelf: 'stretch',
     },
     headerRow: {
         flexDirection: 'row',

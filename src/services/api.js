@@ -192,12 +192,12 @@ async function getWithAuth(path, params = {}, accessToken) {
     return promise;
 }
 
-async function post(path, body = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
+async function post(path, body = {}, timeoutMs = REQUEST_TIMEOUT_MS, extraHeaders = {}) {
     if (!API_BASE) return { data: null, error: { message: 'API URL not configured. Set EXPO_PUBLIC_API_URL in .env' } };
     try {
         const res = await fetchWithTimeout(`${API_BASE}${path}`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...extraHeaders },
             body: JSON.stringify(body),
         }, timeoutMs);
         const contentType = res.headers.get('content-type') || '';
@@ -205,11 +205,33 @@ async function post(path, body = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
             ? await res.json().catch(() => null)
             : null;
         if (!res.ok) {
-            const msg =
-                stringifyApiError(data?.error) ||
-                (res.status === 404
-                    ? 'Endpoint not found. Ensure backend is deployed with payment routes.'
-                    : res.statusText);
+            const fromErr =
+                data?.error != null
+                    ? stringifyApiError(data.error)
+                    : data?.message != null
+                      ? stringifyApiError(data.message)
+                      : '';
+            const details =
+                data?.details && typeof data.details === 'object'
+                    ? (() => {
+                          try {
+                              return ' ' + JSON.stringify(data.details);
+                          } catch {
+                              return '';
+                          }
+                      })()
+                    : '';
+            const fallback =
+                res.status === 404
+                    ? 'Endpoint not found. Ensure the backend is deployed and EXPO_PUBLIC_API_URL points to it.'
+                    : [res.status, res.statusText || 'Error'].filter(Boolean).join(' ').trim();
+            let msg = (fromErr && fromErr !== 'Request failed' ? fromErr : '') || fallback;
+            if (fromErr === 'Request failed' && data?.error == null) {
+                msg = fallback || 'Request failed';
+            }
+            if (details && fromErr && fromErr === 'Invalid body') {
+                msg = `${fromErr}${details}`;
+            }
             return { data: null, error: { message: msg } };
         }
         if (shouldInvalidateCacheForMutation(path)) invalidateAllGetCache();
@@ -405,6 +427,11 @@ export const api = {
     async postAiChat(body) {
         return post('/api/public/ai/chat', body, 45000);
     },
+    /** Mastra planning agent (JSON). Pass threadId for memory continuity. */
+    async postAiPlanningMessage(body, threadId) {
+        const headers = threadId ? { 'X-Thread-Id': String(threadId) } : {};
+        return post('/api/public/ai/planning/message', body, 120000, headers);
+    },
     async postBudgetRecommendationSnapshot(body) {
         return post('/api/public/budget-recommendation-snapshots', body);
     },
@@ -421,14 +448,26 @@ export const api = {
     async createCart(body) {
         return post('/api/public/cart', body);
     },
+    async createCartWithAuth(body, accessToken) {
+        if (!accessToken) return post('/api/public/cart', body);
+        return postWithAuth('/api/public/cart', body, accessToken);
+    },
     async getCart(cartId) {
         return get(`/api/public/cart/${cartId}`);
     },
     async updateCart(cartId, body) {
         return patch(`/api/public/cart/${cartId}`, body);
     },
+    async updateCartWithAuth(cartId, body, accessToken) {
+        if (!accessToken) return patch(`/api/public/cart/${cartId}`, body);
+        return patchWithAuth(`/api/public/cart/${cartId}`, body, accessToken);
+    },
     async addCartItem(body) {
         return post('/api/public/cart/items', body);
+    },
+    async addCartItemWithAuth(body, accessToken) {
+        if (!accessToken) return post('/api/public/cart/items', body);
+        return postWithAuth('/api/public/cart/items', body, accessToken);
     },
     async updateCartItem(itemId, body) {
         return patch(`/api/public/cart/items/${itemId}`, body);

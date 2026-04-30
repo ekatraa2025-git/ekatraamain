@@ -308,7 +308,7 @@ export const dbService = {
     async getOccasions() {
         const { data, error } = await supabase
             .from('occasions')
-            .select('id, name, icon, icon_url, display_order')
+            .select('id, name, icon, icon_url, image_url, display_order')
             .eq('is_active', true)
             .order('display_order', { ascending: true });
         return { data, error };

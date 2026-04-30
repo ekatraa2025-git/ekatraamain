@@ -38,6 +38,7 @@ export const TIER_ACCENT_COLORS = ['#10B981', '#3B82F6', '#FF7A00', '#8B5CF6', '
  */
 export function getOfferableTierRows(svc) {
     const out = [];
+    if (!svc || typeof svc !== 'object') return out;
     TIER_KEYS.forEach((key, i) => {
         const v = svc[key];
         if (v != null && v !== '') {
@@ -69,8 +70,15 @@ const LEGACY = {
     imperial: 'Imperial',
 };
 
+function normalizeOptions(options) {
+    if (options == null) return {};
+    if (typeof options === 'object' && !Array.isArray(options)) return options;
+    return {};
+}
+
 export function tierIndexFromOptions(options) {
-    const tier = options?.tier || options?.tier_key || options?.selected_tier || options?.pricing_tier;
+    const opt = normalizeOptions(options);
+    const tier = opt.tier || opt.tier_key || opt.selected_tier || opt.pricing_tier;
     if (!tier) return -1;
     let idx = TIER_KEYS.indexOf(tier);
     if (idx >= 0) return idx;
@@ -80,10 +88,11 @@ export function tierIndexFromOptions(options) {
 }
 
 export function getTierLabel(options) {
-    const tier = options?.tier || options?.tier_key || options?.selected_tier || options?.pricing_tier;
+    const opt = normalizeOptions(options);
+    const tier = opt.tier || opt.tier_key || opt.selected_tier || opt.pricing_tier;
     if (!tier) return null;
     if (LEGACY[tier]) return LEGACY[tier];
-    const idx = tierIndexFromOptions(options);
+    const idx = tierIndexFromOptions(opt);
     if (idx >= 0) return TIER_LABELS_ARR[idx];
     const normalized = String(tier).replace(/^price_/, '');
     return LEGACY[normalized] || normalized.charAt(0).toUpperCase() + normalized.slice(1);
@@ -93,8 +102,22 @@ export function getTierLabel(options) {
  * @param {object} item cart or order line (may have service relation)
  */
 export function getLineItemParts(item) {
-    const opt = item.options || {};
-    const svc = item.service || item.offerable_services || {};
+    if (!item || typeof item !== 'object') {
+        return {
+            categoryName: null,
+            serviceName: null,
+            tierName: null,
+            qtyLabel: null,
+            subVariety: null,
+            occasion: null,
+            unitPrice: null,
+            quantity: null,
+        };
+    }
+    const opt = normalizeOptions(item.options);
+    const rawSvc = item.service ?? item.offerable_services;
+    const svc =
+        rawSvc && typeof rawSvc === 'object' && !Array.isArray(rawSvc) ? rawSvc : {};
     const categoryName =
         svc.categories?.name ||
         svc.category?.name ||

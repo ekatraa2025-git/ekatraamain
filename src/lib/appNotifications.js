@@ -6,7 +6,13 @@ let notificationsAvailable = false;
 let notificationsConfigured = false;
 
 function loadNotificationsModule() {
-    if (Notifications !== null) return;
+    if (Notifications !== null || notificationsAvailable) return;
+    // Expo Go SDK 53+ does not support remote push notifications.
+    if (Constants.appOwnership === 'expo') {
+        Notifications = null;
+        notificationsAvailable = false;
+        return;
+    }
     try {
         if (typeof require !== 'undefined') {
             Notifications = require('expo-notifications');
@@ -18,9 +24,8 @@ function loadNotificationsModule() {
     }
 }
 
-loadNotificationsModule();
-
 export function canUseAppNotifications() {
+    loadNotificationsModule();
     return !!notificationsAvailable && !!Notifications;
 }
 

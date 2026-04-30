@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
     View,
     Text,
@@ -9,10 +9,16 @@ import {
     Dimensions,
     FlatList,
     Image,
+    TextInput,
+    Modal,
+    KeyboardAvoidingView,
+    Platform,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as Location from 'expo-location';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { colors } from '../../theme/colors';
 import { useTheme } from '../../context/ThemeContext';
 import { useLocale } from '../../context/LocaleContext';
@@ -36,16 +42,30 @@ export default function SpecialServices({ route, navigation }) {
     const { theme, isDarkMode } = useTheme();
     const { t: tr } = useLocale();
     const insets = useSafeAreaInsets();
-    const { isAuthenticated, user } = useAuth();
+    const { isAuthenticated, user, session } = useAuth();
     const { cartId: globalCartId, setCartId: setGlobalCartId, refreshCartCount } = useCart();
     const { showToast } = useToast();
-    const { occasionId, occasionName, city } = route.params || {};
+    const { occasionId, occasionName, city, selectedServiceId = null, showAll = false } = route.params || {};
 
     const [services, setServices] = useState([]);
     const [loading, setLoading] = useState(true);
     const [selected, setSelected] = useState(new Map());
     const [cartId, setCartId] = useState(globalCartId || null);
     const [adding, setAdding] = useState(false);
+    const [showAllServices, setShowAllServices] = useState(showAll || !selectedServiceId);
+    const [expandedServiceId, setExpandedServiceId] = useState(selectedServiceId || null);
+    const [detailsModalVisible, setDetailsModalVisible] = useState(false);
+    const [showDatePicker, setShowDatePicker] = useState(false);
+    const [cartMeta, setCartMeta] = useState({
+        occasion_name: occasionName || 'Special add-ons',
+        event_date: '',
+        delivery_mode: 'venue',
+        venue_selection: '',
+        delivery_address: city || '',
+        contact_name: user?.user_metadata?.full_name || user?.user_metadata?.name || '',
+        contact_mobile: user?.phone || '',
+        contact_email: user?.email || '',
+    });
     const useApi = useBackendApi();
 
     const load = useCallback(async () => {
@@ -73,6 +93,20 @@ export default function SpecialServices({ route, navigation }) {
     useEffect(() => {
         load();
     }, [load]);
+
+    const filteredServices = useMemo(() => {
+        if (showAllServices || !selectedServiceId) return services;
+        return services.filter((svc) => svc.id === selectedServiceId);
+    }, [services, showAllServices, selectedServiceId]);
+
+    const allVisibleSelected =
+        filteredServices.length > 0 &&
+        filteredServices.every((svc) => selected.has(svc.id));
+
+    const total = useMemo(
+        () => [...selected.values()].reduce((s, r) => s + (r.price || 0), 0),
+        [selected]
+    );
 
     const selectTier = (svc, tierRow) => {
         setSelected((prev) => {
@@ -112,27 +146,146 @@ export default function SpecialServices({ route, navigation }) {
         });
     };
 
-    const total = [...selected.values()].reduce((s, r) => s + (r.price || 0), 0);
+    const toggleSelectAllVisible = () => {
+        if (!filteredServices.length) return;
+        setSelected((prev) => {
+            const next = new Map(prev);
+            if (allVisibleSelected) {
+                filteredServices.forEach((svc) => next.delete(svc.id));
+                return next;
+            }
+            filteredServices.forEach((svc) => {
+                const rows = getOfferableTierRows(svc);
+                if (!rows.length) return;
+                const r = rows[0];
+                next.set(svc.id, {
+                    tierKey: r.key,
+                    price: r.value,
+                    name: svc.name,
+                    label: r.label,
+                    qtyLabel: r.qtyLabel,
+                    subVariety: r.subVariety,
+                });
+            });
+            return next;
+        });
+    };
 
-    const addToCart = async () => {
+    const fillCurrentLocation = async () => {
+        try {
+            const { status } = await Location.requestForegroundPermissionsAsync();
+            if (status !== 'granted') {
+                showToast({ variant: 'info', title: 'Permission needed', message: 'Allow location to use current address.' });
+                return;
+            }
+            const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+            const [rev] = await Location.reverseGeocodeAsync({
+                latitude: pos.coords.latitude,
+                longitude: pos.coords.longitude,
+            });
+            const line = [rev?.name, rev?.street, rev?.city, rev?.region, rev?.postalCode]
+                .filter(Boolean)
+                .join(', ');
+            if (line) {
+                setCartMeta((p) => ({ ...p, delivery_mode: 'address', delivery_address: line }));
+            }
+        } catch (e) {
+            showToast({ variant: 'error', title: 'Location', message: e?.message || 'Could not fetch current location.' });
+        }
+    };
+
+    const proceedAddToCart = async () => {
         if (selected.size === 0) {
             showToast({ variant: 'info', title: 'Select items', message: 'Choose at least one special add-on.' });
             return;
         }
+        if (!cartMeta.contact_name.trim() || !cartMeta.contact_mobile.trim()) {
+            showToast({
+                variant: 'info',
+                title: 'Details needed',
+                message: 'Please add name and mobile to continue.',
+            });
+            return;
+        }
+        const mobileDigits = cartMeta.contact_mobile.replace(/\D/g, '');
+        if (mobileDigits.length < 10) {
+            showToast({ variant: 'info', title: 'Invalid mobile', message: 'Enter a valid 10-digit mobile number.' });
+            return;
+        }
+        if (!cartMeta.occasion_name.trim()) {
+            showToast({ variant: 'info', title: 'Required', message: 'Please enter occasion name.' });
+            return;
+        }
+        if (!cartMeta.event_date) {
+            showToast({ variant: 'info', title: 'Required', message: 'Please select event date.' });
+            return;
+        }
+        if (cartMeta.delivery_mode === 'venue' && !cartMeta.venue_selection.trim()) {
+            showToast({ variant: 'info', title: 'Required', message: 'Please enter venue selection.' });
+            return;
+        }
+        if (cartMeta.delivery_mode === 'address' && !cartMeta.delivery_address.trim()) {
+            showToast({ variant: 'info', title: 'Required', message: 'Please enter delivery address.' });
+            return;
+        }
+        if (cartMeta.contact_email?.trim()) {
+            const okEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cartMeta.contact_email.trim());
+            if (!okEmail) {
+                showToast({ variant: 'info', title: 'Invalid email', message: 'Please enter a valid email address.' });
+                return;
+            }
+        }
         setAdding(true);
         try {
             let cid = cartId;
+            const accessToken = session?.access_token || null;
             if (!cid) {
-                const { data: created, error: e1 } = await api.createCart({
+                const createPayload = {
                     session_id: 'special-' + Date.now(),
                     user_id: isAuthenticated && user?.id ? user.id : null,
-                });
+                    event_name: cartMeta.occasion_name?.trim() || 'Special add-ons',
+                    contact_name: cartMeta.contact_name.trim(),
+                    contact_mobile: mobileDigits,
+                    contact_email: cartMeta.contact_email?.trim() || null,
+                    event_date: cartMeta.event_date || null,
+                    location_preference:
+                        cartMeta.delivery_mode === 'address'
+                            ? cartMeta.delivery_address?.trim() || null
+                            : cartMeta.venue_selection?.trim() || null,
+                    venue_preference:
+                        cartMeta.delivery_mode === 'venue'
+                            ? cartMeta.venue_selection?.trim() || null
+                            : null,
+                };
+                const { data: created, error: e1 } = accessToken
+                    ? await api.createCartWithAuth(createPayload, accessToken)
+                    : await api.createCart(createPayload);
                 if (e1) throw new Error(e1.message);
                 cid = created?.id;
                 if (cid) {
                     setCartId(cid);
                     await setGlobalCartId(cid);
                 }
+            } else {
+                const updatePayload = {
+                    event_name: cartMeta.occasion_name?.trim() || 'Special add-ons',
+                    contact_name: cartMeta.contact_name.trim(),
+                    contact_mobile: mobileDigits,
+                    contact_email: cartMeta.contact_email?.trim() || null,
+                    event_date: cartMeta.event_date || null,
+                    location_preference:
+                        cartMeta.delivery_mode === 'address'
+                            ? cartMeta.delivery_address?.trim() || null
+                            : cartMeta.venue_selection?.trim() || null,
+                    venue_preference:
+                        cartMeta.delivery_mode === 'venue'
+                            ? cartMeta.venue_selection?.trim() || null
+                            : null,
+                };
+                const { error: eUp } = accessToken
+                    ? await api.updateCartWithAuth(cid, updatePayload, accessToken)
+                    : await api.updateCart(cid, updatePayload);
+                if (eUp) throw new Error(eUp.message);
             }
             if (!cid) throw new Error('Could not create cart');
 
@@ -141,7 +294,7 @@ export default function SpecialServices({ route, navigation }) {
                 if (unit == null || unit <= 0) {
                     throw new Error('Invalid price for ' + row.name);
                 }
-                const { error: e2 } = await api.addCartItem({
+                const addPayload = {
                     cart_id: cid,
                     service_id: serviceId,
                     quantity: 1,
@@ -154,7 +307,10 @@ export default function SpecialServices({ route, navigation }) {
                         ...(row.qtyLabel ? { qty_label: row.qtyLabel } : {}),
                         ...(row.subVariety ? { sub_variety: row.subVariety } : {}),
                     },
-                });
+                };
+                const { error: e2 } = accessToken
+                    ? await api.addCartItemWithAuth(addPayload, accessToken)
+                    : await api.addCartItem(addPayload);
                 if (e2) throw new Error(e2.message);
             }
             await refreshCartCount?.(cid);
@@ -169,6 +325,15 @@ export default function SpecialServices({ route, navigation }) {
         } finally {
             setAdding(false);
         }
+        return true;
+    };
+
+    const addToCart = () => {
+        if (selected.size === 0) {
+            showToast({ variant: 'info', title: 'Select items', message: 'Choose at least one special add-on.' });
+            return;
+        }
+        setDetailsModalVisible(true);
     };
 
     return (
@@ -181,7 +346,7 @@ export default function SpecialServices({ route, navigation }) {
                 </TouchableOpacity>
                 <View style={styles.headerTextWrap}>
                     <Text style={[styles.headerTitle, { color: theme.text }]}>{tr('special_catalog_title')}</Text>
-                    <Text style={[styles.headerSub, { color: theme.textLight }]} numberOfLines={1}>
+                    <Text style={[styles.headerSub, { color: theme.textLight }]}>
                         {tr('special_catalog_header_sub')}
                     </Text>
                 </View>
@@ -213,17 +378,57 @@ export default function SpecialServices({ route, navigation }) {
                         <Text style={styles.heroSub}>{tr('special_catalog_hero_sub')}</Text>
                     </LinearGradient>
 
-                    {services.length === 0 ? (
+                    <View style={styles.actionRow}>
+                        {!showAllServices && selectedServiceId ? (
+                            <Text style={[styles.actionHint, { color: theme.textLight }]}>
+                                Showing selected add-on details
+                            </Text>
+                        ) : (
+                            <Text style={[styles.actionHint, { color: theme.textLight }]}>
+                                Tap any card to expand details
+                            </Text>
+                        )}
+                        {!showAllServices && selectedServiceId ? (
+                            <TouchableOpacity
+                                style={[styles.actionPill, { borderColor: colors.primary + '4D', backgroundColor: colors.primary + '10' }]}
+                                onPress={() => setShowAllServices(true)}
+                                activeOpacity={0.86}
+                            >
+                                <Ionicons name="list" size={14} color={colors.primary} />
+                                <Text style={[styles.actionPillText, { color: colors.primary }]}>Select all</Text>
+                            </TouchableOpacity>
+                        ) : (
+                            <TouchableOpacity
+                                style={[styles.actionPill, { borderColor: colors.primary + '4D', backgroundColor: colors.primary + '10' }]}
+                                onPress={toggleSelectAllVisible}
+                                activeOpacity={0.86}
+                            >
+                                <Ionicons
+                                    name={allVisibleSelected ? 'close-circle' : 'checkmark-done-circle'}
+                                    size={14}
+                                    color={colors.primary}
+                                />
+                                <Text style={[styles.actionPillText, { color: colors.primary }]}>
+                                    {allVisibleSelected ? 'Clear all' : 'Select all'}
+                                </Text>
+                            </TouchableOpacity>
+                        )}
+                    </View>
+
+                    {filteredServices.length === 0 ? (
                         <Text style={[styles.empty, { color: theme.textLight }]}>{tr('special_catalog_empty')}</Text>
                     ) : (
                         <FlatList
-                            data={services}
+                            data={filteredServices}
                             scrollEnabled={false}
                             keyExtractor={(s) => s.id}
                             renderItem={({ item: svc }) => {
                                 const tiers = getOfferableTierRows(svc);
                                 const isOn = selected.has(svc.id);
                                 const sel = selected.get(svc.id);
+                                const isExpanded = expandedServiceId === svc.id;
+                                const tierPrices = tiers.map((t) => Number(t.value)).filter((v) => Number.isFinite(v) && v > 0);
+                                const low = tierPrices.length ? Math.min(...tierPrices) : null;
                                 return (
                                     <View
                                         style={[
@@ -236,24 +441,24 @@ export default function SpecialServices({ route, navigation }) {
                                             isOn && { shadowColor: colors.primary, shadowOpacity: 0.18, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },
                                         ]}
                                     >
-                                        <TouchableOpacity onPress={() => toggleService(svc)} activeOpacity={0.92}>
+                                        <TouchableOpacity
+                                            onPress={() =>
+                                                setExpandedServiceId((prev) => (prev === svc.id ? null : svc.id))
+                                            }
+                                            activeOpacity={0.92}
+                                        >
                                             <View style={styles.cardImageWrap}>
-                                                {svc.image_url ? (
-                                                    <Image source={{ uri: svc.image_url }} style={styles.cardImage} resizeMode="cover" />
-                                                ) : (
-                                                    <LinearGradient
-                                                        colors={isDarkMode ? ['#334155', '#1e293b'] : ['#E2E8F0', '#F8FAFC']}
-                                                        style={styles.cardImagePlaceholder}
-                                                    >
-                                                        <Ionicons name="sparkles" size={32} color={colors.primary} />
-                                                    </LinearGradient>
-                                                )}
-                                                <LinearGradient
-                                                    colors={['transparent', 'rgba(0,0,0,0.65)']}
-                                                    style={styles.cardImageScrim}
-                                                />
-                                                <View style={styles.cardImageBadge}>
-                                                    <Text style={styles.cardImageBadgeText}>{tr('special_catalog_badge')}</Text>
+                                                <View style={[styles.cardImageFrame, { backgroundColor: isDarkMode ? '#101826' : '#FFFFFF' }]}>
+                                                    {svc.image_url ? (
+                                                        <Image source={{ uri: svc.image_url }} style={styles.cardImage} resizeMode="cover" />
+                                                    ) : (
+                                                        <LinearGradient
+                                                            colors={isDarkMode ? ['#334155', '#1e293b'] : ['#E2E8F0', '#F8FAFC']}
+                                                            style={styles.cardImagePlaceholder}
+                                                        >
+                                                            <Ionicons name="sparkles" size={36} color={colors.primary} />
+                                                        </LinearGradient>
+                                                    )}
                                                 </View>
                                                 <View
                                                     style={[
@@ -268,55 +473,96 @@ export default function SpecialServices({ route, navigation }) {
                                                 </View>
                                             </View>
                                             <View style={styles.cardBody}>
-                                                <Text style={[styles.svcName, { color: theme.text }]} numberOfLines={2}>
-                                                    {svc.name}
-                                                    {svc.price_unit ? (
-                                                        <Text style={[styles.svcUnitInline, { color: theme.textLight }]}>
-                                                            {` (${svc.price_unit})`}
-                                                        </Text>
-                                                    ) : null}
-                                                </Text>
+                                                <View style={styles.cardTitleRow}>
+                                                    <Text style={[styles.svcName, { color: theme.text }]} numberOfLines={2}>
+                                                        {svc.name}
+                                                        {svc.price_unit ? (
+                                                            <Text style={[styles.svcUnitInline, { color: theme.textLight }]}>
+                                                                {` (${svc.price_unit})`}
+                                                            </Text>
+                                                        ) : null}
+                                                    </Text>
+                                                    <Ionicons
+                                                        name={isExpanded ? 'chevron-up' : 'chevron-down'}
+                                                        size={18}
+                                                        color={theme.textLight}
+                                                    />
+                                                </View>
+                                                {low != null ? (
+                                                    <Text style={[styles.cardFromPrice, { color: colors.primary }]}>
+                                                        from ₹{low.toLocaleString('en-IN')}
+                                                    </Text>
+                                                ) : null}
                                             </View>
                                         </TouchableOpacity>
-                                        {tiers.length === 0 ? (
-                                            <Text style={[styles.tierHint, { color: theme.textLight }]}>No tiers priced</Text>
-                                        ) : (
-                                            <ScrollView
-                                                horizontal
-                                                showsHorizontalScrollIndicator={false}
-                                                style={styles.tierChips}
-                                                contentContainerStyle={styles.tierChipsRow}
-                                            >
-                                                {tiers.map((t) => {
-                                                    const active = sel?.tierKey === t.key;
-                                                    return (
-                                                        <TouchableOpacity
-                                                            key={t.key}
-                                                            onPress={() => selectTier(svc, t)}
-                                                            style={[
-                                                                styles.tierChip,
-                                                                {
-                                                                    borderColor: active ? t.color : theme.border,
-                                                                    backgroundColor: active ? t.color + '22' : theme.background,
-                                                                },
-                                                            ]}
-                                                        >
-                                                            <Text style={[styles.tierChipLabel, { color: theme.text }]} numberOfLines={1}>
-                                                                {t.label}
-                                                            </Text>
-                                                            <Text style={[styles.tierChipPrice, { color: t.color }]}>
-                                                                ₹{t.value.toLocaleString('en-IN')}
-                                                            </Text>
-                                                            {t.subVariety ? (
-                                                                <Text style={[styles.tierSubVariety, { color: theme.textLight }]} numberOfLines={2}>
-                                                                    {t.subVariety}
-                                                                </Text>
-                                                            ) : null}
-                                                        </TouchableOpacity>
-                                                    );
-                                                })}
-                                            </ScrollView>
-                                        )}
+                                        {isExpanded ? (
+                                            <View style={[styles.expandedBody, { borderTopColor: theme.border }]}>
+                                                {svc.description ? (
+                                                    <Text style={[styles.svcDesc, { color: theme.textLight }]} numberOfLines={3}>
+                                                        {svc.description}
+                                                    </Text>
+                                                ) : null}
+                                                {tiers.length === 0 ? (
+                                                    <Text style={[styles.tierHint, { color: theme.textLight }]}>No tiers priced</Text>
+                                                ) : (
+                                                    <View style={styles.tierStack}>
+                                                        {tiers.map((t) => {
+                                                            const active = sel?.tierKey === t.key;
+                                                            return (
+                                                                <TouchableOpacity
+                                                                    key={t.key}
+                                                                    onPress={() => selectTier(svc, t)}
+                                                                    style={[
+                                                                        styles.tierChip,
+                                                                        {
+                                                                            borderColor: active ? t.color : theme.border,
+                                                                            backgroundColor: active ? t.color + '22' : theme.background,
+                                                                        },
+                                                                    ]}
+                                                                >
+                                                                    <Text style={[styles.tierChipLabel, { color: theme.text }]} numberOfLines={1}>
+                                                                        {t.label}
+                                                                    </Text>
+                                                                    <Text style={[styles.tierChipPrice, { color: t.color }]}>
+                                                                        ₹{t.value.toLocaleString('en-IN')}
+                                                                    </Text>
+                                                                    {t.subVariety ? (
+                                                                        <Text style={[styles.tierSubVariety, { color: theme.textLight }]} numberOfLines={2}>
+                                                                            {t.subVariety}
+                                                                        </Text>
+                                                                    ) : null}
+                                                                </TouchableOpacity>
+                                                            );
+                                                        })}
+                                                    </View>
+                                                )}
+                                                <TouchableOpacity
+                                                    style={[
+                                                        styles.selectOneBtn,
+                                                        {
+                                                            borderColor: isOn ? colors.primary : theme.border,
+                                                            backgroundColor: isOn ? colors.primary + '15' : theme.background,
+                                                        },
+                                                    ]}
+                                                    onPress={() => toggleService(svc)}
+                                                    activeOpacity={0.85}
+                                                >
+                                                    <Ionicons
+                                                        name={isOn ? 'checkmark-circle' : 'add-circle-outline'}
+                                                        size={16}
+                                                        color={isOn ? colors.primary : theme.textLight}
+                                                    />
+                                                    <Text
+                                                        style={[
+                                                            styles.selectOneBtnText,
+                                                            { color: isOn ? colors.primary : theme.text },
+                                                        ]}
+                                                    >
+                                                        {isOn ? 'Selected' : 'Select add-on'}
+                                                    </Text>
+                                                </TouchableOpacity>
+                                            </View>
+                                        ) : null}
                                     </View>
                                 );
                             }}
@@ -361,6 +607,169 @@ export default function SpecialServices({ route, navigation }) {
             </View>
 
             <BottomTabBar navigation={navigation} activeRoute="Home" />
+
+            <Modal
+                visible={detailsModalVisible}
+                transparent
+                animationType="slide"
+                onRequestClose={() => setDetailsModalVisible(false)}
+            >
+                <View style={styles.modalBackdrop}>
+                    <KeyboardAvoidingView
+                        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                        style={styles.modalWrap}
+                    >
+                        <View style={[styles.modalCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+                            <View style={styles.modalHeadRow}>
+                                <Text style={[styles.modalTitle, { color: theme.text }]}>Your event details</Text>
+                                <TouchableOpacity onPress={() => setDetailsModalVisible(false)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                                    <Ionicons name="close" size={22} color={theme.textLight} />
+                                </TouchableOpacity>
+                            </View>
+                            <Text style={[styles.modalSub, { color: theme.textLight }]}>
+                                Needed before adding special add-ons to cart
+                            </Text>
+                            <View style={styles.modalInputGroup}>
+                                <Text style={[styles.modalLabel, { color: theme.textLight }]}>Occasion Name</Text>
+                                <TextInput
+                                    style={[styles.modalInput, { color: theme.text, borderColor: theme.border, backgroundColor: theme.background }]}
+                                    value={cartMeta.occasion_name}
+                                    onChangeText={(occasion_name) => setCartMeta((p) => ({ ...p, occasion_name }))}
+                                    placeholder="Special add-ons"
+                                    placeholderTextColor={theme.textLight}
+                                />
+                            </View>
+                            <View style={styles.modalInputGroup}>
+                                <Text style={[styles.modalLabel, { color: theme.textLight }]}>Event date *</Text>
+                                <TouchableOpacity
+                                    style={[styles.modalInput, styles.modalDateBtn, { borderColor: theme.border, backgroundColor: theme.background }]}
+                                    onPress={() => setShowDatePicker(true)}
+                                >
+                                    <Ionicons name="calendar-outline" size={16} color={colors.primary} />
+                                    <Text style={[styles.modalDateText, { color: cartMeta.event_date ? theme.text : theme.textLight }]}>
+                                        {cartMeta.event_date
+                                            ? new Date(cartMeta.event_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+                                            : 'Select date'}
+                                    </Text>
+                                </TouchableOpacity>
+                                {showDatePicker ? (
+                                    <DateTimePicker
+                                        value={cartMeta.event_date ? new Date(cartMeta.event_date) : new Date()}
+                                        mode="date"
+                                        display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                                        minimumDate={new Date()}
+                                        onChange={(_, d) => {
+                                            setShowDatePicker(false);
+                                            if (d) setCartMeta((p) => ({ ...p, event_date: d.toISOString() }));
+                                        }}
+                                    />
+                                ) : null}
+                            </View>
+                            <View style={styles.modalInputGroup}>
+                                <Text style={[styles.modalLabel, { color: theme.textLight }]}>Delivery preference *</Text>
+                                <View style={styles.deliveryModeRow}>
+                                    {[
+                                        { key: 'venue', label: 'Event venue selection' },
+                                        { key: 'address', label: 'Address selection' },
+                                    ].map((opt) => (
+                                        <TouchableOpacity
+                                            key={opt.key}
+                                            style={[
+                                                styles.deliveryModeChip,
+                                                { borderColor: theme.border, backgroundColor: theme.background },
+                                                cartMeta.delivery_mode === opt.key && { borderColor: colors.primary, backgroundColor: colors.primary + '10' },
+                                            ]}
+                                            onPress={() => setCartMeta((p) => ({ ...p, delivery_mode: opt.key }))}
+                                        >
+                                            <Text
+                                                style={[
+                                                    styles.deliveryModeText,
+                                                    { color: cartMeta.delivery_mode === opt.key ? colors.primary : theme.text },
+                                                ]}
+                                            >
+                                                {opt.label}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    ))}
+                                </View>
+                            </View>
+                            {cartMeta.delivery_mode === 'venue' ? (
+                                <View style={styles.modalInputGroup}>
+                                    <Text style={[styles.modalLabel, { color: theme.textLight }]}>Event venue *</Text>
+                                    <TextInput
+                                        style={[styles.modalInput, { color: theme.text, borderColor: theme.border, backgroundColor: theme.background }]}
+                                        value={cartMeta.venue_selection}
+                                        onChangeText={(venue_selection) => setCartMeta((p) => ({ ...p, venue_selection }))}
+                                        placeholder="Venue name / selection"
+                                        placeholderTextColor={theme.textLight}
+                                    />
+                                </View>
+                            ) : (
+                                <View style={styles.modalInputGroup}>
+                                    <Text style={[styles.modalLabel, { color: theme.textLight }]}>Delivery address *</Text>
+                                    <TextInput
+                                        style={[styles.modalInput, styles.modalInputTall, { color: theme.text, borderColor: theme.border, backgroundColor: theme.background }]}
+                                        value={cartMeta.delivery_address}
+                                        onChangeText={(delivery_address) => setCartMeta((p) => ({ ...p, delivery_address }))}
+                                        placeholder="Enter address"
+                                        placeholderTextColor={theme.textLight}
+                                        multiline
+                                    />
+                                    <TouchableOpacity
+                                        style={[styles.useCurrentLocBtn, { borderColor: theme.border, backgroundColor: theme.background }]}
+                                        onPress={fillCurrentLocation}
+                                    >
+                                        <Ionicons name="navigate" size={15} color={colors.primary} />
+                                        <Text style={[styles.useCurrentLocText, { color: theme.text }]}>Use current location</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            )}
+                            <View style={styles.modalInputGroup}>
+                                <Text style={[styles.modalLabel, { color: theme.textLight }]}>Contact name *</Text>
+                                <TextInput
+                                    style={[styles.modalInput, { color: theme.text, borderColor: theme.border, backgroundColor: theme.background }]}
+                                    value={cartMeta.contact_name}
+                                    onChangeText={(contact_name) => setCartMeta((p) => ({ ...p, contact_name }))}
+                                    placeholder="Your name"
+                                    placeholderTextColor={theme.textLight}
+                                />
+                            </View>
+                            <View style={styles.modalInputGroup}>
+                                <Text style={[styles.modalLabel, { color: theme.textLight }]}>Mobile number *</Text>
+                                <TextInput
+                                    style={[styles.modalInput, { color: theme.text, borderColor: theme.border, backgroundColor: theme.background }]}
+                                    value={cartMeta.contact_mobile}
+                                    onChangeText={(contact_mobile) => setCartMeta((p) => ({ ...p, contact_mobile }))}
+                                    keyboardType="phone-pad"
+                                    placeholder="10-digit mobile"
+                                    placeholderTextColor={theme.textLight}
+                                />
+                            </View>
+                            <View style={styles.modalInputGroup}>
+                                <Text style={[styles.modalLabel, { color: theme.textLight }]}>Email</Text>
+                                <TextInput
+                                    style={[styles.modalInput, { color: theme.text, borderColor: theme.border, backgroundColor: theme.background }]}
+                                    value={cartMeta.contact_email}
+                                    onChangeText={(contact_email) => setCartMeta((p) => ({ ...p, contact_email }))}
+                                    keyboardType="email-address"
+                                    placeholder="Email address"
+                                    placeholderTextColor={theme.textLight}
+                                />
+                            </View>
+                            <TouchableOpacity
+                                style={[styles.modalCta, { backgroundColor: colors.primary }]}
+                                onPress={async () => {
+                                    const ok = await proceedAddToCart();
+                                    if (ok) setDetailsModalVisible(false);
+                                }}
+                                disabled={adding}
+                            >
+                                {adding ? <ActivityIndicator color="#FFF" /> : <Text style={styles.modalCtaText}>Save & Add to cart</Text>}
+                            </TouchableOpacity>
+                        </View>
+                    </KeyboardAvoidingView>
+                </View>
+            </Modal>
         </SafeAreaView>
     );
 }
@@ -382,9 +791,9 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
-    headerTextWrap: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
+    headerTextWrap: { flex: 1, flexDirection: 'column', alignItems: 'flex-start', gap: 2 },
     headerTitle: { fontSize: 20, fontWeight: '800' },
-    headerSub: { fontSize: 12, flexShrink: 1 },
+    headerSub: { fontSize: 12, flexShrink: 1, lineHeight: 18 },
     centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
     loadingText: { marginTop: 12, fontSize: 14 },
     scroll: { paddingHorizontal: 16, paddingTop: 12 },
@@ -408,8 +817,32 @@ const styles = StyleSheet.create({
     heroTitle: { color: '#FFF', fontSize: 18, fontWeight: '800', marginTop: 10 },
     heroSub: { color: 'rgba(255,255,255,0.9)', fontSize: 13, lineHeight: 19, marginTop: 6 },
     empty: { textAlign: 'center', marginTop: 40, paddingHorizontal: 24 },
+    actionRow: {
+        marginBottom: 12,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 10,
+    },
+    actionHint: {
+        flex: 1,
+        fontSize: 12,
+    },
+    actionPill: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 5,
+        borderWidth: 1,
+        borderRadius: 999,
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+    },
+    actionPillText: {
+        fontSize: 12,
+        fontWeight: '700',
+    },
     gridCard: {
-        borderRadius: 16,
+        borderRadius: 12,
         borderWidth: 1.5,
         padding: 0,
         overflow: 'hidden',
@@ -417,9 +850,23 @@ const styles = StyleSheet.create({
     },
     cardImageWrap: {
         width: '100%',
-        height: 108,
+        height: 196,
         position: 'relative',
-        backgroundColor: '#E5E7EB',
+        padding: 10,
+        backgroundColor: 'transparent',
+    },
+    cardImageFrame: {
+        width: '100%',
+        height: '100%',
+        borderRadius: 11,
+        overflow: 'hidden',
+        borderWidth: 1,
+        borderColor: 'rgba(124,58,237,0.22)',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.09,
+        shadowRadius: 7,
+        elevation: 3,
     },
     cardImage: { width: '100%', height: '100%' },
     cardImagePlaceholder: {
@@ -428,27 +875,10 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
-    cardImageScrim: {
-        position: 'absolute',
-        left: 0,
-        right: 0,
-        bottom: 0,
-        height: '60%',
-    },
-    cardImageBadge: {
-        position: 'absolute',
-        left: 8,
-        bottom: 8,
-        backgroundColor: 'rgba(0,0,0,0.5)',
-        paddingHorizontal: 8,
-        paddingVertical: 3,
-        borderRadius: 8,
-    },
-    cardImageBadgeText: { color: '#FFF', fontSize: 9, fontWeight: '800', letterSpacing: 0.3 },
     checkFloating: {
         position: 'absolute',
-        top: 8,
-        right: 8,
+        top: 16,
+        right: 16,
         width: 26,
         height: 26,
         borderRadius: 8,
@@ -456,22 +886,51 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
-    cardBody: { paddingHorizontal: 10, paddingTop: 10, paddingBottom: 2 },
+    cardBody: { paddingHorizontal: 12, paddingTop: 10, paddingBottom: 6 },
+    cardTitleRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 8,
+    },
+    cardFromPrice: {
+        marginTop: 6,
+        fontSize: 15,
+        fontWeight: '800',
+    },
+    expandedBody: {
+        borderTopWidth: 1,
+        paddingHorizontal: 10,
+        paddingTop: 10,
+        paddingBottom: 10,
+    },
     gridCardTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
-    tierChips: { marginTop: 4, paddingBottom: 10 },
-    tierChipsRow: { paddingHorizontal: 10, paddingRight: 14 },
+    tierStack: { marginTop: 6, gap: 8 },
     tierChip: {
         borderRadius: 10,
         borderWidth: 1,
-        paddingHorizontal: 8,
-        paddingVertical: 6,
-        marginRight: 8,
+        paddingHorizontal: 10,
+        paddingVertical: 8,
         minWidth: 96,
     },
-    tierChipLabel: { fontSize: 10, fontWeight: '700' },
-    tierChipPrice: { fontSize: 13, fontWeight: '800', marginTop: 2 },
-    tierSubVariety: { fontSize: 9, marginTop: 4, lineHeight: 12 },
-    tierHint: { fontSize: 11, marginTop: 6 },
+    tierChipLabel: { fontSize: 12, fontWeight: '700' },
+    tierChipPrice: { fontSize: 16, fontWeight: '800', marginTop: 2 },
+    tierSubVariety: { fontSize: 11, marginTop: 4, lineHeight: 15 },
+    tierHint: { fontSize: 13, marginTop: 6 },
+    selectOneBtn: {
+        marginTop: 8,
+        borderWidth: 1,
+        borderRadius: 10,
+        paddingVertical: 8,
+        paddingHorizontal: 10,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+    },
+    selectOneBtnText: {
+        fontSize: 13,
+        fontWeight: '700',
+    },
     card: {
         flexDirection: 'row',
         borderRadius: 16,
@@ -492,7 +951,7 @@ const styles = StyleSheet.create({
     },
     svcName: { fontSize: 17, fontWeight: '800' },
     svcUnitInline: { fontSize: 12, fontWeight: '600' },
-    svcDesc: { fontSize: 13, lineHeight: 19, marginTop: 4 },
+    svcDesc: { fontSize: 14, lineHeight: 21, marginTop: 4 },
     priceRow: { flexDirection: 'row', alignItems: 'baseline', marginTop: 10, flexWrap: 'wrap' },
     price: { fontSize: 18, fontWeight: '800' },
     unit: { fontSize: 12 },
@@ -522,4 +981,104 @@ const styles = StyleSheet.create({
         paddingHorizontal: 20,
     },
     ctaText: { color: '#FFF', fontSize: 16, fontWeight: '800' },
+    modalBackdrop: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.45)',
+        justifyContent: 'flex-end',
+    },
+    modalWrap: {
+        width: '100%',
+    },
+    modalCard: {
+        borderTopLeftRadius: 20,
+        borderTopRightRadius: 20,
+        borderWidth: 1,
+        paddingHorizontal: 16,
+        paddingTop: 14,
+        paddingBottom: 24,
+    },
+    modalHeadRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    modalTitle: {
+        fontSize: 19,
+        fontWeight: '800',
+    },
+    modalSub: {
+        fontSize: 12,
+        marginTop: 2,
+        marginBottom: 10,
+    },
+    modalInputGroup: {
+        marginTop: 8,
+    },
+    modalLabel: {
+        fontSize: 12,
+        marginBottom: 6,
+        fontWeight: '600',
+    },
+    modalInput: {
+        borderWidth: 1,
+        borderRadius: 10,
+        height: 44,
+        paddingHorizontal: 12,
+        fontSize: 14,
+    },
+    modalInputTall: {
+        minHeight: 80,
+        height: 80,
+        paddingTop: 10,
+        textAlignVertical: 'top',
+    },
+    modalDateBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    modalDateText: {
+        fontSize: 14,
+    },
+    deliveryModeRow: {
+        flexDirection: 'row',
+        gap: 8,
+        flexWrap: 'wrap',
+    },
+    deliveryModeChip: {
+        borderWidth: 1,
+        borderRadius: 999,
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+    },
+    deliveryModeText: {
+        fontSize: 12,
+        fontWeight: '700',
+    },
+    useCurrentLocBtn: {
+        marginTop: 8,
+        borderWidth: 1,
+        borderRadius: 10,
+        paddingHorizontal: 10,
+        paddingVertical: 10,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+    },
+    useCurrentLocText: {
+        fontSize: 13,
+        fontWeight: '600',
+    },
+    modalCta: {
+        marginTop: 14,
+        borderRadius: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 13,
+    },
+    modalCtaText: {
+        color: '#FFF',
+        fontSize: 15,
+        fontWeight: '700',
+    },
 });

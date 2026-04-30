@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Button } from '../../components/Button';
 import { colors } from '../../theme/colors';
 import { useTheme } from '../../context/ThemeContext';
+import { useAuth } from '../../context/AuthContext';
 import Logo from '../../components/Logo';
 
 const { width, height } = Dimensions.get('window');
@@ -39,6 +40,7 @@ const SLIDES = [
 
 export default function Onboarding({ navigation }) {
     const { theme, isDarkMode } = useTheme();
+    const { isAuthenticated, loading: authLoading, user, session } = useAuth();
     const [currentIndex, setCurrentIndex] = useState(0);
     const flatListRef = useRef(null);
     const scrollX = useRef(new Animated.Value(0)).current;
@@ -125,6 +127,8 @@ export default function Onboarding({ navigation }) {
         </View>
     );
 
+    const isLoggedIn = !!isAuthenticated || !!user || !!session;
+
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
             {/* Header */}
@@ -167,15 +171,23 @@ export default function Onboarding({ navigation }) {
                 />
 
                 {currentIndex === SLIDES.length - 1 && (
-                    <TouchableOpacity 
-                        style={styles.loginLink}
-                        onPress={() => navigation.navigate('Login')}
-                    >
-                        <Text style={[styles.loginText, { color: theme.textLight }]}>
-                            Already have an account?{' '}
-                            <Text style={{ color: colors.primary, fontWeight: '600' }}>Login</Text>
-                        </Text>
-                    </TouchableOpacity>
+                    <View style={styles.authFooterWrap}>
+                        {authLoading ? (
+                            <Text style={[styles.authHintText, { color: theme.textLight }]}>Checking login state...</Text>
+                        ) : isLoggedIn ? (
+                            <Text style={[styles.loggedInText, { color: colors.primary }]}>Logged in</Text>
+                        ) : (
+                            <TouchableOpacity
+                                style={styles.authLinkBtn}
+                                onPress={() => navigation.navigate('Login')}
+                                activeOpacity={0.8}
+                            >
+                                <Text style={[styles.authLinkText, { color: colors.primary }]}>
+                                    Login with Mobile or Google Id
+                                </Text>
+                            </TouchableOpacity>
+                        )}
+                    </View>
                 )}
             </View>
         </SafeAreaView>
@@ -273,11 +285,24 @@ const styles = StyleSheet.create({
     nextBtn: {
         marginBottom: 16,
     },
-    loginLink: {
+    authFooterWrap: {
         alignItems: 'center',
         padding: 8,
     },
-    loginText: {
+    authHintText: {
         fontSize: 14,
+        marginBottom: 6,
+    },
+    authLinkBtn: {
+        paddingHorizontal: 2,
+        paddingVertical: 2,
+    },
+    authLinkText: {
+        fontSize: 15,
+        fontWeight: '700',
+    },
+    loggedInText: {
+        fontSize: 15,
+        fontWeight: '700',
     },
 });

@@ -19,6 +19,7 @@ export default function OrderLineItemRows({ item, theme, tr }) {
     const qty = Number(item.quantity) || 1;
     const unit = parts.unitPrice != null && Number.isFinite(parts.unitPrice) ? parts.unitPrice : Number(item.unit_price) || 0;
     const lineTotal = unit * qty;
+    const unitLabel = item?.price_unit || item?.unit || parts?.priceUnit || null;
 
     return (
         <View style={[styles.wrap, { borderLeftColor: accent }]}>
@@ -55,6 +56,11 @@ export default function OrderLineItemRows({ item, theme, tr }) {
                     ₹{lineTotal.toLocaleString('en-IN')}
                 </Text>
             </View>
+            {unitLabel ? (
+                <Text style={[styles.meta, { color: theme.textLight, marginTop: 2 }]}>
+                    Unit detail: {String(unitLabel)}
+                </Text>
+            ) : null}
         </View>
     );
 }

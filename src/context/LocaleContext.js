@@ -61,7 +61,7 @@ const FALLBACK_EN = {
     home_plan_subtitle: 'Choose an event to get started',
     home_plan_tab_occasions: 'All occasions',
     home_plan_tab_special: 'Special add-ons',
-    home_latest_partners: 'Latest from our partners',
+    home_latest_partners: 'Latest from our Partners',
     home_latest_partners_sub: 'Gallery previews — partner details unlock after you book.',
     home_featured_in_city: 'Featured in {city}',
     home_partner_services_hint: 'Services shown are indicative.',

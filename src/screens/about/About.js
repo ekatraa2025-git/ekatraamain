@@ -7,6 +7,7 @@ import { colors } from '../../theme/colors';
 import { useTheme } from '../../context/ThemeContext';
 import { useLocale } from '../../context/LocaleContext';
 import BottomTabBar from '../../components/BottomTabBar';
+import Logo from '../../components/Logo';
 
 export default function About({ navigation }) {
     const { theme, isDarkMode } = useTheme();
@@ -19,7 +20,6 @@ export default function About({ navigation }) {
                     <Ionicons name="arrow-back" size={24} color={theme.text} />
                 </TouchableOpacity>
                 <Text style={[styles.headerTitle, { color: theme.text }]}>{tr('about_title')}</Text>
-                <View style={{ width: 32 }} />
             </View>
 
             <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
@@ -27,8 +27,8 @@ export default function About({ navigation }) {
                     colors={[colors.primary + '15', colors.primary + '05']}
                     style={styles.heroCard}
                 >
-                    <View style={[styles.logoWrap, { backgroundColor: colors.primary }]}>
-                        <Text style={styles.logoText}>eK</Text>
+                    <View style={[styles.logoWrap, { backgroundColor: isDarkMode ? '#1F2333' : '#FFFFFF' }]}>
+                        <Logo width={48} height={48} />
                     </View>
                     <Text style={[styles.appName, { color: theme.text }]}>Ekatraa</Text>
                     <Text style={[styles.tagline, { color: theme.textLight }]}>
@@ -85,13 +85,12 @@ const styles = StyleSheet.create({
     header: {
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'space-between',
         paddingHorizontal: 16,
         paddingVertical: 12,
         borderBottomWidth: 1,
     },
     backBtn: { padding: 4 },
-    headerTitle: { fontSize: 17, fontWeight: '700' },
+    headerTitle: { fontSize: 17, fontWeight: '700', marginLeft: 8 },
     scroll: { padding: 20 },
     heroCard: {
         borderRadius: 20,
@@ -107,7 +106,6 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         marginBottom: 14,
     },
-    logoText: { color: '#FFF', fontSize: 24, fontWeight: '900' },
     appName: { fontSize: 26, fontWeight: '800', marginBottom: 8 },
     tagline: { fontSize: 14, textAlign: 'center', lineHeight: 22, marginBottom: 10 },
     version: { fontSize: 12 },
