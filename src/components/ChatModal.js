@@ -76,8 +76,8 @@ function buildWelcomeMessages(city, occasionName) {
 
 export default function ChatModal({ visible, onClose, city, occasionId, occasionName, plannedBudgetInr, navigation }) {
     const { theme, isDarkMode } = useTheme();
-    const { showToast } = useToast();
-    const { isAuthenticated, user } = useAuth();
+    const { showToast, showConfirm } = useToast();
+    const { isAuthenticated, user, session } = useAuth();
     const { cartId, setCartId, refreshCartCount } = useCart();
     const insets = useSafeAreaInsets();
     const planningThreadIdRef = useRef(`app-chat-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`);
@@ -85,12 +85,14 @@ export default function ChatModal({ visible, onClose, city, occasionId, occasion
     const [inputText, setInputText] = useState('');
     const [isTyping, setIsTyping] = useState(false);
     const [addingServiceId, setAddingServiceId] = useState(null);
+    const [selectedByMessageId, setSelectedByMessageId] = useState({});
     const flatListRef = useRef(null);
     const prevVisibleRef = useRef(false);
 
     useEffect(() => {
         if (visible && !prevVisibleRef.current) {
             setMessages(buildWelcomeMessages(city, occasionName));
+            setSelectedByMessageId({});
         }
         prevVisibleRef.current = visible;
     }, [visible, city, occasionName]);
@@ -105,13 +107,13 @@ export default function ChatModal({ visible, onClose, city, occasionId, occasion
 
     const ensureCart = useCallback(async () => {
         if (cartId) return cartId;
-        const { data, error } = await api.createCart({
+        const { data, error } = await api.createCartWithAuth({
             session_id: 'chat-' + Date.now(),
             user_id: isAuthenticated && user?.id ? user.id : null,
             event_name: occasionName || null,
             location_preference: city || null,
             planned_budget_inr: typeof plannedBudgetInr === 'number' && plannedBudgetInr > 0 ? plannedBudgetInr : null,
-        });
+        }, session?.access_token);
         if (error) {
             showToast({ variant: 'error', title: 'Cart', message: error.message || 'Could not start a cart.' });
             return null;
@@ -122,41 +124,94 @@ export default function ChatModal({ visible, onClose, city, occasionId, occasion
             return id;
         }
         return null;
-    }, [cartId, setCartId, isAuthenticated, user?.id, occasionName, city, plannedBudgetInr, showToast]);
+    }, [cartId, setCartId, isAuthenticated, user?.id, occasionName, city, plannedBudgetInr, showToast, session?.access_token]);
 
     const addServiceToCart = useCallback(
-        async (serviceId, label) => {
+        async (serviceId, label, options = {}) => {
             const sid = String(serviceId || '').trim();
             if (!sid) return;
             setAddingServiceId(sid);
             try {
                 const cid = await ensureCart();
                 if (!cid) return;
-                const { error } = await api.addCartItem({
+                const { error } = await api.addCartItemWithAuth({
                     cart_id: cid,
                     service_id: sid,
                     quantity: 1,
                     unit_price: null,
                     options: { source: 'ai_chat', label: label || null },
-                });
+                }, session?.access_token);
                 if (error) {
                     showToast({ variant: 'error', title: 'Could not add', message: error.message || 'Try again from the service page.' });
                     return;
                 }
                 await refreshCartCount(cid);
-                showToast({
-                    variant: 'success',
-                    title: 'Added to cart',
-                    message: (label && String(label)) || 'Service added.',
-                    action: navigation
-                        ? { label: 'View cart', onPress: () => navigation.navigate('Cart') }
-                        : undefined,
-                });
+                if (!options?.silent) {
+                    showToast({
+                        variant: 'success',
+                        title: 'Added to cart',
+                        message: (label && String(label)) || 'Service added.',
+                        action: navigation
+                            ? { label: 'View cart', onPress: () => navigation.navigate('Cart') }
+                            : undefined,
+                    });
+                }
             } finally {
                 setAddingServiceId(null);
             }
         },
-        [ensureCart, refreshCartCount, showToast, navigation]
+        [ensureCart, refreshCartCount, showToast, navigation, session?.access_token]
+    );
+
+    const toggleCartSelection = useCallback((messageId, serviceId) => {
+        setSelectedByMessageId((prev) => {
+            const msgMap = { ...(prev?.[messageId] || {}) };
+            if (msgMap[serviceId]) delete msgMap[serviceId];
+            else msgMap[serviceId] = true;
+            return { ...prev, [messageId]: msgMap };
+        });
+    }, []);
+
+    const handleBulkCartAction = useCallback(
+        (messageId, items, shouldCheckout) => {
+            const selectedMap = selectedByMessageId?.[messageId] || {};
+            const selected = (Array.isArray(items) ? items : []).filter((it) => !!selectedMap[it.service_id]);
+            if (!selected.length) {
+                showToast({
+                    variant: 'info',
+                    title: 'Select services',
+                    message: 'Tap one or more suggested services first.',
+                });
+                return;
+            }
+            const run = async () => {
+                for (const it of selected) {
+                    // Sequential add keeps ordering stable and avoids cart races.
+                    // eslint-disable-next-line no-await-in-loop
+                    await addServiceToCart(it.service_id, it.label, { silent: true });
+                }
+                showToast({
+                    variant: 'success',
+                    title: shouldCheckout ? 'Budget acknowledged' : 'Added to cart',
+                    message: shouldCheckout
+                        ? 'Selected services were added. Review and checkout in your cart.'
+                        : `${selected.length} service${selected.length > 1 ? 's' : ''} added to cart.`,
+                });
+                if (shouldCheckout && navigation) navigation.navigate('Cart');
+            };
+            if (!shouldCheckout) {
+                void run();
+                return;
+            }
+            showConfirm({
+                title: 'Acknowledge budget plan?',
+                message: 'This confirms your selected services for the planned budget. Continue to cart to review before checkout.',
+                confirmLabel: 'Acknowledge & Continue',
+                cancelLabel: 'Not now',
+                onConfirm: () => void run(),
+            });
+        },
+        [selectedByMessageId, showToast, addServiceToCart, navigation, showConfirm]
     );
 
     const sendWithText = useCallback(
@@ -260,6 +315,8 @@ export default function ChatModal({ visible, onClose, city, occasionId, occasion
             }
 
             const { display, items } = splitCartActions(item.text);
+            const selectedMap = selectedByMessageId?.[item.id] || {};
+            const selectedCount = items.filter((it) => !!selectedMap[it.service_id]).length;
             return (
                 <View style={styles.assistantRow}>
                     <View style={[styles.assistantIcon, { borderColor: theme.border, backgroundColor: theme.card }]}>
@@ -282,29 +339,54 @@ export default function ChatModal({ visible, onClose, city, occasionId, occasion
                                 {items.map((it) => (
                                     <TouchableOpacity
                                         key={it.service_id}
-                                        style={[styles.addCartBtn, { borderColor: brandColors.primary }]}
-                                        onPress={() => addServiceToCart(it.service_id, it.label)}
+                                        style={[
+                                            styles.addCartBtn,
+                                            { borderColor: selectedMap[it.service_id] ? brandColors.primary : theme.border },
+                                        ]}
+                                        onPress={() => toggleCartSelection(item.id, it.service_id)}
                                         disabled={addingServiceId != null}
                                     >
-                                        {addingServiceId === it.service_id ? (
-                                            <ActivityIndicator size="small" color={brandColors.primary} />
-                                        ) : (
-                                            <>
-                                                <Ionicons name="cart" size={16} color={brandColors.primary} />
-                                                <Text style={[styles.addCartBtnText, { color: brandColors.primary }]} numberOfLines={1}>
-                                                    Add: {it.label || it.service_id.slice(0, 8) + '…'}
-                                                </Text>
-                                            </>
-                                        )}
+                                        <Ionicons
+                                            name={selectedMap[it.service_id] ? 'checkbox' : 'square-outline'}
+                                            size={18}
+                                            color={selectedMap[it.service_id] ? brandColors.primary : theme.textLight}
+                                        />
+                                        <Text
+                                            style={[
+                                                styles.addCartBtnText,
+                                                { color: selectedMap[it.service_id] ? brandColors.primary : theme.text },
+                                            ]}
+                                            numberOfLines={1}
+                                        >
+                                            {it.label || it.service_id.slice(0, 8) + '…'}
+                                        </Text>
                                     </TouchableOpacity>
                                 ))}
+                                <View style={styles.cartCtaRow}>
+                                    <TouchableOpacity
+                                        style={[styles.inlineActionBtn, { borderColor: brandColors.primary }]}
+                                        onPress={() => handleBulkCartAction(item.id, items, false)}
+                                    >
+                                        <Ionicons name="cart-outline" size={15} color={brandColors.primary} />
+                                        <Text style={[styles.inlineActionText, { color: brandColors.primary }]}>
+                                            Add selected ({selectedCount})
+                                        </Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        style={[styles.inlineActionBtnPrimary, { backgroundColor: brandColors.primary }]}
+                                        onPress={() => handleBulkCartAction(item.id, items, true)}
+                                    >
+                                        <Ionicons name="checkmark-done" size={15} color="#fff" />
+                                        <Text style={styles.inlineActionPrimaryText}>Acknowledge budget & checkout</Text>
+                                    </TouchableOpacity>
+                                </View>
                             </View>
                         ) : null}
                     </View>
                 </View>
             );
         },
-        [theme, isDarkMode, onSelectChip, addServiceToCart, addingServiceId]
+        [theme, isDarkMode, onSelectChip, addingServiceId, selectedByMessageId, toggleCartSelection, handleBulkCartAction]
     );
 
     return (
@@ -459,6 +541,28 @@ const styles = StyleSheet.create({
         paddingHorizontal: 12,
     },
     addCartBtnText: { flex: 1, fontWeight: '600', fontSize: 14 },
+    cartCtaRow: { marginTop: 4, gap: 8 },
+    inlineActionBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+        borderWidth: 1.2,
+        borderRadius: 10,
+        paddingVertical: 9,
+        paddingHorizontal: 10,
+    },
+    inlineActionBtnPrimary: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+        borderRadius: 10,
+        paddingVertical: 10,
+        paddingHorizontal: 10,
+    },
+    inlineActionText: { fontSize: 12.5, fontWeight: '700' },
+    inlineActionPrimaryText: { fontSize: 12.5, fontWeight: '700', color: '#fff' },
     suggestCard: { borderWidth: 1, borderRadius: 16, padding: 16, marginBottom: 8 },
     suggestTitle: { fontSize: 16, fontWeight: '700' },
     suggestSub: { fontSize: 13, lineHeight: 20, marginTop: 6 },

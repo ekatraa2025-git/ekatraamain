@@ -21,6 +21,7 @@
     "@supabase/supabase-js": "^2.89.0",
     "babel-preset-expo": "~54.0.10",
     "expo": "~54.0.33",
+    "expo-av": "~16.0.8",
     "expo-contacts": "~15.0.11",
     "expo-font": "~14.0.11",
     "expo-linear-gradient": "~15.0.8",

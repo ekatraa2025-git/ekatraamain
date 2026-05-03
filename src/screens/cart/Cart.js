@@ -39,6 +39,7 @@ export default function Cart({ route, navigation }) {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [qtyDraftById, setQtyDraftById] = useState({});
+    const [guestSyncedIds, setGuestSyncedIds] = useState({});
     const [protectionSettings, setProtectionSettings] = useState(null);
 
     const loadCart = useCallback(async () => {
@@ -85,7 +86,30 @@ export default function Cart({ route, navigation }) {
                 .filter(Boolean),
         [cart?.items]
     );
-    const MAX_QTY = 99;
+    const MAX_QTY = 9999;
+    const guestCount = useMemo(() => {
+        const raw = cart?.guest_count ?? cart?.total_guests ?? cart?.planned_guests;
+        const n = Number(raw);
+        if (!Number.isFinite(n) || n < 1) return 0;
+        return Math.min(Math.floor(n), MAX_QTY);
+    }, [cart?.guest_count, cart?.planned_guests, cart?.total_guests]);
+
+    const isSingleUnitItem = useCallback((item, parts) => {
+        const unitText = [
+            item?.price_unit,
+            item?.unit,
+            item?.options?.price_unit,
+            parts?.qtyLabel,
+            parts?.subVariety,
+        ]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase();
+        if (!unitText) return false;
+        if (/\b(per\s*(guest|person|head|pax))\b/.test(unitText)) return true;
+        if (/\b(single\s*(unit|qty|piece|service))\b/.test(unitText)) return true;
+        return /\b(1|one)\s*(unit|qty|piece|pc|service)\b/.test(unitText);
+    }, []);
 
     useEffect(() => {
         if (!normalizedItems.length) return;
@@ -97,6 +121,45 @@ export default function Cart({ route, navigation }) {
             return next;
         });
     }, [normalizedItems]);
+
+    useEffect(() => {
+        if (!guestCount || !normalizedItems.length) return;
+        let cancelled = false;
+        (async () => {
+            let changed = false;
+            const syncedNow = {};
+            for (const item of normalizedItems) {
+                if (!item?.id || !item?._safeId) continue;
+                let parts;
+                try {
+                    parts = getLineItemParts(item);
+                } catch {
+                    parts = {};
+                }
+                if (!isSingleUnitItem(item, parts)) continue;
+                const currentQty = Number(item.quantity) || 1;
+                const targetQty = guestCount;
+                if (targetQty < 1 || currentQty === targetQty || guestSyncedIds[item._safeId]) continue;
+                // eslint-disable-next-line no-await-in-loop
+                const { error } = await api.updateCartItem(item.id, { quantity: targetQty });
+                if (!error) {
+                    changed = true;
+                    syncedNow[item._safeId] = true;
+                }
+            }
+            if (cancelled) return;
+            if (Object.keys(syncedNow).length) {
+                setGuestSyncedIds((prev) => ({ ...prev, ...syncedNow }));
+            }
+            if (changed) {
+                await loadCart();
+                refreshCartCount();
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [guestCount, normalizedItems, isSingleUnitItem, guestSyncedIds, loadCart, refreshCartCount]);
 
     const getDisplayQty = (item) => {
         if (!item || !item._safeId) return 1;
@@ -284,6 +347,7 @@ export default function Cart({ route, navigation }) {
                                     ? TIER_ACCENT_COLORS[accentIdx % TIER_ACCENT_COLORS.length]
                                     : colors.primary;
                             const tierLine = [parts.tierName, parts.qtyLabel].filter(Boolean).join(' · ');
+                            const isSingleUnit = isSingleUnitItem(item, parts);
                             return (
                                 <View
                                     style={[
@@ -294,6 +358,9 @@ export default function Cart({ route, navigation }) {
                                             borderLeftWidth: 4,
                                             borderLeftColor: accent,
                                         },
+                                        isSingleUnit && guestCount > 0
+                                            ? styles.singleUnitCard
+                                            : null,
                                     ]}
                                 >
                                     {metaParts.length > 0 ? (
@@ -313,6 +380,11 @@ export default function Cart({ route, navigation }) {
                                     <Text style={[styles.itemPrice, { color: theme.textLight }]}>
                                         ₹{price.toLocaleString()} × {qty} = ₹{(price * qty).toLocaleString()}
                                     </Text>
+                                    {isSingleUnit && guestCount > 0 ? (
+                                        <Text style={[styles.singleUnitHint, { color: colors.primary }]}>
+                                            Single-unit service: quantity synced to guest count ({guestCount}) for auto total.
+                                        </Text>
+                                    ) : null}
                                     <View style={styles.itemActions}>
                                         <View style={styles.qtyRow}>
                                             <TouchableOpacity
@@ -436,6 +508,8 @@ const styles = StyleSheet.create({
     itemTier: { fontSize: 14, fontWeight: '600', marginBottom: 4 },
     itemSubVariety: { fontSize: 12, marginBottom: 6, fontStyle: 'italic' },
     itemPrice: { fontSize: 14, marginBottom: 12 },
+    singleUnitCard: { borderWidth: 1.6, borderColor: colors.primary + '66' },
+    singleUnitHint: { fontSize: 12, fontWeight: '600', marginBottom: 10 },
     itemActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
     qtyRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
     qtyBtn: { width: 32, height: 32, borderRadius: 8, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },

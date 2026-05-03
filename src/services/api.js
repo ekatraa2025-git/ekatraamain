@@ -229,6 +229,9 @@ async function post(path, body = {}, timeoutMs = REQUEST_TIMEOUT_MS, extraHeader
             if (fromErr === 'Request failed' && data?.error == null) {
                 msg = fallback || 'Request failed';
             }
+            if (!msg || msg === 'null' || msg === 'undefined') {
+                msg = fallback || 'Request failed';
+            }
             if (details && fromErr && fromErr === 'Invalid body') {
                 msg = `${fromErr}${details}`;
             }
@@ -395,6 +398,31 @@ export const api = {
         const q = {};
         if (params.limit) q.limit = params.limit;
         return get('/api/public/e-invites/faqs', q);
+    },
+    async getEInvitePricing() {
+        return get('/api/public/e-invites/pricing');
+    },
+    /** Requires Supabase access_token (logged-in end user). */
+    async generateEInviteMedia(body, accessToken) {
+        if (!accessToken) return { data: null, error: { message: 'Sign in to generate e-invites.' } };
+        return postWithAuth('/api/public/e-invites/generate-media', body, accessToken, 240000);
+    },
+    async createEInvitePaymentOrder(body, accessToken) {
+        return postWithAuth('/api/public/e-invites/payment/create-order', body, accessToken);
+    },
+    async verifyEInvitePayment(body, accessToken) {
+        return postWithAuth('/api/public/e-invites/payment/verify', body, accessToken);
+    },
+    async getMyEInvites(accessToken, params = {}) {
+        return getWithAuth('/api/public/e-invites/mine', params, accessToken);
+    },
+    async getEInviteDownloadUrl(inviteId, accessToken) {
+        return getWithAuth(`/api/public/e-invites/mine/${inviteId}/download`, {}, accessToken);
+    },
+    /** Remove a server-stored e-invite (does not change generation quota). */
+    async deleteMyEInvite(inviteId, accessToken) {
+        if (!accessToken) return { data: null, error: { message: 'Sign in to manage e-invites.' } };
+        return delWithAuth(`/api/public/e-invites/mine/${inviteId}`, accessToken);
     },
     async getServices(params = {}) {
         const q = {};

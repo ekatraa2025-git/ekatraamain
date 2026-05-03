@@ -10,13 +10,17 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Contacts from 'expo-contacts';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors } from '../../theme/colors';
 import { useTheme } from '../../context/ThemeContext';
 import { useLocale } from '../../context/LocaleContext';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
+import { Video, ResizeMode } from 'expo-av';
 import BottomTabBar from '../../components/BottomTabBar';
 import { useToast } from '../../context/ToastContext';
+import { useCart } from '../../context/CartContext';
+import { useRazorpay } from '@codearcade/expo-razorpay';
 
 const TABS_LIST = ['Guests', 'Gifts', 'Invite'];
 
@@ -25,6 +29,27 @@ function formatInviteDate(d) {
 }
 function formatInviteTime(d) {
     return d.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true });
+}
+
+/** Renders MP4 invites with expo-av; PNG/GIF use Image. */
+function EInviteMediaPreview({ uri, outputMime, style, resizeMode = 'cover' }) {
+    const u = String(uri || '');
+    const isVideo =
+        String(outputMime || '').startsWith('video/') || /\.mp4(\?|$)/i.test(u);
+    if (isVideo && u) {
+        return (
+            <Video
+                source={{ uri: u }}
+                style={style}
+                resizeMode={resizeMode === 'cover' ? ResizeMode.COVER : ResizeMode.CONTAIN}
+                isLooping
+                shouldPlay
+                isMuted
+                useNativeControls={false}
+            />
+        );
+    }
+    return <Image source={{ uri: u }} style={style} resizeMode={resizeMode} />;
 }
 function sanitizePhoneForWa(phone) {
     const d = String(phone || '').replace(/\D/g, '');
@@ -39,31 +64,42 @@ function chunkArr(arr, size) {
     return out;
 }
 
-const INVITE_THEMES = {
-    rose: ['#FFF1F2', '#FFE4E6'],
-    gold: ['#FFF8F0', '#FFF0E6'],
-    navy: ['#EEF2FF', '#E0E7FF'],
-    emerald: ['#ECFDF5', '#D1FAE5'],
-    royal: ['#FAF5FF', '#F3E8FF'],
-};
 const COLOR_KEYS = ['rose', 'gold', 'navy', 'emerald', 'royal'];
 const VARIATION_KEYS = ['classic', 'modern', 'festive', 'minimal'];
-const INVITE_SECTION_ORDER = ['wedding_cards', 'video_invites', 'save_the_date'];
-const INVITE_SECTION_TITLES = {
-    wedding_cards: 'Wedding Cards',
-    video_invites: 'Video Invites',
-    save_the_date: 'Save The Date Cards',
-};
-const FALLBACK_EINVITE_TEMPLATES = [
-    { id: 'tmp-1', section_key: 'wedding_cards', title: 'Garden Soree', subtitle: 'Elegant floral frame', template_type: 'image', price: 1399, list_price: 2799 },
-    { id: 'tmp-2', section_key: 'wedding_cards', title: 'Hazel', subtitle: 'Minimal pastel wedding invite', template_type: 'image', price: 1499, list_price: 2999 },
-    { id: 'tmp-3', section_key: 'wedding_cards', title: 'Black Garden', subtitle: 'Classic regal layout', template_type: 'image', price: 1599, list_price: 3199 },
-    { id: 'tmp-4', section_key: 'video_invites', title: 'Me Before You', subtitle: 'Animated save-the-date', template_type: 'video', duration_seconds: 20, price: 1799, list_price: 2799 },
-    { id: 'tmp-5', section_key: 'video_invites', title: 'Floral Extravaganza', subtitle: 'Mehendi special edit', template_type: 'video', duration_seconds: 32, price: 1999, list_price: 3999 },
-    { id: 'tmp-6', section_key: 'video_invites', title: 'We Said Yes', subtitle: 'Premium cinematic invite', template_type: 'video', duration_seconds: 50, price: 1999, list_price: 3999 },
-    { id: 'tmp-7', section_key: 'save_the_date', title: 'Beyond Words', subtitle: 'Soft pastel card', template_type: 'image', price: 1299, list_price: 2299 },
-    { id: 'tmp-8', section_key: 'save_the_date', title: 'At Last', subtitle: 'Travel inspired card', template_type: 'image', price: 1399, list_price: 2499 },
-    { id: 'tmp-9', section_key: 'save_the_date', title: 'New Beginning', subtitle: 'Storybook portrait style', template_type: 'image', price: 1499, list_price: 2799 },
+const INVITE_FONT_CHOICES = [
+    { id: 'classic_serif', label: 'Classic serif' },
+    { id: 'elegant_script', label: 'Elegant script' },
+    { id: 'bold_modern_sans', label: 'Bold modern' },
+    { id: 'indian_calligraphy', label: 'Festive calligraphy' },
+];
+const INVITE_STICKER_CHOICES = [
+    { id: 'floral_mogra', label: 'Floral · mogra' },
+    { id: 'kalash_diya', label: 'Kalash & diya' },
+    { id: 'peacock_elephant', label: 'Peacock & elephant' },
+    { id: 'confetti_sparkle', label: 'Confetti sparkle' },
+    { id: 'minimal_none', label: 'Minimal accents' },
+];
+const EINVITE_OCCASIONS = ['Wedding', 'Birthday', 'Shradh', 'Janeyu', 'Puja', 'Corporate Event'];
+const SAVED_EINVITES_KEY = 'ekatraa.saved.einvites.v1';
+const EINVITE_MAX_ITERATIONS = 10;
+const INVITE_LANGS = [
+    { key: 'en', label: 'English' },
+    { key: 'hi', label: 'Hindi' },
+    { key: 'or', label: 'Odia' },
+];
+const GEN_STAGES_STATIC = [
+    'Preparing prompt…',
+    'Generating image…',
+    'Uploading to cloud…',
+    'Saving invite record…',
+];
+const GEN_STAGES_ANIMATED = [
+    'Preparing prompts…',
+    'Generating frame 1…',
+    'Generating frame 2…',
+    'Rendering animation…',
+    'Uploading to cloud…',
+    'Saving invite record…',
 ];
 const FALLBACK_EINVITE_FAQS = [
     {
@@ -74,7 +110,7 @@ const FALLBACK_EINVITE_FAQS = [
     {
         id: 'faq-2',
         question: 'Can I create a wedding card through my phone as well?',
-        answer: 'Yes. Choose a template, update event details, and share directly from your phone.',
+        answer: 'Yes. Use the AI studio to generate your card, pay once to unlock sharing, and send from your phone.',
     },
     {
         id: 'faq-3',
@@ -88,7 +124,9 @@ export default function GuestManage({ navigation }) {
     const { theme, isDarkMode } = useTheme();
     const { t } = useLocale();
     const { showToast, showConfirm } = useToast();
+    const { openCheckout, closeCheckout, RazorpayUI } = useRazorpay();
     const { user, isAuthenticated, refreshSession } = useAuth();
+    const { cartId: globalCartId, setCartId, refreshCartCount } = useCart();
     const userId = user?.id;
 
     /** Always refresh JWT before API calls — stale session.access_token causes "Invalid or expired token". */
@@ -133,16 +171,40 @@ export default function GuestManage({ navigation }) {
     const [showInviteTimePicker, setShowInviteTimePicker] = useState(false);
     const [inviteColorTheme, setInviteColorTheme] = useState('gold');
     const [inviteVariation, setInviteVariation] = useState('classic');
-    const [inviteAiSamples, setInviteAiSamples] = useState([]);
-    const [inviteAiFinal, setInviteAiFinal] = useState('');
-    const [inviteAiLoadingSamples, setInviteAiLoadingSamples] = useState(false);
-    const [inviteAiLoadingFinal, setInviteAiLoadingFinal] = useState(false);
-    const [inviteTemplates, setInviteTemplates] = useState([]);
+    const [inviteFontStyle, setInviteFontStyle] = useState('classic_serif');
+    const [inviteStickerPack, setInviteStickerPack] = useState('floral_mogra');
+    const [eInvitePricing, setEInvitePricing] = useState({ static_inr: 300, animated_inr: 500 });
+    const [currentUserEInviteId, setCurrentUserEInviteId] = useState(null);
+    const [eInvitePaid, setEInvitePaid] = useState(false);
+    const [eInvitePayBusy, setEInvitePayBusy] = useState(false);
+    const [inviteAiLoadingText, setInviteAiLoadingText] = useState(false);
     const [inviteFaqs, setInviteFaqs] = useState([]);
     const [inviteCatalogLoading, setInviteCatalogLoading] = useState(false);
     const [openFaqId, setOpenFaqId] = useState(null);
     const [waModalVisible, setWaModalVisible] = useState(false);
     const [waChunkIdx, setWaChunkIdx] = useState(0);
+    const [inviteOccasion, setInviteOccasion] = useState('Wedding');
+    const [inviteMediaType, setInviteMediaType] = useState('image');
+    const [invitePrompt, setInvitePrompt] = useState('');
+    const [inviteTextLanguage, setInviteTextLanguage] = useState('en');
+    const [inviteTexts, setInviteTexts] = useState({ en: '', hi: '', or: '' });
+    const [inviteChat, setInviteChat] = useState([
+        {
+            id: 'welcome',
+            sender: 'bot',
+            text: 'Fill invitation details below, add invitation wording (or tap AI text). Then describe colours, mood, and art style here to generate the card image.',
+        },
+    ]);
+    const [generatedInvite, setGeneratedInvite] = useState(null);
+    const [inviteGeneratingImage, setInviteGeneratingImage] = useState(false);
+    const [savedInvites, setSavedInvites] = useState([]);
+    const [inviteIterationMeta, setInviteIterationMeta] = useState({
+        max: EINVITE_MAX_ITERATIONS,
+        used: 0,
+        remaining: EINVITE_MAX_ITERATIONS,
+    });
+    const [inviteGenElapsedSec, setInviteGenElapsedSec] = useState(0);
+    const [inviteGenStageIdx, setInviteGenStageIdx] = useState(0);
 
     useEffect(() => {
         setInviteForm(p => ({
@@ -152,50 +214,130 @@ export default function GuestManage({ navigation }) {
         }));
     }, [inviteDateValue, inviteTimeValue]);
 
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            try {
+                const raw = await AsyncStorage.getItem(SAVED_EINVITES_KEY);
+                const parsed = raw ? JSON.parse(raw) : [];
+                if (!cancelled && Array.isArray(parsed)) setSavedInvites(parsed.slice(0, EINVITE_MAX_ITERATIONS));
+            } catch {
+                if (!cancelled) setSavedInvites([]);
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+    useEffect(() => {
+        if (!inviteGeneratingImage) {
+            setInviteGenElapsedSec(0);
+            setInviteGenStageIdx(0);
+            return undefined;
+        }
+        const t = setInterval(() => {
+            setInviteGenElapsedSec((s) => s + 1);
+            setInviteGenStageIdx((s) => s + 1);
+        }, 1000);
+        return () => clearInterval(t);
+    }, [inviteGeneratingImage]);
+
+    const activeInviteMessage = useMemo(() => {
+        return String(inviteTexts[inviteTextLanguage] || inviteForm.message || '').trim();
+    }, [inviteTexts, inviteTextLanguage, inviteForm.message]);
+    const generationEstimateSec = useMemo(() => (inviteMediaType === 'animated' ? 130 : 80), [inviteMediaType]);
+    const generationStages = useMemo(
+        () => (inviteMediaType === 'animated' ? GEN_STAGES_ANIMATED : GEN_STAGES_STATIC),
+        [inviteMediaType]
+    );
+    const generationStageText = useMemo(
+        () => generationStages[Math.min(inviteGenStageIdx, generationStages.length - 1)] || 'Generating…',
+        [generationStages, inviteGenStageIdx]
+    );
+    const updateInviteTextByLanguage = useCallback((language, text) => {
+        setInviteTexts((prev) => ({ ...prev, [language]: text }));
+        setInviteForm((p) => ({ ...p, message: text }));
+    }, []);
+
     const guestsWithPhoneList = useMemo(
         () => guests.filter(g => sanitizePhoneForWa(g.phone)),
         [guests]
     );
     const waChunks = useMemo(() => chunkArr(guestsWithPhoneList, 5), [guestsWithPhoneList]);
-    const inviteTemplatesBySection = useMemo(() => {
-        const grouped = {};
-        const source = inviteTemplates.length > 0 ? inviteTemplates : FALLBACK_EINVITE_TEMPLATES;
-        source.forEach((item) => {
-            const key = item.section_key || 'wedding_cards';
-            if (!grouped[key]) grouped[key] = [];
-            grouped[key].push(item);
-        });
-        return grouped;
-    }, [inviteTemplates]);
     const visibleFaqs = useMemo(
         () => (inviteFaqs.length > 0 ? inviteFaqs : FALLBACK_EINVITE_FAQS),
         [inviteFaqs]
+    );
+    const eInviteUnitPrice = useMemo(
+        () => (inviteMediaType === 'animated' ? eInvitePricing.animated_inr : eInvitePricing.static_inr),
+        [inviteMediaType, eInvitePricing]
     );
 
     const loadInviteCatalog = useCallback(async () => {
         setInviteCatalogLoading(true);
         try {
-            const [templatesRes, faqsRes] = await Promise.all([
-                api.getEInviteTemplates({ limit: 60 }),
+            const [faqsRes, pricingRes] = await Promise.all([
                 api.getEInviteFaqs({ limit: 30 }),
+                api.getEInvitePricing(),
             ]);
-            if (Array.isArray(templatesRes.data)) {
-                setInviteTemplates(templatesRes.data);
-            } else {
-                setInviteTemplates([]);
-            }
             if (Array.isArray(faqsRes.data)) {
                 setInviteFaqs(faqsRes.data);
             } else {
                 setInviteFaqs([]);
             }
+            if (pricingRes.data?.static_inr != null) {
+                setEInvitePricing({
+                    static_inr: Number(pricingRes.data.static_inr) || 300,
+                    animated_inr: Number(pricingRes.data.animated_inr) || 500,
+                });
+            }
         } catch {
-            setInviteTemplates([]);
             setInviteFaqs([]);
         } finally {
             setInviteCatalogLoading(false);
         }
     }, []);
+
+    const loadMyEInvites = useCallback(async () => {
+        if (!isAuthenticated) return;
+        const token = await resolveAccessToken();
+        if (!token) return;
+        try {
+            const { data, error } = await api.getMyEInvites(token, { limit: 30 });
+            if (error) return;
+            const serverInvites = Array.isArray(data?.invites)
+                ? data.invites.map((it) => {
+                    const payload = it?.form_payload || {};
+                    return {
+                        id: it.id,
+                        user_e_invite_id: it.id,
+                        payment_status: it.payment_status || 'unpaid',
+                        price_inr: it.price_inr,
+                        eventName: payload.event_name || payload.eventName || '',
+                        occasion: payload.occasion || inviteOccasion,
+                        mediaType: it.media_kind === 'animated' ? 'animated' : 'image',
+                        output_mime: payload.output_mime || (it.media_kind === 'animated' ? 'video/mp4' : 'image/png'),
+                        media_url: it.preview_url || '',
+                        prompt: payload.prompt || '',
+                        texts: payload.invitation_texts || null,
+                        createdAt: it.created_at || new Date().toISOString(),
+                    };
+                })
+                : [];
+            if (serverInvites.length > 0) {
+                await persistSavedInvites(serverInvites);
+            }
+            const used = Number(data?.used_iterations ?? serverInvites.length ?? 0);
+            const max = Number(data?.max_iterations ?? EINVITE_MAX_ITERATIONS);
+            setInviteIterationMeta({
+                used,
+                max,
+                remaining: Math.max(0, max - used),
+            });
+        } catch {
+        }
+    }, [isAuthenticated, resolveAccessToken, inviteOccasion]);
 
     const loadData = useCallback(async () => {
         if (!userId) {
@@ -226,7 +368,8 @@ export default function GuestManage({ navigation }) {
         useCallback(() => {
             loadData();
             loadInviteCatalog();
-        }, [loadData, loadInviteCatalog])
+            loadMyEInvites();
+        }, [loadData, loadInviteCatalog, loadMyEInvites])
     );
 
     const GUEST_LIMITS = { name: 100, phone: 20, relation: 50, group: 50, notes: 500 };
@@ -519,12 +662,9 @@ export default function GuestManage({ navigation }) {
     };
 
     const buildInvitationText = () => {
-        if (inviteAiFinal && String(inviteAiFinal).trim()) {
-            return `${String(inviteAiFinal).trim()}\n\n— Powered by Ekatraa`;
-        }
         const f = inviteForm;
         const lines = [];
-        lines.push('✨ You are cordially invited! ✨');
+        lines.push(`✨ ${inviteOccasion} E-Invite ✨`);
         lines.push('');
         if (f.eventName) lines.push(`🎉 ${f.eventName}`);
         if (f.hostNames) lines.push(`Hosted by: ${f.hostNames}`);
@@ -534,14 +674,412 @@ export default function GuestManage({ navigation }) {
         if (f.venueName) lines.push(`📍 Venue: ${f.venueName}`);
         if (f.venueAddress) lines.push(`   ${f.venueAddress}`);
         lines.push('');
-        if (f.message) {
+        if (inviteTexts.en) {
+            lines.push('English:');
+            lines.push(inviteTexts.en);
+            lines.push('');
+        }
+        if (inviteTexts.hi) {
+            lines.push('Hindi:');
+            lines.push(inviteTexts.hi);
+            lines.push('');
+        }
+        if (inviteTexts.or) {
+            lines.push('Odia:');
+            lines.push(inviteTexts.or);
+            lines.push('');
+        }
+        if (!inviteTexts.en && !inviteTexts.hi && !inviteTexts.or && f.message) {
             lines.push(f.message);
+            lines.push('');
+        }
+        if (generatedInvite?.media_url && eInvitePaid) {
+            lines.push(`${inviteMediaType === 'animated' ? '🎬 Animated invite' : '🖼️ Invite image'}: ${generatedInvite.media_url}`);
+            lines.push('');
+        } else if (generatedInvite?.media_url && !eInvitePaid) {
+            lines.push('🖼️ Your AI invite artwork is ready — complete payment in the app to unlock the download and sharing link.');
             lines.push('');
         }
         lines.push('We look forward to your gracious presence!');
         lines.push('');
         lines.push('— Powered by Ekatraa');
         return lines.join('\n');
+    };
+
+    const persistSavedInvites = async (next) => {
+        setSavedInvites(next);
+        try {
+            await AsyncStorage.setItem(SAVED_EINVITES_KEY, JSON.stringify(next.slice(0, EINVITE_MAX_ITERATIONS)));
+        } catch { }
+    };
+
+    const removeSavedInviteEntry = async (it) => {
+        const sid = it.user_e_invite_id || it.id;
+        const isLocalOnly = !sid || String(sid).startsWith('invite-');
+        if (isLocalOnly) {
+            const next = savedInvites.filter((x) => x.id !== it.id);
+            await persistSavedInvites(next);
+            if (generatedInvite?.id === it.id) {
+                setGeneratedInvite(null);
+                setCurrentUserEInviteId(null);
+                setEInvitePaid(false);
+            }
+            showToast({
+                variant: 'success',
+                title: 'Removed',
+                message: 'Invite removed from this device.',
+            });
+            return;
+        }
+        const token = await resolveAccessToken();
+        if (!token) {
+            showToast({ variant: 'info', title: 'Sign in', message: 'Sign in to delete saved invites.' });
+            return;
+        }
+        const { error } = await api.deleteMyEInvite(sid, token);
+        if (error) {
+            showToast({
+                variant: 'error',
+                title: 'Delete failed',
+                message: error.message || 'Could not delete invite.',
+            });
+            return;
+        }
+        const next = savedInvites.filter(
+            (x) => x.id !== it.id && String(x.user_e_invite_id || x.id) !== String(sid),
+        );
+        await persistSavedInvites(next);
+        const genId = generatedInvite?.user_e_invite_id || generatedInvite?.id;
+        if (generatedInvite?.id === it.id || String(genId) === String(sid)) {
+            setGeneratedInvite(null);
+            setCurrentUserEInviteId(null);
+            setEInvitePaid(false);
+        }
+        showToast({
+            variant: 'success',
+            title: 'Deleted',
+            message: 'Invite removed from your account. Your generation limit is unchanged.',
+        });
+    };
+
+    const confirmDeleteSavedInvite = (it) => {
+        showConfirm({
+            title: 'Delete invite',
+            message: 'Remove this invite from your account? This cannot be undone. Your generation quota stays the same.',
+            cancelLabel: 'Cancel',
+            confirmLabel: 'Delete',
+            onConfirm: () => {
+                void removeSavedInviteEntry(it);
+            },
+        });
+    };
+
+    const runGenerateInviteMedia = async () => {
+        const stylePrompt = invitePrompt.trim();
+        const inviteBody = activeInviteMessage;
+        if (!inviteForm.eventName.trim()) {
+            showToast({ variant: 'info', title: 'Required', message: 'Please enter event name.' });
+            return;
+        }
+        if (inviteIterationMeta.remaining <= 0) {
+            showToast({
+                variant: 'info',
+                title: 'Iteration limit reached',
+                message: `You can generate up to ${inviteIterationMeta.max} invites total (static + animated).`,
+            });
+            return;
+        }
+        if (!isAuthenticated) {
+            showToast({ variant: 'info', title: 'Sign in', message: 'Sign in to generate and save your AI e-invite.' });
+            return;
+        }
+        if (!inviteBody && !stylePrompt) {
+            showToast({
+                variant: 'info',
+                title: 'Text or style needed',
+                message: 'Add invitation wording (or generate it with AI), and/or describe the card look in the chat box.',
+            });
+            return;
+        }
+        const token = await resolveAccessToken();
+        if (!token) {
+            showToast({ variant: 'error', title: 'Session', message: 'Could not refresh your session. Sign in again.' });
+            return;
+        }
+        const combinedPrompt = [stylePrompt, inviteBody ? `Invitation wording to reflect on the card: ${inviteBody}` : '']
+            .filter(Boolean)
+            .join('\n\n');
+        const userMsg = {
+            id: `user-${Date.now()}`,
+            sender: 'user',
+            text: [stylePrompt, inviteBody].filter(Boolean).join(' — ') || combinedPrompt,
+        };
+        setInviteChat((prev) => [...prev, userMsg, { id: `bot-loading-${Date.now()}`, sender: 'bot', text: 'Designing your invite image…' }]);
+        setInviteGeneratingImage(true);
+        try {
+            const { data, error } = await api.generateEInviteMedia(
+                {
+                    occasion: inviteOccasion,
+                    media_type: inviteMediaType,
+                    prompt: combinedPrompt,
+                    event_name: inviteForm.eventName,
+                    host_names: inviteForm.hostNames,
+                    event_date: inviteForm.eventDate,
+                    event_time: inviteForm.eventTime,
+                    venue: [inviteForm.venueName, inviteForm.venueAddress].filter(Boolean).join(', '),
+                    design: {
+                        color_theme: inviteColorTheme,
+                        variation: inviteVariation,
+                        font_style: inviteFontStyle,
+                        sticker_pack: inviteStickerPack,
+                    },
+                    invitation_texts: inviteTexts,
+                    preferred_language: inviteTextLanguage,
+                    chat_history: inviteChat.slice(-8),
+                },
+                token
+            );
+            if (error) {
+                const errMsg = String(error?.message || '').trim();
+                showToast({
+                    variant: 'error',
+                    title: 'Generation failed',
+                    message: errMsg && errMsg !== 'null' ? errMsg : 'Could not generate invite image. Check OpenRouter API key and admin image model in backend settings.',
+                });
+                setInviteChat((prev) => prev.filter((m) => !String(m.id).startsWith('bot-loading-')));
+                return;
+            }
+            if (!data?.media_url) {
+                showToast({
+                    variant: 'error',
+                    title: 'Generation failed',
+                    message: 'No image URL returned. Check Supabase storage permissions.',
+                });
+                setInviteChat((prev) => prev.filter((m) => !String(m.id).startsWith('bot-loading-')));
+                return;
+            }
+            const uid = data.user_e_invite_id || `invite-${Date.now()}`;
+            const paid = String(data.payment_status || '') === 'paid';
+            const nextInvite = {
+                id: uid,
+                user_e_invite_id: data.user_e_invite_id,
+                payment_status: data.payment_status || 'unpaid',
+                price_inr: data.price_inr ?? eInviteUnitPrice,
+                eventName: inviteForm.eventName,
+                occasion: inviteOccasion,
+                mediaType: inviteMediaType,
+                output_mime: data.output_mime || (inviteMediaType === 'animated' ? 'video/mp4' : 'image/png'),
+                media_url: data.media_url,
+                storage_path: data?.storage_path,
+                prompt: data?.prompt || combinedPrompt,
+                texts: inviteTexts,
+                createdAt: new Date().toISOString(),
+            };
+            setGeneratedInvite(nextInvite);
+            setCurrentUserEInviteId(data.user_e_invite_id || null);
+            setEInvitePaid(paid);
+            setInviteIterationMeta({
+                used: Number(data?.used_iterations ?? inviteIterationMeta.used + 1),
+                max: Number(data?.max_iterations ?? inviteIterationMeta.max),
+                remaining: Number(
+                    data?.remaining_iterations ??
+                    Math.max(0, (inviteIterationMeta.max || EINVITE_MAX_ITERATIONS) - (inviteIterationMeta.used + 1))
+                ),
+            });
+            await persistSavedInvites([
+                nextInvite,
+                ...savedInvites.filter((it) => it.id !== nextInvite.id),
+            ]);
+            setInviteChat((prev) => [
+                ...prev.filter((m) => !String(m.id).startsWith('bot-loading-')),
+                {
+                    id: `bot-${Date.now()}`,
+                    sender: 'bot',
+                    text: paid
+                        ? 'Your invite design is ready. You can download, share, or edit the wording in the designer.'
+                        : `Your invite preview is ready. Pay ₹${Number(data.price_inr || eInviteUnitPrice).toLocaleString('en-IN')} to unlock download and sharing.`,
+                },
+            ]);
+            setInvitePrompt('');
+            showToast({ variant: 'success', title: 'Saved', message: 'Invite generated and saved to your list.' });
+        } finally {
+            setInviteGeneratingImage(false);
+        }
+    };
+
+    const payForCurrentEInvite = useCallback(async (inviteIdInput) => {
+        const inviteId = inviteIdInput || currentUserEInviteId || generatedInvite?.user_e_invite_id;
+        if (!inviteId) return { ok: false };
+        if (eInvitePaid) return { ok: true, alreadyPaid: true };
+        if (!isAuthenticated) {
+            showToast({ variant: 'info', title: 'Sign in', message: 'Sign in to complete e-invite payment.' });
+            return { ok: false };
+        }
+        const token = await resolveAccessToken();
+        if (!token) {
+            showToast({ variant: 'error', title: 'Session', message: 'Could not refresh your session.' });
+            return { ok: false };
+        }
+        setEInvitePayBusy(true);
+        try {
+            const { data, error } = await api.createEInvitePaymentOrder({ user_e_invite_id: inviteId }, token);
+            setEInvitePayBusy(false);
+            if (error || !data?.razorpay_order_id) {
+                showToast({
+                    variant: 'error',
+                    title: 'Payment',
+                    message: error?.message || data?.error || 'Could not start payment.',
+                });
+                return { ok: false };
+            }
+            const amountInr = data.amount_inr != null ? Number(data.amount_inr) : eInviteUnitPrice;
+            const paymentResult = await new Promise((resolve) => {
+                openCheckout(
+                    {
+                        key: data.key,
+                        amount: data.amount,
+                        currency: 'INR',
+                        order_id: data.razorpay_order_id,
+                        name: 'Ekatraa',
+                        description: `E-invite unlock — ₹${amountInr.toLocaleString('en-IN')}`,
+                        prefill: {
+                            name: user?.name || user?.email || '',
+                            email: user?.email || '',
+                            contact: user?.phone || '',
+                        },
+                        theme: { color: colors.primary },
+                    },
+                    {
+                        onSuccess: async (pay) => {
+                            closeCheckout();
+                            const verifyTok = (await refreshSession())?.access_token;
+                            if (!verifyTok) {
+                                showToast({ variant: 'error', title: 'Session expired', message: 'Sign in again to verify payment.' });
+                                resolve({ ok: false });
+                                return;
+                            }
+                            const { data: v, error: vErr } = await api.verifyEInvitePayment(
+                                {
+                                    user_e_invite_id: inviteId,
+                                    razorpay_payment_id: pay.razorpay_payment_id,
+                                    razorpay_order_id: pay.razorpay_order_id,
+                                    razorpay_signature: pay.razorpay_signature,
+                                    user_id: userId,
+                                },
+                                verifyTok
+                            );
+                            if (vErr || !v?.ok) {
+                                showToast({
+                                    variant: 'error',
+                                    title: 'Verification failed',
+                                    message: vErr?.message || 'Payment could not be verified.',
+                                });
+                                resolve({ ok: false });
+                                return;
+                            }
+                            setEInvitePaid(true);
+                            setGeneratedInvite((prev) =>
+                                prev
+                                    ? {
+                                        ...prev,
+                                        payment_status: 'paid',
+                                        media_url: v.download_url || prev.media_url,
+                                    }
+                                    : prev
+                            );
+                            const nextSaved = savedInvites.map((it) =>
+                                it.user_e_invite_id === inviteId || it.id === inviteId
+                                    ? { ...it, payment_status: 'paid', media_url: v.download_url || it.media_url }
+                                    : it
+                            );
+                            await persistSavedInvites(nextSaved);
+                            showToast({
+                                variant: 'success',
+                                title: 'Paid',
+                                message: 'Your e-invite is ready to download and share.',
+                            });
+                            resolve({ ok: true, download_url: v.download_url || null });
+                        },
+                        onFailure: (err) => {
+                            showToast({
+                                variant: 'error',
+                                title: 'Payment failed',
+                                message: err?.description || 'Payment could not be completed.',
+                            });
+                            resolve({ ok: false });
+                        },
+                        onClose: () => resolve({ ok: false }),
+                    }
+                );
+            });
+            return paymentResult;
+        } catch (e) {
+            setEInvitePayBusy(false);
+            showToast({ variant: 'error', title: 'Payment', message: e?.message || 'Unexpected error.' });
+            return { ok: false };
+        }
+    }, [
+        currentUserEInviteId,
+        generatedInvite?.user_e_invite_id,
+        eInvitePaid,
+        isAuthenticated,
+        resolveAccessToken,
+        eInviteUnitPrice,
+        openCheckout,
+        closeCheckout,
+        refreshSession,
+        userId,
+        user,
+        showToast,
+        savedInvites,
+    ]);
+
+    const saveGeneratedInvite = async () => {
+        if (!generatedInvite?.media_url) {
+            showToast({ variant: 'info', title: 'Generate first', message: 'Create an invite before saving.' });
+            return;
+        }
+        const next = [
+            {
+                ...generatedInvite,
+                eventName: inviteForm.eventName,
+                message: inviteForm.message,
+                hostNames: inviteForm.hostNames,
+                texts: inviteTexts,
+            },
+            ...savedInvites.filter((it) => it.id !== generatedInvite.id),
+        ].slice(0, EINVITE_MAX_ITERATIONS);
+        await persistSavedInvites(next);
+        showToast({ variant: 'success', title: 'Saved', message: 'Invite saved on this device.' });
+    };
+
+    const openGeneratedInvite = async () => {
+        if (!generatedInvite?.media_url) {
+            showToast({ variant: 'info', title: 'Generate first', message: 'Create an invite before opening.' });
+            return;
+        }
+        const inviteId = generatedInvite?.user_e_invite_id || currentUserEInviteId;
+        if (!eInvitePaid) {
+            const paid = await payForCurrentEInvite(inviteId);
+            if (!paid?.ok) return;
+        }
+        if (!inviteId) {
+            const can = await Linking.canOpenURL(generatedInvite.media_url);
+            if (can) await Linking.openURL(generatedInvite.media_url);
+            else showToast({ variant: 'error', title: 'Download', message: 'Could not open the invite link.' });
+            return;
+        }
+        const token = await resolveAccessToken();
+        if (!token) return;
+        const { data, error } = await api.getEInviteDownloadUrl(inviteId, token);
+        const url = data?.url || generatedInvite.media_url;
+        if (error && !url) {
+            showToast({ variant: 'error', title: 'Download', message: error?.message || 'Could not refresh download link.' });
+            return;
+        }
+        const canOpen = await Linking.canOpenURL(url);
+        if (canOpen) await Linking.openURL(url);
+        else showToast({ variant: 'error', title: 'Download', message: 'Could not open the generated invite link.' });
     };
 
     const openWhatsAppToNumber = async (digits, body) => {
@@ -551,43 +1089,12 @@ export default function GuestManage({ navigation }) {
         else showToast({ variant: 'error', title: 'WhatsApp', message: 'Could not open WhatsApp for this number.' });
     };
 
-    const runGenerateSamples = async () => {
+    const runGenerateInviteText = async () => {
         if (!inviteForm.eventName.trim()) {
             showToast({ variant: 'info', title: 'Required', message: 'Please enter event name.' });
             return;
         }
-        setInviteAiLoadingSamples(true);
-        setInviteAiSamples([]);
-        try {
-            const { data, error } = await api.generateInvitation({
-                mode: 'samples',
-                eventName: inviteForm.eventName,
-                eventDate: inviteForm.eventDate,
-                eventTime: inviteForm.eventTime,
-                venueName: inviteForm.venueName,
-                venueAddress: inviteForm.venueAddress,
-                hostNames: inviteForm.hostNames,
-                message: inviteForm.message,
-                colorTheme: inviteColorTheme,
-                variation: inviteVariation,
-            });
-            if (error) {
-                showToast({ variant: 'error', title: 'Error', message: error.message || 'Could not generate samples.' });
-                return;
-            }
-            if (data?.samples?.length) setInviteAiSamples(data.samples.slice(0, 3));
-            else showToast({ variant: 'info', title: 'Samples', message: 'No samples returned. Try again.' });
-        } finally {
-            setInviteAiLoadingSamples(false);
-        }
-    };
-
-    const runGenerateFinal = async () => {
-        if (!inviteForm.eventName.trim()) {
-            showToast({ variant: 'info', title: 'Required', message: 'Please enter event name.' });
-            return;
-        }
-        setInviteAiLoadingFinal(true);
+        setInviteAiLoadingText(true);
         try {
             const { data, error } = await api.generateInvitation({
                 mode: 'final',
@@ -597,19 +1104,35 @@ export default function GuestManage({ navigation }) {
                 venueName: inviteForm.venueName,
                 venueAddress: inviteForm.venueAddress,
                 hostNames: inviteForm.hostNames,
-                message: inviteForm.message,
+                message: activeInviteMessage,
                 colorTheme: inviteColorTheme,
                 variation: inviteVariation,
-                samples: inviteAiSamples,
+                templateType: inviteMediaType === 'animated' ? 'video' : 'image',
+                session_id: `invite-editor-${Date.now()}`,
             });
             if (error) {
-                showToast({ variant: 'error', title: 'Error', message: error.message || 'Could not generate final invite.' });
+                showToast({ variant: 'error', title: 'Error', message: error.message || 'Could not generate invite text.' });
                 return;
             }
-            if (data?.final) setInviteAiFinal(String(data.final));
-            else showToast({ variant: 'info', title: 'Final', message: 'No final text returned.' });
+            const generatedMulti = data?.final_multilingual || null;
+            const generated = String(data?.final || '').trim();
+            if (generatedMulti && (generatedMulti.en || generatedMulti.hi || generatedMulti.or)) {
+                const nextTexts = {
+                    en: String(generatedMulti.en || '').trim(),
+                    hi: String(generatedMulti.hi || '').trim(),
+                    or: String(generatedMulti.or || '').trim(),
+                };
+                setInviteTexts(nextTexts);
+                setInviteTextLanguage('en');
+                setInviteForm((p) => ({ ...p, message: nextTexts.en || generated }));
+            } else if (generated) {
+                setInviteTexts((prev) => ({ ...prev, [inviteTextLanguage]: generated }));
+                setInviteForm((p) => ({ ...p, message: generated }));
+            } else {
+                showToast({ variant: 'info', title: 'AI text', message: 'No text returned. Try again.' });
+            }
         } finally {
-            setInviteAiLoadingFinal(false);
+            setInviteAiLoadingText(false);
         }
     };
 
@@ -622,14 +1145,109 @@ export default function GuestManage({ navigation }) {
             showToast({ variant: 'info', title: 'WhatsApp', message: t('invite_wa_no_phone') });
             return;
         }
+        if (generatedInvite?.media_url && generatedInvite?.user_e_invite_id && !eInvitePaid) {
+            payForCurrentEInvite(generatedInvite.user_e_invite_id).then((paid) => {
+                if (!paid?.ok) return;
+                setWaChunkIdx(0);
+                setWaModalVisible(true);
+            });
+            return;
+        }
         setWaChunkIdx(0);
         setWaModalVisible(true);
+    };
+
+    const goToCartAndCheckoutForEInvite = async () => {
+        const inviteId = generatedInvite?.user_e_invite_id || currentUserEInviteId;
+        if (!inviteId) {
+            showToast({ variant: 'info', title: 'Generate first', message: 'Generate an invite before checkout.' });
+            return;
+        }
+        if (!isAuthenticated || !user?.id) {
+            showToast({
+                variant: 'info',
+                title: 'Sign in',
+                message: 'Sign in to add your e-invite to the cart and pay at checkout.',
+            });
+            return;
+        }
+        if (eInvitePaid) {
+            navigation.navigate('Cart');
+            return;
+        }
+        const token = await resolveAccessToken();
+        if (!token) {
+            showToast({
+                variant: 'error',
+                title: 'Session',
+                message: 'Could not refresh your session. Try signing in again.',
+            });
+            return;
+        }
+        let cid = globalCartId;
+        try {
+            if (!cid) {
+                const { data: created, error: cartErr } = await api.createCartWithAuth(
+                    {
+                        user_id: user.id,
+                        event_name:
+                            (inviteForm.eventName && String(inviteForm.eventName).trim()) ||
+                            generatedInvite?.eventName ||
+                            null,
+                    },
+                    token
+                );
+                if (cartErr) {
+                    showToast({
+                        variant: 'error',
+                        title: 'Cart',
+                        message: cartErr.message || 'Could not create cart.',
+                    });
+                    return;
+                }
+                cid = created?.id;
+                if (cid) await setCartId(cid);
+            }
+            if (!cid) {
+                showToast({ variant: 'error', title: 'Cart', message: 'No cart available.' });
+                return;
+            }
+            const { error: itemErr } = await api.addCartItemWithAuth(
+                { cart_id: cid, user_e_invite_id: inviteId, quantity: 1 },
+                token
+            );
+            if (itemErr) {
+                showToast({
+                    variant: 'error',
+                    title: 'Cart',
+                    message: itemErr.message || 'Could not add e-invite to cart.',
+                });
+                return;
+            }
+            await refreshCartCount(cid);
+            navigation.navigate('Cart');
+            showToast({
+                variant: 'success',
+                title: 'Added to cart',
+                message: 'Your e-invite and price are in the cart. Proceed to checkout when ready.',
+            });
+        } catch (e) {
+            showToast({
+                variant: 'error',
+                title: 'Cart',
+                message: e?.message || 'Something went wrong.',
+            });
+        }
     };
 
     const shareInvitation = async () => {
         if (!inviteForm.eventName.trim()) {
             showToast({ variant: 'info', title: 'Required', message: 'Please enter event name.' });
             return;
+        }
+        if (generatedInvite?.media_url && generatedInvite?.user_e_invite_id && !eInvitePaid) {
+            const paid = await payForCurrentEInvite(generatedInvite.user_e_invite_id);
+            if (!paid?.ok) return;
         }
         const text = buildInvitationText();
         try {
@@ -645,6 +1263,10 @@ export default function GuestManage({ navigation }) {
                 message: 'Please fill the invitation details first, then share.',
             });
             return;
+        }
+        if (generatedInvite?.media_url && generatedInvite?.user_e_invite_id && !eInvitePaid) {
+            const paid = await payForCurrentEInvite(generatedInvite.user_e_invite_id);
+            if (!paid?.ok) return;
         }
         const personalText = `Dear ${guest.name},\n\n${buildInvitationText()}`;
         try {
@@ -714,23 +1336,31 @@ export default function GuestManage({ navigation }) {
         </View>
     );
 
-    const inviteCardGradient = isDarkMode
-        ? ['#181B25', '#1A1D27']
-        : (INVITE_THEMES[inviteColorTheme] || INVITE_THEMES.gold);
-    const previewGrad = INVITE_THEMES[inviteColorTheme] || INVITE_THEMES.gold;
-
     const renderInviteTab = () => (
         <ScrollView contentContainerStyle={styles.inviteScroll} showsVerticalScrollIndicator={false}>
             <View style={[styles.eInviteShell, { backgroundColor: theme.card, borderColor: theme.border }]}>
                 <View style={styles.eInviteTopRow}>
-                    <Text style={[styles.eInviteTitle, { color: theme.text }]}>E-Invites</Text>
+                    <Text style={[styles.eInviteTitle, { color: theme.text }]}>AI E-Invite Studio</Text>
                     <TouchableOpacity
                         style={styles.eInviteYourCardsBtn}
-                        onPress={() => showToast({ variant: 'info', title: 'Your cards', message: 'Saved cards view will appear here.' })}
+                        onPress={() => showToast({ variant: 'info', title: 'Saved invites', message: `${savedInvites.length} invite${savedInvites.length === 1 ? '' : 's'} saved on this device.` })}
                     >
                         <Ionicons name="albums-outline" size={14} color={theme.textLight} />
-                        <Text style={[styles.eInviteYourCardsText, { color: theme.textLight }]}>Your cards</Text>
+                        <Text style={[styles.eInviteYourCardsText, { color: theme.textLight }]}>Saved ({savedInvites.length})</Text>
                     </TouchableOpacity>
+                </View>
+
+                <View style={[styles.eInvitePricingBanner, { backgroundColor: theme.inputBackground, borderColor: theme.border }]}>
+                    <Ionicons name="pricetag-outline" size={18} color={colors.primary} />
+                    <View style={{ flex: 1 }}>
+                        <Text style={[styles.eInvitePricingTitle, { color: theme.text }]}>Simple pricing</Text>
+                        <Text style={[styles.eInvitePricingSub, { color: theme.textLight }]}>
+                            Static image · ₹{eInvitePricing.static_inr} · Animated MP4 · ₹{eInvitePricing.animated_inr}. Pay after you generate to unlock download & sharing.
+                        </Text>
+                        <Text style={[styles.eInvitePricingSub, { color: theme.textLight, marginTop: 4 }]}>
+                            Iterations used: {inviteIterationMeta.used}/{inviteIterationMeta.max} · Remaining: {inviteIterationMeta.remaining}
+                        </Text>
+                    </View>
                 </View>
 
                 {inviteCatalogLoading ? (
@@ -738,140 +1368,76 @@ export default function GuestManage({ navigation }) {
                         <ActivityIndicator color={colors.primary} />
                     </View>
                 ) : null}
-
-                {INVITE_SECTION_ORDER.map((sectionKey) => {
-                    const sectionItems = inviteTemplatesBySection[sectionKey] || [];
-                    if (!sectionItems.length) return null;
-                    return (
-                        <View key={sectionKey} style={styles.eInviteSectionBlock}>
-                            <View style={styles.eInviteSectionRow}>
-                                <Text style={[styles.eInviteSectionTitle, { color: theme.text }]}>
-                                    {INVITE_SECTION_TITLES[sectionKey] || sectionKey}
-                                </Text>
-                                <TouchableOpacity
-                                    onPress={() =>
-                                        showToast({
-                                            variant: 'info',
-                                            title: 'View all',
-                                            message: `${INVITE_SECTION_TITLES[sectionKey] || 'Templates'} section is ready for backend-managed expansion.`,
-                                        })
-                                    }
-                                >
-                                    <Text style={[styles.eInviteViewAll, { color: colors.primary }]}>View all</Text>
-                                </TouchableOpacity>
-                            </View>
-                            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.eInviteCardsRow}>
-                                {sectionItems.map((tpl) => {
-                                    const hasDiscount =
-                                        Number.isFinite(Number(tpl.list_price)) &&
-                                        Number.isFinite(Number(tpl.price)) &&
-                                        Number(tpl.list_price) > Number(tpl.price);
-                                    return (
-                                        <TouchableOpacity
-                                            key={tpl.id}
-                                            style={[styles.eInviteCard, { backgroundColor: theme.background, borderColor: theme.border }]}
-                                            activeOpacity={0.9}
-                                            onPress={() =>
-                                                showToast({
-                                                    variant: 'info',
-                                                    title: tpl.title || 'Template',
-                                                    message: 'Template detail and customization step will open here.',
-                                                })
-                                            }
-                                        >
-                                            <View style={styles.eInviteThumbWrap}>
-                                                {tpl.thumbnail_url ? (
-                                                    <Image source={{ uri: tpl.thumbnail_url }} style={styles.eInviteThumb} resizeMode="cover" />
-                                                ) : (
-                                                    <LinearGradient
-                                                        colors={isDarkMode ? ['#334155', '#1f2937'] : ['#F8E8D9', '#FDEBD5']}
-                                                        style={styles.eInviteThumb}
-                                                    >
-                                                        <Ionicons name="image-outline" size={20} color={colors.primary} />
-                                                    </LinearGradient>
-                                                )}
-                                                {String(tpl.template_type || '').toLowerCase() === 'video' ? (
-                                                    <View style={styles.eInviteDuration}>
-                                                        <Ionicons name="play" size={10} color="#FFF" />
-                                                        <Text style={styles.eInviteDurationText}>
-                                                            {Number(tpl.duration_seconds || 0) > 0
-                                                                ? `00:${String(Math.max(0, Number(tpl.duration_seconds || 0))).padStart(2, '0')}`
-                                                                : '00:20'}
-                                                        </Text>
-                                                    </View>
-                                                ) : null}
-                                            </View>
-                                            <Text style={[styles.eInviteCardName, { color: theme.text }]} numberOfLines={2}>
-                                                {tpl.title || 'Template'}
-                                            </Text>
-                                            <View style={styles.eInvitePriceRow}>
-                                                <Text style={[styles.eInvitePrice, { color: theme.text }]}>
-                                                    ₹{Number(tpl.price || 0).toLocaleString('en-IN')}
-                                                </Text>
-                                                {hasDiscount ? (
-                                                    <Text style={[styles.eInviteListPrice, { color: theme.textLight }]}>
-                                                        ₹{Number(tpl.list_price || 0).toLocaleString('en-IN')}
-                                                    </Text>
-                                                ) : null}
-                                            </View>
-                                        </TouchableOpacity>
-                                    );
-                                })}
-                            </ScrollView>
-                        </View>
-                    );
-                })}
             </View>
 
-            <View style={[styles.eInviteFaqCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
-                <Text style={[styles.eInviteFaqTitle, { color: theme.text }]}>Frequently asked question.</Text>
-                {visibleFaqs.map((faq, idx) => {
-                    const expanded = openFaqId === faq.id;
-                    return (
-                        <View
-                            key={faq.id || `faq-${idx}`}
-                            style={[
-                                styles.eInviteFaqItem,
-                                idx < visibleFaqs.length - 1 && { borderBottomColor: theme.border, borderBottomWidth: 1 },
-                            ]}
-                        >
-                            <TouchableOpacity
-                                style={styles.eInviteFaqQuestionRow}
-                                onPress={() => setOpenFaqId((prev) => (prev === faq.id ? null : faq.id))}
-                                activeOpacity={0.8}
-                            >
-                                <Text style={[styles.eInviteFaqQuestion, { color: theme.text }]}>{faq.question}</Text>
-                                <Ionicons
-                                    name={expanded ? 'chevron-up' : 'chevron-down'}
-                                    size={16}
-                                    color={theme.textLight}
-                                />
-                            </TouchableOpacity>
-                            {expanded ? (
-                                <Text style={[styles.eInviteFaqAnswer, { color: theme.textLight }]}>{faq.answer}</Text>
-                            ) : null}
-                        </View>
-                    );
-                })}
-            </View>
-
-            <LinearGradient colors={inviteCardGradient} style={styles.inviteCard}>
-                <View style={styles.inviteHeaderRow}>
-                    <View style={[styles.inviteLogoWrap, { backgroundColor: colors.primary }]}>
-                        <Text style={styles.inviteLogoText}>eK</Text>
+            <View style={[styles.aiInviteStudio, { backgroundColor: theme.card, borderColor: theme.border }]}>
+                <LinearGradient
+                    colors={isDarkMode ? ['#1F2937', '#111827'] : ['#FFF7ED', '#FDF2F8']}
+                    style={styles.aiInviteHero}
+                >
+                    <View style={styles.aiInviteHeroIcon}>
+                        <Ionicons name="sparkles" size={22} color="#FFF" />
                     </View>
-                    <Text style={[styles.inviteCardTitle, { color: theme.text }]}>{t('invite_title')}</Text>
-                </View>
-                <Text style={[styles.inviteDesc, { color: theme.textLight }]}>
-                    {t('invite_desc')}
-                </Text>
+                    <Text style={[styles.aiInviteHeroTitle, { color: theme.text }]}>Chat to create your invite</Text>
+                    <Text style={[styles.aiInviteHeroText, { color: theme.textLight }]}>
+                        Enter your event details, then describe the look in the chat box. Generate wording with AI if you like, then create the image.
+                    </Text>
+                </LinearGradient>
 
+                <Text style={[styles.chipsLabel, { color: theme.textLight }]}>Occasion</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+                    {EINVITE_OCCASIONS.map((occasion) => (
+                        <TouchableOpacity
+                            key={occasion}
+                            style={[
+                                styles.chip,
+                                { borderColor: theme.border, backgroundColor: theme.inputBackground },
+                                inviteOccasion === occasion && { borderColor: colors.primary, backgroundColor: colors.primary + '18' },
+                            ]}
+                            onPress={() => setInviteOccasion(occasion)}
+                        >
+                            <Text style={{ fontSize: 12, fontWeight: '700', color: inviteOccasion === occasion ? colors.primary : theme.text }}>
+                                {occasion}
+                            </Text>
+                        </TouchableOpacity>
+                    ))}
+                </ScrollView>
+
+                <Text style={[styles.chipsLabel, { color: theme.textLight }]}>Output type</Text>
+                <View style={styles.inviteTypeRow}>
+                    {[
+                        { key: 'image', label: 'Image', icon: 'image-outline' },
+                        { key: 'animated', label: 'Animated video', icon: 'film-outline' },
+                    ].map((type) => (
+                        <TouchableOpacity
+                            key={type.key}
+                            style={[
+                                styles.inviteTypeBtn,
+                                { borderColor: theme.border, backgroundColor: theme.inputBackground },
+                                inviteMediaType === type.key && { borderColor: colors.primary, backgroundColor: colors.primary + '18' },
+                            ]}
+                            onPress={() => setInviteMediaType(type.key)}
+                        >
+                            <Ionicons name={type.icon} size={17} color={inviteMediaType === type.key ? colors.primary : theme.textLight} />
+                            <View style={{ flex: 1 }}>
+                                <Text style={{ color: inviteMediaType === type.key ? colors.primary : theme.text, fontWeight: '700' }}>
+                                    {type.label}
+                                </Text>
+                                <Text style={{ color: theme.textLight, fontSize: 11, marginTop: 2, fontWeight: '600' }}>
+                                    {type.key === 'animated' ? `₹${eInvitePricing.animated_inr}` : `₹${eInvitePricing.static_inr}`} · pay after generate
+                                </Text>
+                            </View>
+                        </TouchableOpacity>
+                    ))}
+                </View>
+
+                <Text style={[styles.chipsLabel, { color: theme.textLight }]}>Invitation details</Text>
                 <TextInput
                     style={[styles.input, { backgroundColor: theme.inputBackground, color: theme.text, borderColor: theme.border }]}
                     placeholder={t('invite_event_name_ph')}
                     placeholderTextColor={theme.textLight}
                     value={inviteForm.eventName}
-                    onChangeText={txt => setInviteForm(p => ({ ...p, eventName: txt }))}
+                    onChangeText={(txt) => setInviteForm((p) => ({ ...p, eventName: txt }))}
                 />
                 <View style={styles.inviteRow}>
                     <TouchableOpacity
@@ -914,7 +1480,7 @@ export default function GuestManage({ navigation }) {
 
                 <Text style={[styles.chipsLabel, { color: theme.textLight }]}>{t('invite_color_label')}</Text>
                 <View style={styles.chipRow}>
-                    {COLOR_KEYS.map(c => (
+                    {COLOR_KEYS.map((c) => (
                         <TouchableOpacity
                             key={c}
                             style={[
@@ -930,7 +1496,7 @@ export default function GuestManage({ navigation }) {
                 </View>
                 <Text style={[styles.chipsLabel, { color: theme.textLight }]}>{t('invite_variation_label')}</Text>
                 <View style={styles.chipRow}>
-                    {VARIATION_KEYS.map(v => (
+                    {VARIATION_KEYS.map((v) => (
                         <TouchableOpacity
                             key={v}
                             style={[
@@ -945,172 +1511,355 @@ export default function GuestManage({ navigation }) {
                     ))}
                 </View>
 
+                <Text style={[styles.chipsLabel, { color: theme.textLight }]}>Typography style</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+                    {INVITE_FONT_CHOICES.map((f) => (
+                        <TouchableOpacity
+                            key={f.id}
+                            style={[
+                                styles.chip,
+                                { borderColor: theme.border, backgroundColor: theme.inputBackground },
+                                inviteFontStyle === f.id && { borderColor: colors.primary, backgroundColor: colors.primary + '18' },
+                            ]}
+                            onPress={() => setInviteFontStyle(f.id)}
+                        >
+                            <Text
+                                style={{ fontSize: 11, fontWeight: '700', color: inviteFontStyle === f.id ? colors.primary : theme.text }}
+                                numberOfLines={2}
+                            >
+                                {f.label}
+                            </Text>
+                        </TouchableOpacity>
+                    ))}
+                </ScrollView>
+                <Text style={[styles.chipsLabel, { color: theme.textLight }]}>Sticker & motif accents</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+                    {INVITE_STICKER_CHOICES.map((s) => (
+                        <TouchableOpacity
+                            key={s.id}
+                            style={[
+                                styles.chip,
+                                { borderColor: theme.border, backgroundColor: theme.inputBackground },
+                                inviteStickerPack === s.id && { borderColor: colors.primary, backgroundColor: colors.primary + '18' },
+                            ]}
+                            onPress={() => setInviteStickerPack(s.id)}
+                        >
+                            <Text
+                                style={{ fontSize: 11, fontWeight: '700', color: inviteStickerPack === s.id ? colors.primary : theme.text }}
+                                numberOfLines={2}
+                            >
+                                {s.label}
+                            </Text>
+                        </TouchableOpacity>
+                    ))}
+                </ScrollView>
+
                 <TextInput
                     style={[styles.input, { backgroundColor: theme.inputBackground, color: theme.text, borderColor: theme.border }]}
                     placeholder={t('invite_venue_name')}
                     placeholderTextColor={theme.textLight}
                     value={inviteForm.venueName}
-                    onChangeText={txt => setInviteForm(p => ({ ...p, venueName: txt }))}
+                    onChangeText={(txt) => setInviteForm((p) => ({ ...p, venueName: txt }))}
                 />
                 <TextInput
                     style={[styles.input, { backgroundColor: theme.inputBackground, color: theme.text, borderColor: theme.border }]}
                     placeholder={t('invite_venue_address')}
                     placeholderTextColor={theme.textLight}
                     value={inviteForm.venueAddress}
-                    onChangeText={txt => setInviteForm(p => ({ ...p, venueAddress: txt }))}
+                    onChangeText={(txt) => setInviteForm((p) => ({ ...p, venueAddress: txt }))}
                 />
                 <TextInput
                     style={[styles.input, { backgroundColor: theme.inputBackground, color: theme.text, borderColor: theme.border }]}
                     placeholder={t('invite_hosts_ph')}
                     placeholderTextColor={theme.textLight}
                     value={inviteForm.hostNames}
-                    onChangeText={txt => setInviteForm(p => ({ ...p, hostNames: txt }))}
+                    onChangeText={(txt) => setInviteForm((p) => ({ ...p, hostNames: txt }))}
                 />
+                <Text style={[styles.chipsLabel, { color: theme.textLight }]}>Invitation text language</Text>
+                <View style={styles.chipRow}>
+                    {INVITE_LANGS.map((lang) => (
+                        <TouchableOpacity
+                            key={lang.key}
+                            style={[
+                                styles.chip,
+                                { borderColor: theme.border, backgroundColor: theme.inputBackground },
+                                inviteTextLanguage === lang.key && { borderColor: colors.primary, backgroundColor: colors.primary + '18' },
+                            ]}
+                            onPress={() => {
+                                setInviteTextLanguage(lang.key);
+                                setInviteForm((p) => ({ ...p, message: inviteTexts[lang.key] || '' }));
+                            }}
+                        >
+                            <Text style={{ fontSize: 12, fontWeight: '700', color: inviteTextLanguage === lang.key ? colors.primary : theme.text }}>
+                                {lang.label}
+                            </Text>
+                        </TouchableOpacity>
+                    ))}
+                </View>
                 <TextInput
                     style={[styles.input, styles.multilineInput, { backgroundColor: theme.inputBackground, color: theme.text, borderColor: theme.border }]}
-                    placeholder={t('invite_message_ph')}
+                    placeholder={`Invitation text (${INVITE_LANGS.find((x) => x.key === inviteTextLanguage)?.label || 'Language'})`}
                     placeholderTextColor={theme.textLight}
-                    value={inviteForm.message}
-                    onChangeText={txt => setInviteForm(p => ({ ...p, message: txt }))}
+                    value={inviteTexts[inviteTextLanguage] || ''}
+                    onChangeText={(txt) => updateInviteTextByLanguage(inviteTextLanguage, txt)}
                     multiline
                     numberOfLines={3}
                 />
 
                 <TouchableOpacity
                     style={[styles.aiBtn, { backgroundColor: colors.primary + '20', borderColor: colors.primary + '50' }]}
-                    onPress={runGenerateSamples}
-                    disabled={inviteAiLoadingSamples}
+                    onPress={runGenerateInviteText}
+                    disabled={inviteAiLoadingText}
                 >
-                    {inviteAiLoadingSamples ? <ActivityIndicator color={colors.primary} /> : <Ionicons name="sparkles" size={18} color={colors.primary} />}
-                    <Text style={[styles.aiBtnText, { color: colors.primary }]}>{t('invite_gen_samples')}</Text>
+                    {inviteAiLoadingText ? <ActivityIndicator color={colors.primary} /> : <Ionicons name="sparkles" size={18} color={colors.primary} />}
+                    <Text style={[styles.aiBtnText, { color: colors.primary }]}>Generate invite text with AI</Text>
                 </TouchableOpacity>
-                {inviteAiSamples.length > 0 ? (
-                    <View style={styles.samplesBox}>
-                        <Text style={[styles.samplesTitle, { color: theme.text }]}>{t('invite_samples_heading')}</Text>
-                        {inviteAiSamples.map((s, idx) => (
-                            <View key={idx} style={[styles.sampleCard, { borderColor: theme.border, backgroundColor: theme.card }]}>
-                                <Text style={[styles.sampleText, { color: theme.text }]} numberOfLines={8}>{s}</Text>
-                            </View>
-                        ))}
-                    </View>
-                ) : null}
 
-                <TouchableOpacity
-                    style={[styles.aiBtn, { backgroundColor: '#8B5CF620', borderColor: '#8B5CF650' }]}
-                    onPress={runGenerateFinal}
-                    disabled={inviteAiLoadingFinal}
-                >
-                    {inviteAiLoadingFinal ? <ActivityIndicator color="#8B5CF6" /> : <Ionicons name="color-wand-outline" size={18} color="#8B5CF6" />}
-                    <Text style={[styles.aiBtnText, { color: '#8B5CF6' }]}>{t('invite_gen_final')}</Text>
-                </TouchableOpacity>
-                {inviteAiFinal ? (
-                    <View style={[styles.finalBox, { borderColor: theme.border }]}>
-                        <Text style={[styles.samplesTitle, { color: theme.text }]}>{t('invite_final_heading')}</Text>
-                        <Text style={[styles.finalText, { color: theme.text }]}>{inviteAiFinal}</Text>
-                    </View>
-                ) : null}
-            </LinearGradient>
-
-            {inviteForm.eventName.trim() ? (
-                <View style={[styles.previewCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
-                    <Text style={[styles.previewLabel, { color: theme.textLight }]}>{t('invite_preview')}</Text>
-                    <LinearGradient colors={previewGrad} style={styles.previewInner}>
-                        {inviteAiFinal ? (
-                            <>
-                                <Text style={styles.previewStar}>✨</Text>
-                                <Text style={[styles.previewAiBlock, { color: '#4A2800' }]}>{inviteAiFinal}</Text>
-                                <View style={styles.previewBrand}>
-                                    <View style={styles.previewBrandDot} />
-                                    <Text style={styles.previewBrandText}>Powered by Ekatraa</Text>
-                                </View>
-                            </>
-                        ) : (
-                            <>
-                                <Text style={styles.previewStar}>✨</Text>
-                                <Text style={styles.previewTitle}>{t('invite_preview_title')}</Text>
-                                <Text style={styles.previewEvent}>{inviteForm.eventName}</Text>
-                                {inviteForm.hostNames ? <Text style={styles.previewHost}>Hosted by: {inviteForm.hostNames}</Text> : null}
-                                <View style={styles.previewDivider} />
-                                {inviteForm.eventDate ? (
-                                    <View style={styles.previewDetailRow}>
-                                        <Ionicons name="calendar-outline" size={14} color="#8B6914" />
-                                        <Text style={styles.previewDetail}>{inviteForm.eventDate}{inviteForm.eventTime ? ` at ${inviteForm.eventTime}` : ''}</Text>
-                                    </View>
-                                ) : null}
-                                {inviteForm.venueName ? (
-                                    <View style={styles.previewDetailRow}>
-                                        <Ionicons name="location-outline" size={14} color="#8B6914" />
-                                        <Text style={styles.previewDetail}>{inviteForm.venueName}{inviteForm.venueAddress ? `\n${inviteForm.venueAddress}` : ''}</Text>
-                                    </View>
-                                ) : null}
-                                {inviteForm.message ? <Text style={styles.previewMessage}>{inviteForm.message}</Text> : null}
-                                <Text style={styles.previewFooter}>{t('invite_preview_footer')}</Text>
-                                <View style={styles.previewBrand}>
-                                    <View style={styles.previewBrandDot} />
-                                    <Text style={styles.previewBrandText}>Powered by Ekatraa</Text>
-                                </View>
-                            </>
-                        )}
-                    </LinearGradient>
+                <View style={styles.inviteChatBox}>
+                    {inviteChat.slice(-4).map((msg) => (
+                        <View
+                            key={msg.id}
+                            style={[
+                                styles.inviteChatBubble,
+                                msg.sender === 'user' ? styles.inviteChatUser : styles.inviteChatBot,
+                                { backgroundColor: msg.sender === 'user' ? colors.primary : theme.inputBackground },
+                            ]}
+                        >
+                            <Text style={{ color: msg.sender === 'user' ? '#FFF' : theme.text, fontSize: 13, lineHeight: 19 }}>{msg.text}</Text>
+                        </View>
+                    ))}
                 </View>
-            ) : null}
 
-            <View style={styles.shareActions}>
-                <TouchableOpacity
-                    style={[styles.shareBtn, { backgroundColor: colors.primary }]}
-                    onPress={shareInvitation}
-                >
-                    <Ionicons name="share-outline" size={20} color="#FFF" />
-                    <Text style={styles.shareBtnText}>{t('invite_share')}</Text>
-                </TouchableOpacity>
-                {guests.length > 0 && inviteForm.eventName.trim() ? (
-                    <TouchableOpacity
-                        style={[styles.shareBtnOutline, { borderColor: colors.primary }]}
-                        onPress={() => {
-                            showConfirm({
-                                title: t('invite_send_all'),
-                                message: `Share personalized invitations with ${guests.length} guest${guests.length !== 1 ? 's' : ''}?`,
-                                cancelLabel: 'Cancel',
-                                confirmLabel: 'Share',
-                                onConfirm: () => shareInvitation(),
-                            });
-                        }}
-                    >
-                        <Ionicons name="people-outline" size={20} color={colors.primary} />
-                        <Text style={[styles.shareBtnOutlineText, { color: colors.primary }]}>{t('invite_send_all')} ({guests.length})</Text>
-                    </TouchableOpacity>
-                ) : null}
-                {guestsWithPhoneList.length > 0 && inviteForm.eventName.trim() ? (
-                    <TouchableOpacity
-                        style={[styles.shareBtnOutline, { borderColor: '#25D366' }]}
-                        onPress={startWhatsappBatches}
-                    >
-                        <Ionicons name="logo-whatsapp" size={20} color="#25D366" />
-                        <Text style={[styles.shareBtnOutlineText, { color: '#25D366' }]}>
-                            {t('invite_whatsapp_batches')} ({guestsWithPhoneList.length})
+                <TextInput
+                    style={[styles.input, styles.multilineInput, { backgroundColor: theme.inputBackground, color: theme.text, borderColor: theme.border }]}
+                    placeholder="Colours, motifs, layout, art style (e.g. maroon gold mandap, jasmine, soft lights)…"
+                    placeholderTextColor={theme.textLight}
+                    value={invitePrompt}
+                    onChangeText={setInvitePrompt}
+                    multiline
+                    numberOfLines={4}
+                />
+                {activeInviteMessage ? (
+                    <View style={[styles.eInviteGenerationMeta, { borderColor: theme.border, backgroundColor: theme.inputBackground }]}>
+                        <Text style={[styles.eInviteGenerationText, { color: theme.text }]}>Selected invitation text ({inviteTextLanguage.toUpperCase()})</Text>
+                        <Text style={[styles.eInviteGenerationSub, { color: theme.textLight }]} numberOfLines={3}>
+                            {activeInviteMessage}
                         </Text>
-                    </TouchableOpacity>
+                    </View>
+                ) : null}
+
+                <TouchableOpacity
+                    style={[styles.aiInviteGenerateBtn, { backgroundColor: colors.primary }]}
+                    onPress={runGenerateInviteMedia}
+                    disabled={inviteGeneratingImage || inviteIterationMeta.remaining <= 0}
+                >
+                    {inviteGeneratingImage ? <ActivityIndicator color="#FFF" /> : <Ionicons name="color-wand-outline" size={20} color="#FFF" />}
+                    <Text style={styles.aiInviteGenerateText}>
+                        {inviteGeneratingImage ? 'Generating invite…' : inviteIterationMeta.remaining <= 0 ? 'Iteration limit reached' : `Generate ${inviteMediaType === 'animated' ? 'animated invite' : 'invite image'}`}
+                    </Text>
+                </TouchableOpacity>
+                {inviteGeneratingImage ? (
+                    <View style={[styles.eInviteGenerationMeta, { borderColor: theme.border, backgroundColor: theme.inputBackground }]}>
+                        <Text style={[styles.eInviteGenerationText, { color: theme.text }]}>
+                            {generationStageText}
+                        </Text>
+                        <Text style={[styles.eInviteGenerationSub, { color: theme.textLight }]}>
+                            Streaming status · Elapsed {inviteGenElapsedSec}s · ETA ~{Math.max(0, generationEstimateSec - inviteGenElapsedSec)}s
+                        </Text>
+                    </View>
                 ) : null}
             </View>
 
-            {guests.length > 0 && inviteForm.eventName.trim() ? (
-                <View style={[styles.guestShareList, { backgroundColor: theme.card, borderColor: theme.border }]}>
-                    <Text style={[styles.guestShareTitle, { color: theme.text }]}>Send to Individual Guest</Text>
-                    {guests.map(g => (
-                        <TouchableOpacity
-                            key={g.id}
-                            style={[styles.guestShareRow, { borderBottomColor: theme.border }]}
-                            onPress={() => shareToSpecificGuest(g)}
-                        >
-                            <View style={{ flex: 1 }}>
-                                <Text style={[styles.guestShareName, { color: theme.text }]}>{g.name}</Text>
-                                {g.phone ? <Text style={[styles.guestSharePhone, { color: theme.textLight }]}>{g.phone}</Text> : null}
-                            </View>
-                            <Ionicons name="send-outline" size={18} color={colors.primary} />
+            {generatedInvite?.media_url ? (
+                <View style={[styles.generatedInviteCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+                    <View style={styles.generatedInviteHeader}>
+                        <View>
+                            <Text style={[styles.previewLabel, { color: theme.textLight }]}>Generated design</Text>
+                            <Text style={[styles.generatedInviteTitle, { color: theme.text }]}>
+                                {generatedInvite.occasion} · {generatedInvite.mediaType === 'animated' ? 'Animated' : 'Image'}
+                            </Text>
+                        </View>
+                        <TouchableOpacity style={styles.generatedInviteEditBtn} onPress={() => setShowInviteDesigner(true)}>
+                            <Ionicons name="create-outline" size={16} color={colors.primary} />
+                            <Text style={[styles.generatedInviteEditText, { color: colors.primary }]}>Edit text</Text>
                         </TouchableOpacity>
-                    ))}
+                    </View>
+                    <EInviteMediaPreview
+                        uri={generatedInvite.media_url}
+                        outputMime={generatedInvite.output_mime}
+                        style={styles.generatedInviteImage}
+                        resizeMode="cover"
+                    />
+                    {eInvitePaid ? (
+                        <View style={styles.shareActions}>
+                            <TouchableOpacity style={[styles.shareBtn, { backgroundColor: colors.primary }]} onPress={shareInvitation}>
+                                <Ionicons name="share-social-outline" size={18} color="#FFF" />
+                                <Text style={styles.shareBtnText}>Share</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={[styles.shareBtnOutline, { borderColor: '#25D366' }]} onPress={openGeneratedInvite}>
+                                <Ionicons name="download-outline" size={18} color="#25D366" />
+                                <Text style={[styles.shareBtnOutlineText, { color: '#25D366' }]}>Download</Text>
+                            </TouchableOpacity>
+                        </View>
+                    ) : (
+                        <View style={styles.shareActions}>
+                            <TouchableOpacity style={[styles.shareBtn, { backgroundColor: colors.primary }]} onPress={goToCartAndCheckoutForEInvite}>
+                                <Ionicons name="cart-outline" size={18} color="#FFF" />
+                                <Text style={styles.shareBtnText}>Go to Cart & Checkout</Text>
+                            </TouchableOpacity>
+                        </View>
+                    )}
                 </View>
             ) : null}
+
+            {savedInvites.length > 0 ? (
+                <View style={[styles.savedInviteStrip, { backgroundColor: theme.card, borderColor: theme.border }]}>
+                    <Text style={[styles.savedInviteTitle, { color: theme.text }]}>Saved invites</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.savedInviteRow}>
+                        {savedInvites.map((it) => (
+                            <View key={it.id} style={styles.savedInviteThumbOuter}>
+                                <TouchableOpacity
+                                    style={[styles.savedInviteThumbWrap, { borderColor: theme.border }]}
+                                    onPress={() => {
+                                        setGeneratedInvite(it);
+                                        const nextTexts = it.texts && typeof it.texts === 'object'
+                                            ? {
+                                                en: String(it.texts.en || ''),
+                                                hi: String(it.texts.hi || ''),
+                                                or: String(it.texts.or || ''),
+                                            }
+                                            : null;
+                                        if (nextTexts) {
+                                            setInviteTexts(nextTexts);
+                                            setInviteTextLanguage('en');
+                                        }
+                                        setInviteForm((p) => ({
+                                            ...p,
+                                            eventName: it.eventName || p.eventName,
+                                            message: nextTexts?.en || it.message || p.message,
+                                            hostNames: it.hostNames || p.hostNames,
+                                        }));
+                                        setInviteOccasion(it.occasion || inviteOccasion);
+                                        setInviteMediaType(it.mediaType || inviteMediaType);
+                                        setCurrentUserEInviteId(it.user_e_invite_id || it.id || null);
+                                        setEInvitePaid(String(it.payment_status || '') === 'paid');
+                                    }}
+                                >
+                                    <EInviteMediaPreview
+                                        uri={it.media_url}
+                                        outputMime={it.output_mime}
+                                        style={styles.savedInviteThumb}
+                                        resizeMode="cover"
+                                    />
+                                    <Text style={[styles.savedInviteName, { color: theme.text }]} numberOfLines={1}>{it.eventName || it.occasion}</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={[styles.savedInviteDeleteBtn, { backgroundColor: theme.card, borderColor: theme.border }]}
+                                    onPress={() => confirmDeleteSavedInvite(it)}
+                                    accessibilityLabel="Delete saved invite"
+                                >
+                                    <Ionicons name="trash-outline" size={16} color={colors.error} />
+                                </TouchableOpacity>
+                            </View>
+                        ))}
+                    </ScrollView>
+                </View>
+            ) : null}
+
+            {/* Text-only invite preview removed: image invite output is now the primary preview. */}
+
+            {eInvitePaid ? (
+                <>
+                    <View style={styles.shareActions}>
+                        <TouchableOpacity
+                            style={[styles.shareBtn, { backgroundColor: colors.primary }]}
+                            onPress={shareInvitation}
+                        >
+                            <Ionicons name="share-outline" size={20} color="#FFF" />
+                            <Text style={styles.shareBtnText}>{t('invite_share')}</Text>
+                        </TouchableOpacity>
+                        {guests.length > 0 && inviteForm.eventName.trim() ? (
+                            <TouchableOpacity
+                                style={[styles.shareBtnOutline, { borderColor: colors.primary }]}
+                                onPress={() => {
+                                    showConfirm({
+                                        title: t('invite_send_all'),
+                                        message: `Share personalized invitations with ${guests.length} guest${guests.length !== 1 ? 's' : ''}?`,
+                                        cancelLabel: 'Cancel',
+                                        confirmLabel: 'Share',
+                                        onConfirm: () => shareInvitation(),
+                                    });
+                                }}
+                            >
+                                <Ionicons name="people-outline" size={20} color={colors.primary} />
+                                <Text style={[styles.shareBtnOutlineText, { color: colors.primary }]}>{t('invite_send_all')} ({guests.length})</Text>
+                            </TouchableOpacity>
+                        ) : null}
+                        {guestsWithPhoneList.length > 0 && inviteForm.eventName.trim() ? (
+                            <TouchableOpacity
+                                style={[styles.shareBtnOutline, { borderColor: '#25D366' }]}
+                                onPress={startWhatsappBatches}
+                            >
+                                <Ionicons name="logo-whatsapp" size={20} color="#25D366" />
+                                <Text style={[styles.shareBtnOutlineText, { color: '#25D366' }]}>
+                                    {t('invite_whatsapp_batches')} ({guestsWithPhoneList.length})
+                                </Text>
+                            </TouchableOpacity>
+                        ) : null}
+                    </View>
+
+                    {guests.length > 0 && inviteForm.eventName.trim() ? (
+                        <View style={[styles.guestShareList, { backgroundColor: theme.card, borderColor: theme.border }]}>
+                            <Text style={[styles.guestShareTitle, { color: theme.text }]}>Send to Individual Guest</Text>
+                            {guests.map(g => (
+                                <TouchableOpacity
+                                    key={g.id}
+                                    style={[styles.guestShareRow, { borderBottomColor: theme.border }]}
+                                    onPress={() => shareToSpecificGuest(g)}
+                                >
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={[styles.guestShareName, { color: theme.text }]}>{g.name}</Text>
+                                        {g.phone ? <Text style={[styles.guestSharePhone, { color: theme.textLight }]}>{g.phone}</Text> : null}
+                                    </View>
+                                    <Ionicons name="send-outline" size={18} color={colors.primary} />
+                                </TouchableOpacity>
+                            ))}
+                        </View>
+                    ) : null}
+                </>
+            ) : null}
+
+            <View style={[styles.eInviteFaqCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+                <Text style={[styles.eInviteFaqTitle, { color: theme.text }]}>Frequently asked question.</Text>
+                {visibleFaqs.map((faq, idx) => {
+                    const expanded = openFaqId === faq.id;
+                    return (
+                        <View
+                            key={faq.id || `faq-${idx}`}
+                            style={[
+                                styles.eInviteFaqItem,
+                                idx < visibleFaqs.length - 1 && { borderBottomColor: theme.border, borderBottomWidth: 1 },
+                            ]}
+                        >
+                            <TouchableOpacity
+                                style={styles.eInviteFaqQuestionRow}
+                                onPress={() => setOpenFaqId((prev) => (prev === faq.id ? null : faq.id))}
+                                activeOpacity={0.8}
+                            >
+                                <Text style={[styles.eInviteFaqQuestion, { color: theme.text }]}>{faq.question}</Text>
+                                <Ionicons
+                                    name={expanded ? 'chevron-up' : 'chevron-down'}
+                                    size={16}
+                                    color={theme.textLight}
+                                />
+                            </TouchableOpacity>
+                            {expanded ? (
+                                <Text style={[styles.eInviteFaqAnswer, { color: theme.textLight }]}>{faq.answer}</Text>
+                            ) : null}
+                        </View>
+                    );
+                })}
+            </View>
 
             <View style={{ height: 40 }} />
         </ScrollView>
@@ -1493,6 +2242,92 @@ export default function GuestManage({ navigation }) {
                 </TouchableOpacity>
             </Modal>
 
+            <Modal visible={showInviteDesigner} animationType="slide" transparent>
+                <View style={[styles.fullEditorRoot, { backgroundColor: '#0B1020' }]}>
+                    <View style={styles.fullEditorCanvas}>
+                        {generatedInvite?.media_url ? (
+                            <EInviteMediaPreview
+                                uri={generatedInvite.media_url}
+                                outputMime={generatedInvite.output_mime}
+                                style={styles.fullEditorBgMedia}
+                                resizeMode="cover"
+                            />
+                        ) : (
+                            <LinearGradient colors={['#1E293B', '#0F172A']} style={styles.fullEditorBgMedia} />
+                        )}
+                        <View style={styles.fullEditorShade} />
+                        <View style={styles.fullEditorHeader}>
+                            <TouchableOpacity
+                                style={styles.fullEditorIconBtn}
+                                onPress={() => setShowInviteDesigner(false)}
+                            >
+                                <Ionicons name="chevron-back" size={22} color="#FFF" />
+                            </TouchableOpacity>
+                            <Text style={styles.fullEditorTitle} numberOfLines={1}>
+                                {generatedInvite?.eventName || inviteForm.eventName || 'Invite editor'}
+                            </Text>
+                            <TouchableOpacity
+                                style={styles.fullEditorIconBtn}
+                                onPress={saveGeneratedInvite}
+                            >
+                                <Ionicons name="bookmark-outline" size={20} color="#FFF" />
+                            </TouchableOpacity>
+                        </View>
+                        <View style={styles.fullEditorPreviewTextWrap}>
+                            <Text style={styles.fullEditorPreviewEvent}>{inviteForm.eventName || 'Your Event Name'}</Text>
+                            <Text style={styles.fullEditorPreviewMsg} numberOfLines={5}>
+                                {inviteForm.message || 'Your invitation message appears here. Edit below.'}
+                            </Text>
+                        </View>
+                    </View>
+                    <View style={[styles.fullEditorPanel, { backgroundColor: theme.card, borderColor: theme.border }]}>
+                        <TextInput
+                            style={[styles.input, { backgroundColor: theme.inputBackground, color: theme.text, borderColor: theme.border }]}
+                            placeholder={t('invite_event_name_ph')}
+                            placeholderTextColor={theme.textLight}
+                            value={inviteForm.eventName}
+                            onChangeText={(txt) => setInviteForm((p) => ({ ...p, eventName: txt }))}
+                        />
+                        <TextInput
+                            style={[styles.input, styles.multilineInput, { backgroundColor: theme.inputBackground, color: theme.text, borderColor: theme.border }]}
+                            placeholder={`Invitation text (${INVITE_LANGS.find((x) => x.key === inviteTextLanguage)?.label || 'Language'})`}
+                            placeholderTextColor={theme.textLight}
+                            value={inviteTexts[inviteTextLanguage] || inviteForm.message}
+                            onChangeText={(txt) => updateInviteTextByLanguage(inviteTextLanguage, txt)}
+                            multiline
+                            numberOfLines={3}
+                        />
+                        <View style={styles.fullEditorActions}>
+                            <TouchableOpacity
+                                style={[styles.fullEditorAiBtn, { borderColor: colors.primary }]}
+                                onPress={runGenerateInviteText}
+                                disabled={inviteAiLoadingText}
+                            >
+                                {inviteAiLoadingText ? (
+                                    <ActivityIndicator size="small" color={colors.primary} />
+                                ) : (
+                                    <Ionicons name="sparkles-outline" size={16} color={colors.primary} />
+                                )}
+                                <Text style={[styles.fullEditorAiBtnText, { color: colors.primary }]}>AI text</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.fullEditorApplyBtn, { backgroundColor: colors.primary }]}
+                                onPress={() => {
+                                    setShowInviteDesigner(false);
+                                    showToast({
+                                        variant: 'success',
+                                        title: 'Invite updated',
+                                        message: 'Your wording changes are applied.',
+                                    });
+                                }}
+                            >
+                                <Text style={styles.fullEditorApplyBtnText}>Apply</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
+
             <BottomTabBar navigation={navigation} activeRoute="Home" />
 
             {activeTab !== 'Invite' && (
@@ -1609,6 +2444,90 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(148,163,184,0.15)',
     },
     eInviteYourCardsText: { fontSize: 11, fontWeight: '600' },
+    eInvitePricingBanner: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 10,
+        borderWidth: 1,
+        borderRadius: 12,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        marginHorizontal: 12,
+    },
+    eInvitePricingTitle: { fontSize: 14, fontWeight: '800' },
+    eInvitePricingSub: { fontSize: 13, lineHeight: 18, fontWeight: '600' },
+    aiInviteStudio: { borderWidth: 1, borderRadius: 18, padding: 12, marginBottom: 14 },
+    aiInviteHero: { borderRadius: 16, padding: 14, marginBottom: 14, overflow: 'hidden' },
+    aiInviteHeroIcon: {
+        width: 38,
+        height: 38,
+        borderRadius: 19,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: colors.primary,
+        marginBottom: 10,
+    },
+    aiInviteHeroTitle: { fontSize: 20, fontWeight: '800', marginBottom: 4 },
+    aiInviteHeroText: { fontSize: 13, lineHeight: 19 },
+    inviteTypeRow: { flexDirection: 'row', gap: 10, marginBottom: 12 },
+    inviteTypeBtn: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'flex-start',
+        gap: 7,
+        borderWidth: 1.2,
+        borderRadius: 12,
+        paddingVertical: 11,
+        paddingHorizontal: 10,
+        minHeight: 62,
+    },
+    inviteChatBox: { gap: 8, marginBottom: 12 },
+    inviteChatBubble: { maxWidth: '88%', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 9 },
+    inviteChatUser: { alignSelf: 'flex-end', borderBottomRightRadius: 4 },
+    inviteChatBot: { alignSelf: 'flex-start', borderBottomLeftRadius: 4 },
+    aiInviteGenerateBtn: {
+        borderRadius: 14,
+        paddingVertical: 14,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+    },
+    aiInviteGenerateText: { color: '#FFF', fontSize: 15, fontWeight: '800' },
+    eInviteGenerationMeta: {
+        borderWidth: 1,
+        borderRadius: 12,
+        paddingHorizontal: 10,
+        paddingVertical: 9,
+        marginTop: 10,
+    },
+    eInviteGenerationText: { fontSize: 13, fontWeight: '700' },
+    eInviteGenerationSub: { fontSize: 12, marginTop: 2 },
+    generatedInviteCard: { borderRadius: 18, borderWidth: 1, padding: 12, marginBottom: 14 },
+    generatedInviteHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 10 },
+    generatedInviteTitle: { fontSize: 16, fontWeight: '800', marginTop: 2 },
+    generatedInviteEditBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 8 },
+    generatedInviteEditText: { fontSize: 12, fontWeight: '800' },
+    generatedInviteImage: { width: '100%', height: 420, borderRadius: 16, backgroundColor: '#E5E7EB' },
+    savedInviteStrip: { borderRadius: 16, borderWidth: 1, padding: 12, marginBottom: 14 },
+    savedInviteTitle: { fontSize: 16, fontWeight: '800', marginBottom: 10 },
+    savedInviteRow: { gap: 10, paddingRight: 8 },
+    savedInviteThumbOuter: { position: 'relative', width: 106 },
+    savedInviteDeleteBtn: {
+        position: 'absolute',
+        top: 4,
+        right: 4,
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        borderWidth: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    savedInviteThumbWrap: { width: 106, borderWidth: 1, borderRadius: 12, padding: 6 },
+    savedInviteThumb: { width: '100%', height: 120, borderRadius: 10, backgroundColor: '#E5E7EB' },
+    savedInviteName: { fontSize: 11, fontWeight: '700', marginTop: 6 },
     inviteCatalogLoading: { paddingVertical: 8, alignItems: 'center' },
     eInviteSectionBlock: { marginTop: 4, marginBottom: 10 },
     eInviteSectionRow: {
@@ -1627,6 +2546,14 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         padding: 7,
         marginRight: 10,
+    },
+    eInviteCardActive: {
+        borderColor: colors.primary,
+        shadowColor: colors.primary,
+        shadowOpacity: 0.2,
+        shadowRadius: 6,
+        shadowOffset: { width: 0, height: 2 },
+        elevation: 2,
     },
     eInviteThumbWrap: {
         borderRadius: 8,
@@ -1655,6 +2582,7 @@ const styles = StyleSheet.create({
     },
     eInviteDurationText: { color: '#FFF', fontSize: 10, fontWeight: '700' },
     eInviteCardName: { fontSize: 12, fontWeight: '600', minHeight: 30 },
+    eInviteCardSubtitle: { fontSize: 10.5, marginTop: 2, minHeight: 24 },
     eInvitePriceRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
     eInvitePrice: { fontSize: 13, fontWeight: '800' },
     eInviteListPrice: {
@@ -1678,6 +2606,130 @@ const styles = StyleSheet.create({
     },
     eInviteFaqQuestion: { flex: 1, fontSize: 14, fontWeight: '600' },
     eInviteFaqAnswer: { marginTop: 6, fontSize: 13, lineHeight: 19 },
+    selectedTemplateBanner: {
+        borderRadius: 14,
+        borderWidth: 1,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        marginBottom: 12,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+    },
+    selectedTemplateLabel: { fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
+    selectedTemplateTitle: { fontSize: 14, fontWeight: '700' },
+    selectedTemplateSubtitle: { fontSize: 12, marginTop: 2 },
+    selectedTemplateBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        borderWidth: 1.2,
+        borderRadius: 10,
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+    },
+    selectedTemplateBtnText: { fontSize: 12, fontWeight: '700' },
+    designerMediaCard: {
+        borderWidth: 1,
+        borderRadius: 12,
+        padding: 10,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+        marginBottom: 12,
+    },
+    designerMediaThumb: {
+        width: 72,
+        height: 72,
+        borderRadius: 10,
+    },
+    designerMediaFallback: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#EEF2FF',
+    },
+    designerMediaTitle: { fontSize: 14, fontWeight: '700' },
+    designerMediaSubtitle: { fontSize: 12, marginTop: 3 },
+    designerPreviewBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8 },
+    designerPreviewText: { fontSize: 12, fontWeight: '700' },
+    fullEditorRoot: { flex: 1 },
+    fullEditorCanvas: { flex: 1, position: 'relative' },
+    fullEditorBgMedia: { ...StyleSheet.absoluteFillObject },
+    fullEditorShade: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(2,6,23,0.42)',
+    },
+    fullEditorHeader: {
+        position: 'absolute',
+        top: 56,
+        left: 14,
+        right: 14,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 8,
+    },
+    fullEditorIconBtn: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(15,23,42,0.55)',
+    },
+    fullEditorTitle: { flex: 1, color: '#FFF', fontSize: 15, fontWeight: '700', textAlign: 'center' },
+    fullEditorPreviewTextWrap: {
+        position: 'absolute',
+        left: 18,
+        right: 18,
+        bottom: 28,
+        borderRadius: 14,
+        padding: 14,
+        backgroundColor: 'rgba(15,23,42,0.42)',
+    },
+    fullEditorPreviewEvent: { color: '#FFF', fontSize: 22, fontWeight: '800', marginBottom: 8 },
+    fullEditorPreviewMsg: { color: '#E2E8F0', fontSize: 14, lineHeight: 20 },
+    fullEditorPanel: {
+        borderTopLeftRadius: 22,
+        borderTopRightRadius: 22,
+        borderWidth: 1,
+        borderBottomWidth: 0,
+        padding: 14,
+        paddingBottom: 18,
+    },
+    fullEditorActions: { flexDirection: 'row', gap: 8, alignItems: 'center' },
+    fullEditorAiBtn: {
+        flex: 1,
+        borderWidth: 1.4,
+        borderRadius: 12,
+        paddingVertical: 12,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+    },
+    fullEditorAiBtnText: { fontSize: 13, fontWeight: '700' },
+    fullEditorApplyBtn: {
+        flex: 1,
+        borderRadius: 12,
+        paddingVertical: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    fullEditorApplyBtnText: { color: '#FFF', fontSize: 13, fontWeight: '700' },
+    inviteLibraryRow: {
+        borderWidth: 1,
+        borderRadius: 12,
+        padding: 10,
+        marginBottom: 9,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+    },
+    inviteLibraryThumb: { width: 56, height: 56, borderRadius: 10 },
+    inviteLibraryTitle: { fontSize: 14, fontWeight: '700' },
+    inviteLibrarySubtitle: { fontSize: 12, marginTop: 2 },
+    inviteLibraryMeta: { fontSize: 11, marginTop: 4, fontWeight: '700' },
     inviteCard: { borderRadius: 20, padding: 20, marginBottom: 16 },
     inviteHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 10 },
     inviteLogoWrap: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
